@@ -58,7 +58,7 @@ python3 -m unittest discover -s tests -v
 ## 已知局限
 
 - 栈检查只看单个函数的栈帧，没有分析调用链的最坏情况。
-- 在 Linux 上用 `docker run -v` 运行时要加 `--user \"$(id -u):$(id -g)\"`，否则容器内生成的 `.ff_build/` 属于 root。
+- 在 Linux 上用 `docker run -v` 运行时要加 `--user "$(id -u):$(id -g)"`，否则容器内生成的 `.ff_build/` 属于 root。
 - 国内网络下拉取基础镜像需要给 Docker 守护进程配置代理（`/etc/systemd/system/docker.service.d/http-proxy.conf`）。
 
 ## 开源组件
