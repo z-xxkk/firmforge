@@ -14,7 +14,7 @@
 |---|---|---|
 | `ringbuf_init(rb, storage, capacity)` | 绑定存储区，缓冲区为空，返回 true | rb 为 NULL、storage 为 NULL 或 capacity 为 0：返回 false |
 | `ringbuf_put(rb, byte)` | 写入一个字节，返回 true | rb 为 NULL 或缓冲区已满：返回 false，**不覆盖旧数据** |
-| `ringbuf_get(rb, out)` | 取出最早写入的字节到 `*out`，返回 true | rb 为 NULL、out 为 NULL 或缓冲区为空：返回 false，缓冲区内容不变 |
+| `ringbuf_get(rb, out)` | 取出最早写入的字节到 `*out`，返回 true | rb 为 NULL、out 为 NULL 或缓冲区为空：返回 false，缓冲区内容不变，也不修改 `*out` |
 | `ringbuf_count(rb)` | 已存字节数 | rb 为 NULL：返回 0 |
 | `ringbuf_free(rb)` | 剩余空间（capacity − count） | rb 为 NULL：返回 0 |
 | `ringbuf_is_empty(rb)` | count 为 0 时为 true | rb 为 NULL：返回 true |
