@@ -1,0 +1,32 @@
+# FirmForge 全局配置（ARCHITECTURE §2.6）
+
+[llm]
+api_key_env = "DEEPSEEK_API_KEY"
+base_url_env = "DEEPSEEK_BASE_URL"
+timeout_s = 120
+max_retries = 3
+
+[models.fast]                     # 型号以 `firmforge models` 列出的为准
+name = ""
+price_in_per_mtok = 0.0           # 元 / 百万 token，用于成本统计
+price_out_per_mtok = 0.0
+
+[models.strong]
+name = ""
+price_in_per_mtok = 0.0
+price_out_per_mtok = 0.0
+
+[concurrency]
+llm = 4                           # 同时进行的 LLM 调用数
+verify = 4                        # 同时进行的判定数
+
+[loop]
+max_attempts_per_module = 6
+rounds_before_escalation = 3
+repeat_threshold = 2              # 同一签名连续出现几次就升级
+
+[scheduler]
+alpha = 0.3                       # 成本权重
+beta = 0.2                        # 负载权重
+gamma = 0.5                       # 探索权重
+seed = 42

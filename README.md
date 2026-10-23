@@ -23,6 +23,27 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 | crc16_modbus | 128 / 0 / 16（查表写法 flash 632） | 1264 / 0 / 32 |
 | debounce | 72 / 0 / 0 | 144 / 0 / 32 |
 
+**阶段 2（接入 DeepSeek + 单 Agent 基线 + 评测脚本）：代码完成，单元测试通过；还没有用真实 API 跑过，等待负责人验收。**
+
+- LLM 客户端 `firmforge.llm`：标准库 urllib 实现的 OpenAI 兼容接口，429 / 5xx / 网络错误指数退避重试；
+  FakeLLM（单元测试用，不联网）；调用日志 `llm_calls.jsonl` + `llm_calls/<n>.json`，Authorization 显示为 `***`。
+- 文件块协议与路径白名单：Agent 只能写 `src/`、`tests/` 下的 `.c` / `.h`，其他路径拒绝并记录。
+- 运行目录 `.ff_runs/<run_id>/`、事件流 `events.jsonl`、SQLite（runs、node_attempts 两张表）。
+- 单 Agent 基线：B1 一次生成不修正；B2 判定报错直接回喂、最多 3 轮修正；同一个 Agent 同时写实现和测试。
+- 评测：`eval` 输出 `results.csv`、`summary.md`；最终是否通过只看 L1–L4 + 隐藏测试，在临时目录判定。
+- 命令：`models`、`run`、`eval`（含 `--estimate`）、`replay`。
+- 单元测试 106 个（本机 1 个因缺交叉工具链跳过；Docker 中全部通过），其中包括"发给 LLM 的消息和运行目录里都不含隐藏测试内容"。
+
+### 阶段 2 验收命令
+
+```bash
+docker build -t firmforge -f docker/Dockerfile .
+docker run --rm --env-file .env -v "$PWD":/work -w /work firmforge models
+docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge run --task tasks/ringbuf --config b2
+docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge eval --configs b1,b2 --tasks all --runs 1 --out results/first
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge replay .ff_runs/<运行目录名>
+```
+
 ## 快速开始
 
 ```bash

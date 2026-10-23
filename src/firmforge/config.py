@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 # 字段名 -> (环境变量, 默认命令, 中文说明)
@@ -72,6 +72,12 @@ def project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def prompts_dir() -> Path:
+    """提示词模板目录：优先当前目录下的 prompts/，否则用安装目录。"""
+    cwd = Path.cwd() / "prompts"
+    return cwd if cwd.is_dir() else project_root() / "prompts"
+
+
 def unity_dir() -> Path:
     return project_root() / "third_party" / "unity"
 
@@ -91,3 +97,112 @@ def test_timeout_s() -> float:
 def sanitize_enabled() -> bool:
     """FF_SANITIZE=0 时关闭 ASan/UBSan（Windows 本机临时使用）。"""
     return os.environ.get("FF_SANITIZE", "1") != "0"
+
+
+# ---------------------------------------------------------------- .env 与 firmforge.toml
+
+def load_dotenv(path: Path | str, env: dict[str, str] | None = None) -> list[str]:
+    """读取 .env（KEY=VALUE 每行一个）。已存在的环境变量不覆盖。返回新设置的变量名（不返回值）。"""
+    env = os.environ if env is None else env
+    path = Path(path)
+    if not path.is_file():
+        return []
+    loaded = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export "):].strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key and value and key not in env:
+            env[key] = value
+            loaded.append(key)
+    return loaded
+
+
+def load_default_dotenv() -> list[str]:
+    """依次尝试当前目录和安装目录下的 .env。"""
+    names: list[str] = []
+    for base in (Path.cwd(), project_root()):
+        names += load_dotenv(base / ".env")
+    return names
+
+
+class SettingsError(ValueError):
+    """firmforge.toml 内容不合法或缺少必要配置。"""
+
+
+@dataclass(frozen=True)
+class LLMSettings:
+    api_key_env: str = "DEEPSEEK_API_KEY"
+    base_url_env: str = "DEEPSEEK_BASE_URL"
+    timeout_s: float = 120
+    max_retries: int = 3
+
+
+@dataclass(frozen=True)
+class ModelTier:
+    name: str = ""
+    price_in_per_mtok: float = 0.0
+    price_out_per_mtok: float = 0.0
+
+    def cost(self, prompt_tokens: int, completion_tokens: int) -> float:
+        return (prompt_tokens * self.price_in_per_mtok + completion_tokens * self.price_out_per_mtok) / 1e6
+
+
+@dataclass(frozen=True)
+class Settings:
+    llm: LLMSettings = field(default_factory=LLMSettings)
+    models: dict[str, ModelTier] = field(default_factory=dict)   # 档位名 -> ModelTier
+    concurrency: dict = field(default_factory=dict)
+    loop: dict = field(default_factory=dict)
+    scheduler: dict = field(default_factory=dict)
+    source: Path | None = None
+
+    def tier(self, name: str) -> ModelTier:
+        tier = self.models.get(name)
+        if tier is None:
+            raise SettingsError(f"firmforge.toml 里没有 [models.{name}]")
+        if not tier.name:
+            raise SettingsError(f"请先在 firmforge.toml 的 [models.{name}] 里填写 name（可用 `firmforge models` 查看型号）")
+        return tier
+
+
+DEFAULT_BASE_URL = "https://api.deepseek.com"
+
+
+def settings_path() -> Path:
+    cwd = Path.cwd() / "firmforge.toml"
+    return cwd if cwd.is_file() else project_root() / "firmforge.toml"
+
+
+def load_settings(path: Path | str | None = None) -> Settings:
+    import tomllib
+
+    path = Path(path) if path else settings_path()
+    if not path.is_file():
+        raise SettingsError(f"找不到配置文件 {path}")
+    with path.open("rb") as f:
+        try:
+            data = tomllib.load(f)
+        except tomllib.TOMLDecodeError as exc:
+            raise SettingsError(f"{path} 解析失败：{exc}") from exc
+    llm = data.get("llm", {})
+    models = {}
+    for name, m in data.get("models", {}).items():
+        models[name] = ModelTier(str(m.get("name", "")), float(m.get("price_in_per_mtok", 0.0)),
+                                 float(m.get("price_out_per_mtok", 0.0)))
+    return Settings(
+        llm=LLMSettings(llm.get("api_key_env", "DEEPSEEK_API_KEY"), llm.get("base_url_env", "DEEPSEEK_BASE_URL"),
+                        float(llm.get("timeout_s", 120)), int(llm.get("max_retries", 3))),
+        models=models,
+        concurrency=dict(data.get("concurrency", {})),
+        loop=dict(data.get("loop", {})),
+        scheduler=dict(data.get("scheduler", {})),
+        source=path,
+    )

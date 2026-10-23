@@ -7,13 +7,21 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from . import __version__, config
 from .config import Toolchain
-from .tasks import Task, TaskError, discover_tasks, load_task
+from .evaluation.configs import ConfigError, get_config, parse_configs
+from .evaluation.runner import estimate, evaluate
+from .llm import LLMError, OpenAICompatClient
+from .orchestrator.baseline import run_baseline
+from .runs import DEFAULT_RUNS_DIR, read_events
+from .store import Store
+from .tasks import Task, TaskError, adhoc_task, discover_tasks, load_task
 from .verifier import OBJECTIVE_LAYERS, check_task, verify
 from .verifier.report import FAIL, INCOMPLETE, PASS, SKIPPED, Report
 from .verifier.selfcheck import MUTANT_OK, MUTANT_UNVERIFIABLE, SelfCheckResult
@@ -185,6 +193,184 @@ def cmd_check_task(args) -> int:
     return EXIT_PASS
 
 
+# ---------------------------------------------------------------- LLM 相关命令（阶段 2）
+
+def make_llm(settings: config.Settings):
+    """创建真实的 LLM 客户端；单元测试会替换这个函数。"""
+    return OpenAICompatClient.from_settings(settings)
+
+
+def _secrets(settings: config.Settings) -> tuple[str, ...]:
+    key = os.environ.get(settings.llm.api_key_env, "")
+    return (key,) if key else ()
+
+
+def format_event(e: dict, t0: float) -> str:
+    """把一个事件格式化成一行中文，实时显示和回放共用。"""
+    d = e.get("data", {})
+    t = e.get("ts", t0) - t0
+    node = e.get("node_id")
+    typ = e.get("type")
+    if typ == "run_started":
+        msg = f"运行开始：任务 {d.get('task')}，配置 {d.get('config')}，模型 {d.get('model')}"
+    elif typ == "node_ready":
+        msg = f"模块 {node} 就绪（{d.get('title', '')}）"
+    elif typ == "node_assigned":
+        reason = d.get("scores", {}).get("reason", "")
+        msg = f"模块 {node} 分配给 {d.get('agent')}" + (f"（{reason}）" if reason else "")
+    elif typ == "agent_started":
+        msg = f"{d.get('agent')} 开始第 {d.get('attempt')} 次编写"
+    elif typ == "agent_finished":
+        if d.get("ok"):
+            msg = (f"{d.get('agent')} 交卷：{', '.join(d.get('files', [])) or '没有文件'}；"
+                   f"token {d.get('tokens')}，耗时 {d.get('latency_s')}s")
+            if d.get("rejected"):
+                msg += f"；被拒绝的路径：{', '.join(d['rejected'])}"
+        else:
+            msg = f"[FAIL] {d.get('agent')} 调用失败：{d.get('error')}"
+    elif typ == "verify_started":
+        msg = f"第 {d.get('attempt')} 次判定开始"
+    elif typ == "verify_finished":
+        v = d.get("verdict")
+        msg = f"{MARK.get(v, '[????]')} 第 {d.get('attempt')} 次判定：{v}"
+        if d.get("failed_layer"):
+            msg += f"，首个失败层 {d['failed_layer']}，签名 {d.get('signature')}"
+    elif typ == "node_done":
+        msg = f"模块 {node} 完成，交付第 {d.get('attempt')} 次尝试（{d.get('verdict')}）"
+    elif typ == "node_failed":
+        msg = f"[FAIL] 模块 {node} 未通过，共尝试 {d.get('attempts')} 次"
+    elif typ == "run_finished":
+        msg = (f"运行结束：{MARK.get(d.get('verdict'), '[FAIL]')} {d.get('verdict')}，尝试 {d.get('attempts')} 次，"
+               f"token {d.get('tokens')}，成本 {d.get('cost')} 元，用时 {d.get('wall_s')}s")
+    else:
+        msg = f"{typ} {node or ''} {json.dumps(d, ensure_ascii=False)}"
+    return f"[{t:7.1f}s] {msg}"
+
+
+def _live_printer():
+    state = {"t0": None}
+
+    def show(e: dict) -> None:
+        if state["t0"] is None:
+            state["t0"] = e["ts"]
+        print(format_event(e, state["t0"]), flush=True)
+    return show
+
+
+def cmd_models(args) -> int:
+    settings = config.load_settings()
+    client = make_llm(settings)
+    try:
+        names = client.list_models()
+    except LLMError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return EXIT_FAIL
+    print(f"可用型号（{client.base_url}）：")
+    for n in names:
+        print(f"  {n}")
+    tiers = "，".join(f"{k}={v.name or '未填写'}" for k, v in settings.models.items())
+    print(f"\n当前 firmforge.toml：{tiers}")
+    print("在 firmforge.toml 的 [models.fast] / [models.strong] 里填写 name 和价格（元 / 百万 token）。")
+    return EXIT_PASS
+
+
+def _run_task(args) -> Task:
+    if args.task and (args.spec or args.include):
+        raise UsageError("--task 与 --spec/--include 只能二选一")
+    if args.task:
+        return _load(args.task)
+    if args.spec and args.include:
+        try:
+            return adhoc_task(args.spec, args.include)
+        except TaskError as exc:
+            raise UsageError(str(exc)) from exc
+    raise UsageError("请给出 --task <任务目录>，或者同时给出 --spec 和 --include")
+
+
+def cmd_run(args) -> int:
+    task = _run_task(args)
+    cfg = get_config(args.config)
+    settings = config.load_settings()
+    model = settings.tier(cfg.tier)
+    llm = make_llm(settings)
+    store = Store(args.db) if args.db else Store()
+    try:
+        res = run_baseline(task, cfg, llm=llm, model=model, runs_root=args.runs_dir, store=store,
+                           subscribers=(_live_printer(),), secrets=_secrets(settings))
+    finally:
+        store.close()
+    print(f"\n运行目录：{res.run_dir}")
+    print(f"交付物：{res.final_dir}（第 {res.best} 次尝试）" if res.best else "没有交付物")
+    if res.error:
+        print(f"错误：{res.error}", file=sys.stderr)
+        return EXIT_FAIL
+    return VERDICT_EXIT.get(res.verdict, EXIT_FAIL)
+
+
+def _eval_tasks(spec: str) -> list[Task]:
+    all_tasks = discover_tasks(_tasks_dir())
+    if spec.strip().lower() == "all":
+        if not all_tasks:
+            raise UsageError(f"{_tasks_dir()} 下没有任务")
+        return all_tasks
+    by_id = {t.id: t for t in all_tasks}
+    chosen = []
+    for tid in (x.strip() for x in spec.split(",") if x.strip()):
+        if tid not in by_id:
+            raise UsageError(f"没有任务 {tid}；可选：{', '.join(by_id)}")
+        chosen.append(by_id[tid])
+    if not chosen:
+        raise UsageError("--tasks 不能为空")
+    return chosen
+
+
+def cmd_eval(args) -> int:
+    configs = parse_configs(args.configs)
+    tasks = _eval_tasks(args.tasks)
+    if args.runs < 1:
+        raise UsageError("--runs 至少为 1")
+    settings = config.load_settings()
+    for cfg in configs:
+        settings.tier(cfg.tier)       # 先检查型号都填了
+    llm = make_llm(settings)
+    out = Path(args.out)
+    if args.estimate:
+        est = estimate(tasks, configs, args.runs, out, llm=llm, settings=settings,
+                       secrets=_secrets(settings), progress=print)
+        print(f"\n估算（按任务 {est['sample_task']} 实测 × {est['scale']}）：")
+        for name, v in est["per_config"].items():
+            print(f"  {name}：单次 token {v['tokens']}，成本 {v['cost']:.4f} 元")
+        print(f"全量预计：token 约 {est['total_tokens']}，成本约 {est['total_cost']:.2f} 元")
+        return EXIT_PASS
+    if (out / "results.csv").exists():
+        raise UsageError(f"{out} 里已经有 results.csv，请换一个 --out 目录，避免覆盖之前的结果")
+    print(f"评测：{len(tasks)} 个任务 × {len(configs)} 个配置 × {args.runs} 次 = "
+          f"{len(tasks) * len(configs) * args.runs} 次运行")
+    res = evaluate(tasks, configs, args.runs, out, llm=llm, settings=settings,
+                   secrets=_secrets(settings), progress=print)
+    print(f"\n结果：{res.csv_path}\n汇总：{res.summary_path}")
+    return EXIT_PASS
+
+
+def cmd_replay(args) -> int:
+    try:
+        events = read_events(args.run_dir)
+    except FileNotFoundError as exc:
+        raise UsageError(str(exc)) from exc
+    if not events:
+        print("没有事件。")
+        return EXIT_PASS
+    t0 = events[0]["ts"]
+    prev = t0
+    for e in events:
+        gap = e["ts"] - prev
+        if args.speed > 0 and gap > 0:
+            time.sleep(gap / args.speed)
+        prev = e["ts"]
+        print(format_event(e, t0), flush=True)
+    return EXIT_PASS
+
+
 # ---------------------------------------------------------------- main
 
 def build_parser() -> argparse.ArgumentParser:
@@ -212,6 +398,31 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-stop", action="store_true", help="某层失败后继续运行后面的层")
     s.add_argument("--json", help="把报告写入 JSON 文件")
     s.set_defaults(func=cmd_verify)
+
+    s = sub.add_parser("models", help="列出 DeepSeek 可用型号")
+    s.set_defaults(func=cmd_models)
+
+    s = sub.add_parser("run", help="对一个任务运行 Agent（阶段 2：单 Agent 基线 b1 / b2）")
+    s.add_argument("--task", help="任务目录")
+    s.add_argument("--spec", help="需求文档（与 --include 一起使用）")
+    s.add_argument("--include", help="公共头文件目录")
+    s.add_argument("--config", default="b2", help="配置：b1 或 b2（默认 b2）")
+    s.add_argument("--runs-dir", default=DEFAULT_RUNS_DIR, help="运行目录的上级目录（默认 .ff_runs）")
+    s.add_argument("--db", help="SQLite 数据库路径（默认 .ff_data/firmforge.db）")
+    s.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("eval", help="批量评测：任务 × 配置 × 重复次数")
+    s.add_argument("--configs", required=True, help="配置列表，逗号分隔，如 b1,b2")
+    s.add_argument("--tasks", default="all", help="all 或任务 id 列表，逗号分隔")
+    s.add_argument("--runs", type=int, default=1, help="每个组合重复几次（默认 1）")
+    s.add_argument("--out", required=True, help="输出目录，如 results/first")
+    s.add_argument("--estimate", action="store_true", help="只跑 1 个任务 1 次，推算全量 token 和成本")
+    s.set_defaults(func=cmd_eval)
+
+    s = sub.add_parser("replay", help="在终端按时间顺序回放一次运行")
+    s.add_argument("run_dir")
+    s.add_argument("--speed", type=float, default=4.0, help="倍速（默认 4；0 表示不等待）")
+    s.set_defaults(func=cmd_replay)
     return p
 
 
@@ -226,11 +437,15 @@ def main(argv: list[str] | None = None) -> int:
     if not getattr(args, "func", None):
         parser.print_help()
         return EXIT_USAGE
+    config.load_default_dotenv()
     try:
         return args.func(args)
-    except UsageError as exc:
+    except (UsageError, config.SettingsError, ConfigError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return EXIT_USAGE
+    except LLMError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return EXIT_FAIL
 
 
 if __name__ == "__main__":

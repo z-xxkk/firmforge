@@ -65,8 +65,12 @@ python -m unittest discover -s tests -v       # 全部单元测试
 firmforge doctor                               # 检查工具链是否可用
 firmforge check-task --all                     # 自检评测任务：参考实现要通过，变异体要在预期层失败
 firmforge verify <workdir> --task tasks/<id>   # 对一个工作目录跑判定器
+firmforge models                               # 列出 DeepSeek 可用型号（需要 .env 里的 key）
+firmforge run --task tasks/<id> --config b2    # 单 Agent 跑一个任务，生成 .ff_runs/<run_id>/
+firmforge eval --configs b1,b2 --tasks all --runs 1 --out results/<实验名>
+firmforge replay .ff_runs/<run_id> --speed 4   # 终端回放
 docker build -t firmforge -f docker/Dockerfile .
-docker run --rm -v "$PWD":/work -w /work firmforge <子命令>
+docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge <子命令>
 ```
 
 ## 每完成一个阶段

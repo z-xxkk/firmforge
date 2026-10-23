@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,14 +47,16 @@ class Task:
     extra_forbidden_symbols: tuple[str, ...] = ()
     allowed_symbols: tuple[str, ...] = ()
     mutants: tuple[Mutant, ...] = ()
+    spec_file: Path | None = None      # 临时任务（run --spec）用，覆盖 root/spec.md
+    include_path: Path | None = None   # 临时任务（run --include）用，覆盖 root/include
 
     @property
     def spec_path(self) -> Path:
-        return self.root / "spec.md"
+        return self.spec_file or self.root / "spec.md"
 
     @property
     def include_dir(self) -> Path:
-        return self.root / "include"
+        return self.include_path or self.root / "include"
 
     @property
     def hidden_tests_dir(self) -> Path:
@@ -117,6 +120,23 @@ def load_task(path: Path | str) -> Task:
         allowed_symbols=tuple(rules.get("allowed_symbols", [])),
         mutants=tuple(mutants),
     )
+
+
+def adhoc_task(spec: Path | str, include: Path | str) -> Task:
+    """由一份需求文档和一个头文件目录构成的临时任务：没有隐藏测试、参考实现和预算。"""
+    spec, include = Path(spec).resolve(), Path(include).resolve()
+    if not spec.is_file():
+        raise TaskError(f"找不到需求文档 {spec}")
+    if not include.is_dir() or not list(include.glob("*.h")):
+        raise TaskError(f"头文件目录 {include} 不存在或里面没有 .h 文件")
+    tid = re.sub(r"[^A-Za-z0-9_]+", "_", spec.stem).strip("_") or "module"
+    title = tid
+    for line in spec.read_text(encoding="utf-8").splitlines():
+        if line.startswith("# "):
+            title = line[2:].strip()
+            break
+    return Task(id=tid, title=title, category="adhoc", difficulty=0, source="命令行临时任务",
+                root=spec.parent, spec_file=spec, include_path=include)
 
 
 def discover_tasks(tasks_dir: Path | str) -> list[Task]:

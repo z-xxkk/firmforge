@@ -115,5 +115,40 @@ class Report:
     def from_dict(cls, d: dict) -> "Report":
         return cls([LayerResult.from_dict(x) for x in d.get("layers", [])], d.get("duration_s", 0.0))
 
+    def to_markdown(self, title: str = "验证报告") -> str:
+        marks = {PASS: "通过", FAIL: "失败", SKIPPED: "跳过"}
+        head = f"结论：**{self.verdict}**"
+        if self.failed_layer:
+            head += f"，首个失败层 `{self.failed_layer}`，签名 `{self.signature}`"
+        lines = [f"# {title}", "", head, "", "| 层 | 结果 | 指标 | 备注 |", "|---|---|---|---|"]
+        for lr in self.layers:
+            metrics = "，".join(f"{k}={v}" for k, v in lr.metrics.items() if not isinstance(v, dict))
+            extra = "" if lr.complete or lr.status == SKIPPED else "（不完整）"
+            notes = "；".join(lr.notes).replace("|", "/")
+            lines.append(f"| {lr.title} `{lr.layer}` | {marks.get(lr.status, lr.status)}{extra} | {metrics} | {notes} |")
+        for lr in self.layers:
+            diags = [d for d in lr.diagnostics if d.severity != "info"]
+            if diags:
+                lines += ["", f"## {lr.title}的问题", ""]
+                for d in diags[:20]:
+                    loc = f"{d.file}:{d.line}: " if d.file and d.line else (f"{d.file}: " if d.file else "")
+                    lines.append(f"- {loc}{d.message}")
+        return "\n".join(lines) + "\n"
 
-__all__ = ["Diagnostic", "LayerResult", "Report", "PASS", "FAIL", "SKIPPED", "INCOMPLETE"]
+
+OBJECTIVE_LAYER_NAMES = ("host_compile", "cross_compile", "resources", "static_check", "unit_tests")
+
+
+def attempt_score(report: Report) -> float:
+    """尝试得分（ARCHITECTURE §8）= 通过的客观层数（0–5）+ L5 测试通过比例。"""
+    score = float(sum(1 for lr in report.layers if lr.layer in OBJECTIVE_LAYER_NAMES and lr.status == PASS))
+    ut = report.layer("unit_tests")
+    if ut is not None:
+        total = ut.metrics.get("total") or 0
+        failed = ut.metrics.get("failed") or 0
+        if total > 0:
+            score += max(0, total - failed) / total
+    return score
+
+
+__all__ = ["Diagnostic", "LayerResult", "Report", "PASS", "FAIL", "SKIPPED", "INCOMPLETE", "attempt_score"]
