@@ -1,0 +1,33 @@
+id = "crc16_modbus"
+title = "CRC-16/MODBUS 校验"
+category = "protocol"
+difficulty = 1
+source = "Modbus over Serial Line 规范 V1.02 中的 CRC 生成方法"
+
+[budget]
+# 初值为估计值，待用 check-task 在 Docker 中实测后按 1.5–2 倍校准
+flash_bytes = 640
+ram_bytes = 0
+stack_bytes = 64
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/init_zero.c"
+replaces = "crc16_modbus.c"
+expect_fail = "hidden_tests"
+why = "初值写成 0x0000"
+
+[[mutants]]
+file = "mutants/append_swapped.c"
+replaces = "crc16_modbus.c"
+expect_fail = "hidden_tests"
+why = "append 的字节序反了（先写高字节）"
+
+[[mutants]]
+file = "mutants/table_in_ram.c"
+replaces = "crc16_modbus.c"
+expect_fail = "resources"
+why = "查表数组没加 const，512 字节跑进了 RAM——展示把嵌入式约束做成判定器"

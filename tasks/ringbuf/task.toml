@@ -1,0 +1,33 @@
+id = "ringbuf"
+title = "字节环形缓冲区"
+category = "data_structure"
+difficulty = 1
+source = "嵌入式常见模块，参考 UART 接收缓冲区的典型写法"
+
+[budget]
+# 初值为估计值，待用 check-task 在 Docker 中实测后按 1.5–2 倍校准
+flash_bytes = 512
+ram_bytes = 0
+stack_bytes = 64
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/no_wrap.c"
+replaces = "ringbuf.c"
+expect_fail = "hidden_tests"
+why = "写指针没有取模，越界写（由 ASan 抓到）"
+
+[[mutants]]
+file = "mutants/full_off_by_one.c"
+replaces = "ringbuf.c"
+expect_fail = "hidden_tests"
+why = "满判断差一，只能存 capacity-1 个字节"
+
+[[mutants]]
+file = "mutants/init_malloc.c"
+replaces = "ringbuf.c"
+expect_fail = "static_check"
+why = "storage 为 NULL 时用 malloc 自行分配，违反禁止动态内存的规则"

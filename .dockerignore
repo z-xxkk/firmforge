@@ -1,0 +1,8 @@
+.git
+.ff_build
+.ff_runs
+.ff_data
+results
+.env
+**/__pycache__
+*.egg-info

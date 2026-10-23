@@ -1,0 +1,27 @@
+id = "debounce"
+title = "按键消抖"
+category = "state_machine"
+difficulty = 1
+source = "嵌入式常见模块：按固定 tick 采样的计数式按键消抖"
+
+[budget]
+# 初值为估计值，待用 check-task 在 Docker 中实测后按 1.5–2 倍校准
+flash_bytes = 256
+ram_bytes = 0
+stack_bytes = 64
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/late_by_one.c"
+replaces = "debounce.c"
+expect_fail = "hidden_tests"
+why = "第 threshold+1 个 tick 才翻转（差一）"
+
+[[mutants]]
+file = "mutants/no_reset_on_bounce.c"
+replaces = "debounce.c"
+expect_fail = "hidden_tests"
+why = "抖动时计数不清零"

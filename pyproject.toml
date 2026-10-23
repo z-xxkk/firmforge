@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "firmforge"
+version = "0.1.0"
+description = "面向嵌入式固件开发的多 Agent 编排与验证平台"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+gui = ["PySide6"]
+
+[project.scripts]
+firmforge = "firmforge.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
