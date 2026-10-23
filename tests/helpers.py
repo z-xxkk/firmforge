@@ -23,5 +23,6 @@ HAS_HOST_SIZE = shutil.which("size") is not None
 def copy_fixture(name: str, dst: Path) -> Path:
     """把样例复制到临时目录，避免 .ff_build 写进仓库。"""
     target = dst / name
-    shutil.copytree(FIXTURES / name, target)
+    # 跳过手工运行 verify 时留下的 .ff_build
+    shutil.copytree(FIXTURES / name, target, ignore=shutil.ignore_patterns(".ff_build"))
     return target

@@ -1,7 +1,8 @@
 #include "crc16_modbus.h"
 
-/* 变异：查表数组没有加 const，512 字节进入 .data（RAM） */
-static uint16_t crc_table[256] = {
+/* 变异：查表数组既没加 const 也没加 static，512 字节进入 .data（RAM）。
+ * 注：只漏 const、保留 static 时，GCC -Os 发现数组从未被改写，会自动放进 .rodata，抓不到。 */
+uint16_t crc_table[256] = {
     0x0000u, 0xC0C1u, 0xC181u, 0x0140u, 0xC301u, 0x03C0u, 0x0280u, 0xC241u,
     0xC601u, 0x06C0u, 0x0780u, 0xC741u, 0x0500u, 0xC5C1u, 0xC481u, 0x0440u,
     0xCC01u, 0x0CC0u, 0x0D80u, 0xCD41u, 0x0F00u, 0xCFC1u, 0xCE81u, 0x0E40u,
