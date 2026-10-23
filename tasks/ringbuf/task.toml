@@ -5,7 +5,7 @@ difficulty = 1
 source = "嵌入式常见模块，参考 UART 接收缓冲区的典型写法"
 
 [budget]
-# 初值为估计值，待用 check-task 在 Docker 中实测后按 1.5–2 倍校准
+# 初值为估计值，待用 check-task 在 Docker 中实测后按 2 倍校准（DECISIONS 第 19 条）
 flash_bytes = 512
 ram_bytes = 0
 stack_bytes = 64
