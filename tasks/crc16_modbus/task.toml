@@ -5,10 +5,10 @@ difficulty = 1
 source = "Modbus over Serial Line 规范 V1.02 中的 CRC 生成方法"
 
 [budget]
-# 初值为估计值，待用 check-task 在 Docker 中实测后按 2 倍校准（DECISIONS 第 19 条）
-flash_bytes = 640
+# 逐位参考实现实测 flash 128、栈 16；flash 按 const 查表写法实测 632 的 2 倍定，两种写法都能过（DECISIONS 第 20 条）
+flash_bytes = 1264
 ram_bytes = 0
-stack_bytes = 64
+stack_bytes = 32
 
 [rules]
 extra_forbidden_symbols = []

@@ -5,34 +5,31 @@
 
 ## 当前进度
 
-**阶段 1（判定器 + 首批 3 个任务 + Docker）：代码完成，等待 Docker 环境验收。**
-
-已实现并有单元测试覆盖：
+**阶段 1（判定器 + 首批 3 个任务 + Docker）：已完成，在 Docker 镜像中验收通过（2026-10-23）。**
 
 - 判定器 `firmforge.verifier`：L1 主机编译、L2 交叉编译、L3 资源预算（flash / RAM / 单函数栈帧 / 动态栈）、
   L4 静态检查（禁用符号 + cppcheck）、L5 单元测试（Unity + ASan/UBSan + 超时 + gcov 覆盖率）、隐藏测试层；
   JSON 报告、错误签名、给 Agent 看的报告（剔除隐藏测试层）。
 - 任务自检 `check_task`：参考实现必须通过，每个变异体必须在预期层第一个失败。
-- 评测任务：`ringbuf`、`crc16_modbus`、`debounce`（各含 spec、锁定的头文件、隐藏测试、参考实现、变异体）。
-- 命令行：`doctor`、`tasks`、`check-task`、`verify`。
-- `docker/Dockerfile`。
+- 评测任务：`ringbuf`、`crc16_modbus`、`debounce`，共 7 个变异体；预算按参考实现实测用量校准（见 `docs/DECISIONS.md` 第 19、20 条）。
+- 命令行：`doctor`、`tasks`、`check-task`、`verify`；`docker/Dockerfile`。
 
-在没有 arm-none-eabi 工具链和 cppcheck 的机器上（开发机现状）已验证：L1、L4 禁用符号检查（改用主机 nm）、
-L5、隐藏测试；7 个变异体中 6 个在预期层失败。以下内容**尚未实际运行过**，要在 Docker 里验收：
+Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 个参考实现 PASS，7 个变异体全部在预期层失败；
+`tests/fixtures/` 的样例各在预期层失败；59 个单元测试全部通过、无跳过。
 
-- L2 交叉编译、L3 资源预算的真实工具链路径（L3 的统计逻辑已用主机 gcc + size 测过）；
-- cppcheck 子检查；
-- `crc16_modbus` 的"查表数组没加 const"变异体（预期在资源预算层失败）；
-- 各任务的预算目前是估计值，要用 `check-task` 在容器里实测后校准；
-- `docker build` 和 `pip install -e .`（开发机没有 Docker 和 pip）。
+| 任务 | 实测 flash / RAM / 最大栈帧（字节） | 预算 |
+|---|---|---|
+| ringbuf | 272 / 0 / 24 | 544 / 0 / 48 |
+| crc16_modbus | 128 / 0 / 16（查表写法 flash 632） | 1264 / 0 / 32 |
+| debounce | 72 / 0 / 0 | 144 / 0 / 32 |
 
 ## 快速开始
 
 ```bash
 docker build -t firmforge -f docker/Dockerfile .
 docker run --rm firmforge doctor
-docker run --rm -v "$PWD":/work -w /work firmforge check-task --all
-docker run --rm -v "$PWD":/work -w /work firmforge verify tests/fixtures/syntax_error --task tasks/ringbuf
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge check-task --all
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge verify tests/fixtures/syntax_error --task tasks/ringbuf
 ```
 
 不用 Docker、直接在本机运行（缺失的工具对应的层会显示 `[SKIP]`，结论最多是 incomplete）：
@@ -61,7 +58,8 @@ python3 -m unittest discover -s tests -v
 ## 已知局限
 
 - 栈检查只看单个函数的栈帧，没有分析调用链的最坏情况。
-- 在 Linux 上用 `docker run -v` 运行时，容器内生成的 `.ff_build/` 属于 root。
+- 在 Linux 上用 `docker run -v` 运行时要加 `--user \"$(id -u):$(id -g)\"`，否则容器内生成的 `.ff_build/` 属于 root。
+- 国内网络下拉取基础镜像需要给 Docker 守护进程配置代理（`/etc/systemd/system/docker.service.d/http-proxy.conf`）。
 
 ## 开源组件
 
