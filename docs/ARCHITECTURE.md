@@ -112,7 +112,7 @@ expect_fail = "hidden_tests"      # 期望最先失败的层
 why = "写指针没有取模，越界写"
 ```
 
-默认禁用符号：`malloc calloc realloc free aligned_alloc printf sprintf fprintf puts putchar`。
+默认禁用符号（DECISIONS 第 26 条）：动态内存（MISRA C:2012 Rule 21.3）；`<stdio.h>` 全部输入输出函数（Rule 21.6）；`abort exit _Exit quick_exit getenv system`（Rule 21.8）；`setjmp longjmp`（Rule 21.4）；`signal raise`（Rule 21.5）；进程与网络调用（fork、exec 系列、socket 等，最小权限原则）。完整列表以 `src/firmforge/tasks.py` 的 `DEFAULT_FORBIDDEN_SYMBOLS` 为准。
 
 预算的定法：先用 `check-task` 量出参考实现在 arm-none-eabi-gcc `-Os` 下的实际用量，再取约 1.5–2 倍。预算由人定，写进 task.toml。
 
@@ -376,7 +376,7 @@ check_task(task: Task, toolchain: Toolchain | None = None) -> SelfCheckResult
 |---|---|---|---|
 | L1 主机编译 | `host_compile` | `gcc -std=c11 -Wall -Wextra -Werror -pedantic -I<task>/include -I<workdir>/src -c <f> -o .ff_build/host/<stem>.o`，逐文件编译 | 至少 1 个源文件，且全部返回 0 |
 | L2 交叉编译 | `cross_compile` | `arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -Os -ffunction-sections -fdata-sections -std=c11 -Wall -Wextra -Werror -fstack-usage -I… -c <f> -o .ff_build/cross/<stem>.o`，工作目录为 `.ff_build/cross` | 全部返回 0；交叉编译器缺失则 `skipped` |
-| L3 资源预算 | `resources` | `arm-none-eabi-size <objs>`（Berkeley 格式）；解析 `.su` 文件 | flash=Σ(text+data)、ram=Σ(data+bss)、最大单函数栈帧均不超预算；出现 `dynamic` 栈（VLA/alloca）判失败 |
+| L3 资源预算 | `resources` | `arm-none-eabi-size <objs>`（Berkeley 格式）；L2 加 `-fcallgraph-info=su` 得到调用图和每个函数的栈帧；另用 `-O0` 编译一次的调用图检查递归 | flash=Σ(text+data)、ram=Σ(data+bss)、调用链最坏栈用量均不超预算；出现 `dynamic` 栈（VLA/alloca）或递归判失败（DECISIONS 第 27 条） |
 | L4 静态检查 | `static_check` | ① `arm-none-eabi-nm -u <obj>` 查禁用符号（L2 跳过时改用主机 nm 查主机目标文件）② `cppcheck --std=c11 --enable=warning,performance,portability --inline-suppr --quiet --suppress=missingIncludeSystem --template={file}:{line}:{severity}:{id}:{message} -I<include> <workdir>/src` | 无禁用符号，且 cppcheck 没有 error/warning 级别问题（其他级别只记为 info）；cppcheck 缺失时 `complete=false` |
 | L5 单元测试 | `unit_tests` | 源文件编译选项 `-std=c11 -g -O0 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined --coverage`；unity.c 和弱钩子单独编译（不加 `-Werror`、不加覆盖率）；每个 `tests/test_*.c` 加上 `tests/` 中的其他 .c 支撑文件，单独链接成一个程序，带超时运行 | 没有测试编译/链接错误；没有 FAIL；没有异常退出（崩溃或 sanitizer 报错）；没有超时；测试总数 > 0 |
 | 隐藏测试 | `hidden_tests` | 与 L5 相同的机制，测试目录换成 `<task>/hidden_tests`，不统计覆盖率 | 同 L5；只有 `include_hidden=True` 时运行 |
@@ -385,7 +385,8 @@ check_task(task: Task, toolchain: Toolchain | None = None) -> SelfCheckResult
 
 - **诊断解析**：GCC 格式用正则 `^(?P<file>(?:[A-Za-z]:)?[^:\n]+):(?P<line>\d+):(?:(?P<col>\d+):)?\s*(?P<sev>fatal error|error|warning|note):\s*(?P<msg>.*)$` 解析。链接错误单独匹配含 `undefined reference` 的行。note 级别忽略。
 - **`.su` 格式**：GCC 是 `file:line:col:func<TAB>bytes<TAB>qualifier`，clang 是 `file:line:func<TAB>…`。函数名取 `rsplit(':', 1)[-1]`。
-  - 局限：这里只检查单函数栈帧，没有分析调用链的最坏情况。这一点要写进报告的 `notes`。
+  - 调用链栈：最坏栈 = 从每个入口函数出发，沿调用图累加栈帧的最大值。外部库函数（如 memcpy）的栈帧未知，按 0 计并写进 `notes`；出现间接调用（函数指针）时无法确定调用目标，写进 `notes` 并把本层标为 `complete=false`。
+  - 递归：`-Os` 会把尾递归改成循环、把小函数内联，所以递归检查用 `-O0` 编译的调用图做，任何环都判失败（MISRA Rule 17.2、Power of 10 第 1 条）。
 - **Unity 输出解析**：
   - 通过：`^(?P<file>.+?):(?P<line>\d+):(?P<name>\w+):PASS`
   - 失败：`…:(?P<name>\w+):FAIL(?::\s*(?P<msg>.*))?$`
@@ -440,10 +441,10 @@ Agent 要输出文件时，一律使用下面的格式。解析器只接受该�
 | 角色 | 输入 | 输出 | 可写路径 |
 |---|---|---|---|
 | planner 规划 | spec、公共头文件、知识库检索结果 | `dag.json`（§2.7） | 无 |
-| coder 编码 | 模块说明、公共头文件、依赖模块的头文件、预算和禁用符号、经验库提示；修正轮还有：诊断指令、上一轮代码、给 Agent 看的报告摘录 | 实现文件 | `src/` |
+| coder 编码 | 模块说明、**完整的规划结果（全部模块的划分、职责、接口）**、公共头文件、依赖模块的头文件、预算和禁用符号、经验库提示；修正轮还有：诊断指令、上一轮代码、给 Agent 看的报告摘录 | 实现文件 | `src/` |
 | tester 测试 | **只有** spec 和头文件，看不到实现 | `tests/test_<module>.c`（Unity，自带 main 和 RUN_TEST） | `tests/` |
 | reviewer 审查 | 实现代码、L1–L4 报告 | `{"verdict": "ok"\|"needs_fix", "issues": [{"severity","file","line","rule","message"}]}` | 无 |
-| diagnoser 诊断 | 给 Agent 看的失败报告、实现、测试、本模块历次签名 | `{"blame": "code"\|"test"\|"interface"\|"spec", "summary", "instructions", "confidence"}` | 无 |
+| diagnoser 诊断（固定用 strong 档，DECISIONS 第 31 条） | 给 Agent 看的失败报告、实现、测试、本模块历次签名 | `{"blame": "code"\|"test"\|"interface"\|"spec", "summary", "instructions", "confidence"}` | 无 |
 
 规则：
 
@@ -530,7 +531,7 @@ loop:
 - **尝试得分** = 通过的客观层数（0–5）+ L5 测试通过比例。用于判断变好还是变差。
 - **升级阶梯**（每升一级就发 `escalated` 事件）：
   1. 检索知识库，把相关条目加入编码上下文；
-  2. 换一个 Agent，通常从 fast 档换到 strong 档；
+  2. 换一个 Agent，通常从 fast 档换到 strong 档，并且**从头重写**：新 Agent 只拿需求、接口和"之前失败要点"的摘要，不接着改旧代码（DECISIONS 第 32 条）；
   3. 回到规划层，修改该模块的接口或拆分方式，受影响的下游模块重新执行；
   4. 转人工（评测模式下记为失败）。
 - **基线差异**：B1 = 0 轮修正；B2 = 只有修正，没有诊断 Agent，直接把报错交给编码者，也没有升级。
@@ -557,10 +558,11 @@ firmforge eval --configs b1,b2,b3,b4,full --tasks all --runs 3 --out results/<�
 | `b4` | 多 Agent，`round_robin` 调度，无升级、无经验库 |
 | `full` | 多 Agent，`smart` 调度，升级 + 经验库 + 审查 |
 | `full-no-exp` / `full-no-esc` / `full-no-review` | 消融实验 |
+| `b5` | 同等花费对照（DECISIONS 第 30 条）：单 Agent（coder-strong）每次从头生成、不带报错，直到通过或用完 token 预算；预算 = 同一实验中 `full` 在该任务上的平均 token。因此 `b5` 必须和 `full` 一起跑，且排在 `full` 之后 |
 
 - **判定标准**：最终是否通过 = 交付代码通过 L1–L4 和**隐藏测试**。Agent 自己写的测试通过不算数。
 - **`results.csv`**：每个"任务 × 配置 × 重复"一行，包含这些列：task、category、difficulty、config、run、first_pass、final_pass、attempts、tokens、cost、wall_s、flash、ram、coverage_pct、failed_layer、escalations、experiences_used。
-- **`summary.md`**：各配置的均值 ± 标准差，按任务类别分别统计。
+- **`summary.md`**：各配置的均值 ± 标准差，按任务类别分别统计；另给出"每通过一题的平均 token 和成本"（总 token ÷ 通过题数），用于按同等花费比较（DECISIONS 第 30 条）。
 - **复现条件**：固定 temperature 和种子；`run.json` 记录模型型号。
 - **开跑前估算成本**：`--estimate` 只跑 1 个任务、1 次，然后按规模推算总 token 和成本。
 

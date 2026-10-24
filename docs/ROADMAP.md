@@ -103,7 +103,7 @@
 - `orchestrator/dag.py`（规划结果校验）、`workflow.py`（读取 TOML 模板）、`engine.py`（七种节点、模块隔离目录、集成判定、人工节点）
 - `orchestrator/scheduler.py`：serial、round_robin、random、smart 四种策略，得分明细随事件发出
 - `orchestrator/loop.py`：修正循环、诊断路由、回滚（升级阶梯在阶段 4 做）
-- 评测配置 `b3`、`b4`、`full`（此阶段的 full 还不含升级和经验库）
+- 评测配置 `b3`、`b4`、`full`（此阶段的 full 还不含升级和经验库）；同等花费对照 `b5`，汇总表增加"每通过一题的平均 token 和成本"（DECISIONS 第 30 条）
 - 新任务：`modbus_slave`（多模块，用来演示 DAG），再加附录 A 中的 6 个任务，评测集达到 10 个
 
 **验收**
