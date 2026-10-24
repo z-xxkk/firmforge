@@ -43,7 +43,7 @@ def _budget_text(task: Task) -> str:
     if b.ram_bytes is not None:
         parts.append(f"静态 RAM（data+bss）≤ {b.ram_bytes} 字节")
     if b.stack_bytes is not None:
-        parts.append(f"单个函数栈帧 ≤ {b.stack_bytes} 字节")
+        parts.append(f"调用链最坏栈用量 ≤ {b.stack_bytes} 字节（禁止递归）")
     return "；".join(parts) if parts else "无"
 
 

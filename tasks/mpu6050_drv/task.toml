@@ -1,0 +1,39 @@
+id = "mpu6050_drv"
+title = "MPU6050 姿态传感器驱动"
+category = "driver"
+difficulty = 3
+source = "InvenSense《MPU-6000 and MPU-6050 Register Map and Descriptions》Rev 4.0（RM-MPU-6000A-00）；I2C 接口仿照 STM32 HAL_I2C_Mem_Read / Mem_Write 简化（tasks_inbox/batch2_rules.md）"
+
+[budget]
+# 参考实现实测：flash 368、ram 0、调用链最坏栈 48（不含 hal_i2c 实现的栈）；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 736
+ram_bytes = 0
+stack_bytes = 96
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/little_endian.c"
+replaces = "mpu6050.c"
+expect_fail = "hidden_tests"
+why = "拼字节时低字节在前（手册规定高字节在前）"
+
+[[mutants]]
+file = "mutants/range_not_shifted.c"
+replaces = "mpu6050.c"
+expect_fail = "hidden_tests"
+why = "量程写在第 2–1 位，没有左移到第 4–3 位"
+
+[[mutants]]
+file = "mutants/separate_reads.c"
+replaces = "mpu6050.c"
+expect_fail = "hidden_tests"
+why = "用 7 次单独读代替一次连续读，读到的数据可能不是同一时刻"
+
+[[mutants]]
+file = "mutants/temp_no_offset.c"
+replaces = "mpu6050.c"
+expect_fail = "hidden_tests"
+why = "温度公式漏了 36.53 °C 的偏移"

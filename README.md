@@ -59,7 +59,14 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 | soft_timer | 182 / 0 / 8 | 364 / 0 / 32 |
 | uart_frame | 304 / 0 / 48 | 608 / 0 / 96 |
 
-- 单元测试 122 个（Docker 中全部通过）。
+- 第二批 2 道题（button_events、mpu6050_drv），规则先查资料再定（DECISIONS 第 35 条）；Docker 中自检通过，7 个变异体全部被隐藏测试抓到；隐藏测试清单待审核（`tasks_inbox/batch2_hidden_tests.md`）。
+
+| 任务 | 实测 flash / RAM / 调用链最坏栈 | 预算 |
+|---|---|---|
+| button_events | 180 / 0 / 0 | 360 / 0 / 32 |
+| mpu6050_drv | 368 / 0 / 48 | 736 / 0 / 96 |
+
+- 现有评测任务共 8 道；单元测试 122 个（Docker 中全部通过）。
 
 ### 阶段 2 验收命令
 

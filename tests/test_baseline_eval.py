@@ -34,10 +34,18 @@ def block(path, content):
 
 
 def smoke_test(task):
-    header = next(task.include_dir.glob("*.h")).name
+    header = sorted(h.name for h in task.include_dir.glob("*.h") if not h.name.startswith("hal_"))[0]
     return (f'#include "unity.h"\n#include "{header}"\n'
             "static void test_smoke(void) { TEST_ASSERT_TRUE(1); }\n"
             "int main(void) { UNITY_BEGIN(); RUN_TEST(test_smoke); return UNITY_END(); }\n")
+
+
+# 驱动类任务：测试要自己提供 HAL 的替身（这里只是让链接通过的最简实现）
+FAKE_HAL_I2C = ('#include "hal_i2c.h"\n'
+                'hal_i2c_status_t hal_i2c_mem_read(uint8_t a, uint8_t r, uint8_t *d, uint16_t n)\n'
+                '{ (void)a; (void)r; (void)d; (void)n; return HAL_I2C_ERROR; }\n'
+                'hal_i2c_status_t hal_i2c_mem_write(uint8_t a, uint8_t r, const uint8_t *d, uint16_t n)\n'
+                '{ (void)a; (void)r; (void)d; (void)n; return HAL_I2C_ERROR; }\n')
 
 
 def good_reply(task):
@@ -45,6 +53,8 @@ def good_reply(task):
     for f in sorted(task.reference_dir.glob("*.c")):
         parts.append(block(f"src/{f.name}", f.read_text(encoding="utf-8")))
     parts.append(block(f"tests/test_{task.id}.c", smoke_test(task)))
+    if (task.include_dir / "hal_i2c.h").is_file():
+        parts.append(block("tests/fake_hal_i2c.c", FAKE_HAL_I2C))
     return "".join(parts)
 
 
@@ -85,8 +95,9 @@ class ContextTest(unittest.TestCase):
                 # 参考实现的代码也不能出现在上下文里
                 for ref in task.reference_dir.glob("*.c"):
                     # 只看函数体内的行（缩进的），函数签名本来就会出现在公共头文件里
+                    header_text = "\n".join(h.read_text(encoding="utf-8") for h in task.include_dir.glob("*.h"))
                     body = [ln for ln in ref.read_text(encoding="utf-8").splitlines()
-                            if ln.startswith("    ") and len(ln.strip()) > 20]
+                            if ln.startswith("    ") and len(ln.strip()) > 20 and ln.strip() not in header_text]
                     self.assertTrue(body)
                     for ln in body[:5]:
                         self.assertNotIn(ln.strip(), text)

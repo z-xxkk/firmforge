@@ -1,0 +1,33 @@
+id = "button_events"
+title = "按键事件识别（单击 / 双击 / 长按）"
+category = "state_machine"
+difficulty = 3
+source = "判定规则参照 mathertel/OneButton 源码：默认双击窗口 400 ms、长按 800 ms，双击窗口从松开计时，长按后不报单击（tasks_inbox/batch2_rules.md）"
+
+[budget]
+# 参考实现实测：flash 180、ram 0、调用链最坏栈 0；栈额度取下限 32；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 360
+ram_bytes = 0
+stack_bytes = 32
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/window_from_press.c"
+replaces = "button_events.c"
+expect_fail = "hidden_tests"
+why = "双击窗口从第一次按下开始计时，而不是从松开开始"
+
+[[mutants]]
+file = "mutants/click_after_long.c"
+replaces = "button_events.c"
+expect_fail = "hidden_tests"
+why = "长按松开后又多报一次单击"
+
+[[mutants]]
+file = "mutants/single_late.c"
+replaces = "button_events.c"
+expect_fail = "hidden_tests"
+why = "单击晚一个 tick 才报"
