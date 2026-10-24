@@ -23,7 +23,18 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 | crc16_modbus | 128 / 0 / 16（查表写法 flash 632） | 1264 / 0 / 32 |
 | debounce | 72 / 0 / 0 | 144 / 0 / 32 |
 
-**阶段 2（接入 DeepSeek + 单 Agent 基线 + 评测脚本）：代码完成，单元测试通过；还没有用真实 API 跑过，等待负责人验收。**
+**阶段 2（接入 DeepSeek + 单 Agent 基线 + 评测脚本）：已完成，2026-10-24 用真实 API 验收。**
+
+验收结果：`models` 列出 deepseek-flash、deepseek-v4-pro；`run --task tasks/ringbuf --config b2` 第 1 次即通过（隐藏测试 19/19），
+调用日志中 Authorization 为 `***`、全部记录里搜不到 key；`replay` 可回放。第一组分数 `results/first`（未提交到仓库）：
+
+| 任务 | B1 | B2 |
+|---|---|---|
+| crc16_modbus | 通过 | 通过 |
+| debounce | 未通过（host_compile：用了 NULL 却没包含 `<stddef.h>`） | 第 2 次通过（报错回喂后补上头文件） |
+| ringbuf | 通过 | 缺失（运行中被手动中断） |
+
+每次运行约 0.07–0.20 元、40–120 秒（思考模式，周末空闲价）。每个组合只跑了 1 次，样本很小，只能作为方向参考。
 
 - LLM 客户端 `firmforge.llm`：标准库 urllib 实现的 OpenAI 兼容接口，429 / 5xx / 网络错误指数退避重试；
   FakeLLM（单元测试用，不联网）；调用日志 `llm_calls.jsonl` + `llm_calls/<n>.json`，Authorization 显示为 `***`。
@@ -33,7 +44,7 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 - 评测：`eval` 输出 `results.csv`、`summary.md`；最终是否通过只看 L1–L4 + 隐藏测试，在临时目录判定。
 - 命令：`models`、`run`、`eval`（含 `--estimate`）、`replay`。
 - 模型：fast = deepseek-flash，strong = deepseek-v4-pro，均开启思考模式；成本按北京时间分高峰 / 空闲计价（DECISIONS 第 23、24 条）。
-- 单元测试 113 个（本机 1 个因缺交叉工具链跳过；Docker 中全部通过），其中包括"发给 LLM 的消息和运行目录里都不含隐藏测试内容"。
+- 单元测试 114 个（本机 1 个因缺交叉工具链跳过；Docker 中全部通过），其中包括"发给 LLM 的消息和运行目录里都不含隐藏测试内容"。
 
 ### 阶段 2 验收命令
 

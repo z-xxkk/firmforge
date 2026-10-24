@@ -110,7 +110,10 @@ def evaluate(tasks: list[Task], configs: list[BaselineConfig], runs: int, out_di
                              f"token {row['tokens']}，成本 {row['cost']:.4f} 元")
     finally:
         store.close()
-    summary_path.write_text(summarize(read_csv(csv_path)), encoding="utf-8")
+        # 中途被中断也要给已完成的部分出汇总
+        if rows:
+            title = "评测汇总" if len(rows) == total else f"评测汇总（中断，只完成 {len(rows)}/{total} 次）"
+            summary_path.write_text(summarize(read_csv(csv_path), title), encoding="utf-8")
     return EvalOutput(rows, csv_path, summary_path)
 
 

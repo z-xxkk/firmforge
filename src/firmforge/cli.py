@@ -239,6 +239,8 @@ def format_event(e: dict, t0: float) -> str:
             msg += f"，首个失败层 {d['failed_layer']}，签名 {d.get('signature')}"
     elif typ == "node_done":
         msg = f"模块 {node} 完成，交付第 {d.get('attempt')} 次尝试（{d.get('verdict')}）"
+    elif typ == "node_failed" and d.get("verdict") == "interrupted":
+        msg = f"模块 {node} 被中断，已完成 {d.get('attempts')} 次尝试"
     elif typ == "node_failed":
         msg = f"[FAIL] 模块 {node} 未通过，共尝试 {d.get('attempts')} 次"
     elif typ == "run_finished" and d.get("verdict") == "interrupted":

@@ -287,6 +287,18 @@ class EvaluateTest(_Tmp):
         self.assertEqual(len(judges), 2)
         self.assertTrue((self.tmp / "out" / "firmforge.db").is_file())
 
+    def test_interrupted_eval_still_writes_summary(self):
+        t = TASKS["ringbuf"]
+
+        def interrupt(messages):
+            raise KeyboardInterrupt
+        llm = FakeLLM([good_reply(t), interrupt])
+        with self.assertRaises(KeyboardInterrupt):
+            evaluate([t], [B1, B2], 1, self.tmp / "out", llm=llm, settings=SETTINGS)
+        summary = (self.tmp / "out" / "summary.md").read_text(encoding="utf-8")
+        self.assertIn("中断，只完成 1/2 次", summary)
+        self.assertEqual(len(read_csv(self.tmp / "out" / "results.csv")), 1)
+
     def test_judge_uses_hidden_tests_and_ignores_agent_tests(self):
         t = TASKS["ringbuf"]
         wd = helpers.copy_fixture("test_failure", self.tmp)     # 实现有 bug，Agent 的测试也会失败
