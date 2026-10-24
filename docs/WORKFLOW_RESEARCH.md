@@ -71,7 +71,7 @@ MAST 把多 Agent 失败分成三大类、14 种[1]。我们的事件流里信�
 ## 参考来源
 
 1. Cemri et al., [Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/html/2503.13657v3)（NeurIPS 2025，MAST 分类）
-2. （同 1）
+2. NeurIPS 2025 论文页：[Why Do Multi-Agent LLM Systems Fail?](https://neurips.cc/virtual/2025/poster/121528)
 3. Huang et al., [Large Language Models Cannot Self-Correct Reasoning Yet](https://arxiv.org/pdf/2310.01798)（ICLR 2024）
 4. Olausson et al., [Is Self-Repair a Silver Bullet for Code Generation?](https://arxiv.org/abs/2306.09896)（ICLR 2024）
 5. Chen et al., [Teaching Large Language Models to Self-Debug](https://arxiv.org/pdf/2304.05128)（ICLR 2024）；同等计算量比较的后续工作见 [BESTER](https://arxiv.org/html/2407.19055v1)
