@@ -48,13 +48,20 @@ FAKE_HAL_I2C = ('#include "hal_i2c.h"\n'
                 '{ (void)a; (void)r; (void)d; (void)n; return HAL_I2C_ERROR; }\n')
 
 
+FAKE_HAL_SPI = ('#include "hal_spi.h"\n'
+                'hal_spi_status_t hal_spi_transfer(const uint8_t *t, size_t tl, uint8_t *r, size_t rl)\n'
+                '{ (void)t; (void)tl; (void)r; (void)rl; return HAL_SPI_ERROR; }\n')
+
+
 def good_reply(task):
     parts = ["这是实现和测试：\n"]
-    for f in sorted(task.reference_dir.glob("*.c")):
+    for f in sorted(task.reference_dir.glob("*.[ch]")):         # 多文件参考实现还有内部头文件
         parts.append(block(f"src/{f.name}", f.read_text(encoding="utf-8")))
     parts.append(block(f"tests/test_{task.id}.c", smoke_test(task)))
     if (task.include_dir / "hal_i2c.h").is_file():
         parts.append(block("tests/fake_hal_i2c.c", FAKE_HAL_I2C))
+    if (task.include_dir / "hal_spi.h").is_file():
+        parts.append(block("tests/fake_hal_spi.c", FAKE_HAL_SPI))
     return "".join(parts)
 
 

@@ -66,7 +66,14 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 | button_events | 180 / 0 / 0 | 360 / 0 / 32 |
 | mpu6050_drv | 368 / 0 / 48 | 736 / 0 / 96 |
 
-- 现有评测任务共 8 道；单元测试 122 个（Docker 中全部通过）。
+- 第三批 2 道题（w25q_drv、modbus_slave），规则依据 Winbond 数据手册与 Modbus 官方规范（DECISIONS 第 36 条）；Docker 中自检通过，8 个变异体全部被隐藏测试抓到；隐藏测试清单待审核（`tasks_inbox/batch3_hidden_tests.md`）。
+
+| 任务 | 实测 flash / RAM / 调用链最坏栈 | 预算 |
+|---|---|---|
+| w25q_drv | 482 / 0 / 320 | 964 / 0 / 640 |
+| modbus_slave | 466 / 0 / 56 | 932 / 0 / 112 |
+
+- 评测任务共 10 道（数据结构 2、协议 4、状态机 3、驱动 2，难度 1–3），`check-task --all` 全部通过；单元测试 122 个（Docker 中全部通过）。
 
 ### 阶段 2 验收命令
 
