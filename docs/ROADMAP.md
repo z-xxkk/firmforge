@@ -19,7 +19,7 @@
 - [ ] 项目目录 `~/Documents/Projects/firmforge`，里面已经放好 `CLAUDE.md` 和 `docs/`。在这个目录里执行 `git init`。
 - [ ] 在 GitHub 建一个仓库，先设为私有，提交作品前再公开。初赛要求提供可访问的源码仓库地址。
 - [ ] 准备 DeepSeek API key，阶段 2 时写进 `.env`。key 不要发给任何人，也不要贴进聊天。
-- [ ] 把项目说明书发给 3 位队友，按附录 A 分配要收集的评测任务。
+- [x] ~~把项目说明书发给 3 位队友，按附录 A 分配要收集的评测任务。~~ 没有队友，改为 Claude Code 起草、你审核（DECISIONS 第 25 条）。
 
 ---
 
@@ -116,7 +116,7 @@
 ```
 请阅读 CLAUDE.md、docs/ARCHITECTURE.md（§2.5、§2.7、§5、§6、§7、§8）和 docs/ROADMAP.md 阶段 3。
 实现阶段 3。先给我实现计划、规划 Agent 和诊断 Agent 的提示词草案，以及需要我决定的问题，确认后再写。
-新增任务的 spec.md 以队友整理的需求为准（在 tasks_inbox/ 目录），隐藏测试用例清单写完后给我审核。
+新增任务由你起草全套内容（spec.md、头文件、隐藏测试、参考实现、变异体），先把每道题的规则写成"什么情况 → 应该怎样"的白话清单给我审核，确认后再写代码。
 ```
 
 ---
@@ -162,7 +162,7 @@
 - GitHub Actions：用 Windows runner 自动打包 FirmForge.exe。
 - `README.md` 定稿：一键复现步骤、功能清单、已知局限、开源组件说明（Unity，MIT）、人工智能使用说明。
 - 录演示视频：用桌面软件的回放模式，录一次真实运行。
-- 给队友的素材：`summary.md` 的表格、架构图、每个阶段的设计讲解，用于方案书和 PPT。
+- 方案书与 PPT 素材：`summary.md` 的表格、架构图、每个阶段的设计讲解（由 Claude Code 起草初稿，你修改定稿）。
 
 **提交清单**（对照赛题一要求）
 - [ ] 方案书 PDF，不少于 5000 字，含赛题要求的 8 项内容
@@ -179,42 +179,42 @@
 - 调度参数 α、β、γ 的扫描实验。
 - 可选：Renode 外设仿真判定器。
 - 真实用户试用：记录使用过程和反馈，作为落地应用的证明。
-- 答辩演练：你讲架构、调度、循环，队友扮评委追问。
+- 答辩演练：你讲架构、调度、循环，Claude Code 扮评委追问。
 
 ---
 
 ## 附录 A：评测任务清单（20 个候选）
 
-**队友要做的**：对分到的任务，写一份中文需求草稿，放在 `tasks_inbox/<id>.md`。草稿包括：
-- 功能描述；
-- 每个函数的输入输出；
+**分工（2026-10-24 调整，DECISIONS 第 25 条）**：项目没有队友。每道题由 Claude Code 起草全套内容，草稿包括：
+- 功能描述、每个函数的输入输出；
 - 边界情况和 NULL 怎么处理；
-- 来源（教材第几章、哪个开源项目或标准）。
+- 来源（标准、数据手册或常见开源实现，写明出处）。
 
-你审核后，Claude Code 据此生成任务目录。
+Claude Code 先把规则整理成"什么情况 → 应该怎样"的白话清单交你审核（同阶段 1 的做法），你确认后再生成任务目录，
+并跑 `check-task` 证明参考实现通过、变异体被抓到。题目数量先做到 10 道（阶段 3），是否扩到 20 道视审核负担再定。
 
-| # | id | 类别 | 难度 | 要点 | 整理人 |
+| # | id | 类别 | 难度 | 要点 | 起草 |
 |---|---|---|---|---|---|
 | 1 | ringbuf | 数据结构 | 1 | 字节环形缓冲区 | 阶段 1 已含 |
 | 2 | crc16_modbus | 算法 | 1 | CRC-16/MODBUS | 阶段 1 已含 |
 | 3 | debounce | 状态机 | 1 | 按键消抖 | 阶段 1 已含 |
-| 4 | crc8_maxim | 算法 | 1 | CRC-8/MAXIM（DS18B20 用） | 队友 1 |
-| 5 | moving_average | 滤波 | 1 | 窗口 N 的整数滑动平均，不能溢出 | 队友 1 |
-| 6 | median_filter | 滤波 | 2 | 窗口 5 的中值滤波 | 队友 1 |
-| 7 | pid_ctrl | 控制 | 2 | PID，带积分限幅和输出限幅 | 队友 1 |
-| 8 | q15_math | 算法 | 2 | Q15 定点乘法和加法，带饱和 | 队友 1 |
-| 9 | bit_utils | 数据结构 | 1 | 位段提取和设置、字节序转换 | 队友 2 |
-| 10 | button_events | 状态机 | 3 | 单击、双击、长按识别 | 队友 2 |
-| 11 | soft_timer | 状态机 | 2 | 固定数量的软件定时器，单次和周期 | 队友 2 |
-| 12 | led_pattern | 状态机 | 2 | LED 闪烁模式播放器 | 队友 2 |
-| 13 | uart_frame | 协议 | 2 | 帧头 + 长度 + 载荷 + CRC 的接收状态机，处理粘包和半包 | 队友 2 |
-| 14 | modbus_slave | 协议 | 3 | 功能码 03/06，多模块（用于演示 DAG） | 你 + Claude Code |
-| 15 | nmea_gga | 协议 | 2 | 解析 GGA 语句，带校验和 | 队友 3 |
-| 16 | at_parser | 协议 | 2 | AT 指令响应解析（OK、ERROR、+CSQ: 等） | 队友 3 |
-| 17 | cobs | 协议 | 2 | COBS 编解码 | 队友 3 |
-| 18 | slip | 协议 | 1 | SLIP 编解码 | 队友 3 |
-| 19 | mpu6050_drv | 驱动 | 3 | 对着 mock I2C HAL 读取并换算加速度和角速度 | 你 + Claude Code |
-| 20 | w25q_drv | 驱动 | 3 | 对着 mock SPI HAL 读 ID、读数据、页编程（跨页时拆分） | 你 + Claude Code |
+| 4 | crc8_maxim | 算法 | 1 | CRC-8/MAXIM（DS18B20 用） | Claude Code 起草，你审核 |
+| 5 | moving_average | 滤波 | 1 | 窗口 N 的整数滑动平均，不能溢出 | Claude Code 起草，你审核 |
+| 6 | median_filter | 滤波 | 2 | 窗口 5 的中值滤波 | Claude Code 起草，你审核 |
+| 7 | pid_ctrl | 控制 | 2 | PID，带积分限幅和输出限幅 | Claude Code 起草，你审核 |
+| 8 | q15_math | 算法 | 2 | Q15 定点乘法和加法，带饱和 | Claude Code 起草，你审核 |
+| 9 | bit_utils | 数据结构 | 1 | 位段提取和设置、字节序转换 | Claude Code 起草，你审核 |
+| 10 | button_events | 状态机 | 3 | 单击、双击、长按识别 | Claude Code 起草，你审核 |
+| 11 | soft_timer | 状态机 | 2 | 固定数量的软件定时器，单次和周期 | Claude Code 起草，你审核 |
+| 12 | led_pattern | 状态机 | 2 | LED 闪烁模式播放器 | Claude Code 起草，你审核 |
+| 13 | uart_frame | 协议 | 2 | 帧头 + 长度 + 载荷 + CRC 的接收状态机，处理粘包和半包 | Claude Code 起草，你审核 |
+| 14 | modbus_slave | 协议 | 3 | 功能码 03/06，多模块（用于演示 DAG） | Claude Code 起草，你审核 |
+| 15 | nmea_gga | 协议 | 2 | 解析 GGA 语句，带校验和 | Claude Code 起草，你审核 |
+| 16 | at_parser | 协议 | 2 | AT 指令响应解析（OK、ERROR、+CSQ: 等） | Claude Code 起草，你审核 |
+| 17 | cobs | 协议 | 2 | COBS 编解码 | Claude Code 起草，你审核 |
+| 18 | slip | 协议 | 1 | SLIP 编解码 | Claude Code 起草，你审核 |
+| 19 | mpu6050_drv | 驱动 | 3 | 对着 mock I2C HAL 读取并换算加速度和角速度 | Claude Code 起草，你审核 |
+| 20 | w25q_drv | 驱动 | 3 | 对着 mock SPI HAL 读 ID、读数据、页编程（跨页时拆分） | Claude Code 起草，你审核 |
 
 驱动类任务的 `include/` 里要同时提供 HAL 接口头文件（如 `hal_i2c.h`）。隐藏测试用自己的 mock 实现。测试 Agent 也要自己写 mock，放在 `tests/` 下作为支撑文件。
 
