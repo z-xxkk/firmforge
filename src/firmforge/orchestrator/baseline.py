@@ -43,6 +43,15 @@ B2 = BaselineConfig("b2", max_repairs=3)
 BASELINES = {"b1": B1, "b2": B2}
 
 
+class RunInterrupted(KeyboardInterrupt):
+    """运行被 Ctrl+C 中断；运行目录里的记录已经写完整。"""
+
+    def __init__(self, result: "RunResult"):
+        super().__init__(f"运行 {result.run_id} 被中断")
+        self.result = result
+        self.run_dir = result.run_dir
+
+
 @dataclass
 class AttemptRecord:
     n: int
@@ -59,7 +68,7 @@ class RunResult:
     run_dir: Path
     task_id: str
     config: str
-    verdict: str                 # pass | fail | incomplete | error
+    verdict: str                 # pass | fail | incomplete | error | interrupted
     attempts: list[AttemptRecord] = field(default_factory=list)
     best: int | None = None      # 交付的是第几次尝试
     prompt_tokens: int = 0
@@ -120,50 +129,56 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
         result.cost += model.cost(resp.prompt_tokens, resp.completion_tokens, ts=time.time(), schedule=pricing)
         return resp
 
-    for n in range(1, cfg.max_repairs + 2):
-        try:
-            resp = call(messages, n)
-            parsed = parse_files(resp.text, CODER_DIRS)
-            tokens = resp.prompt_tokens + resp.completion_tokens
-            latency = resp.latency_s
-            if not parsed.files and prev_dir is None:
-                # 第一次就没有可用的文件块：带着格式提醒重试 1 次
-                messages = messages + [{"role": "assistant", "content": resp.text},
-                                       {"role": "user", "content": FORMAT_REMINDER}]
+    interrupted = False
+    try:
+        for n in range(1, cfg.max_repairs + 2):
+            try:
                 resp = call(messages, n)
                 parsed = parse_files(resp.text, CODER_DIRS)
-                tokens += resp.prompt_tokens + resp.completion_tokens
-                latency += resp.latency_s
-        except LLMError as exc:
-            result.verdict, result.error = "error", str(exc)
-            bus.emit("agent_finished", module, agent=cfg.agent, attempt=n, ok=False, error=str(exc))
-            break
-        rejected = parsed.rejected
-        bus.emit("agent_finished", module, agent=cfg.agent, attempt=n, ok=True, tokens=tokens,
-                 latency_s=round(latency, 3), files=sorted(parsed.files), rejected=[p for p, _ in rejected])
+                tokens = resp.prompt_tokens + resp.completion_tokens
+                latency = resp.latency_s
+                if not parsed.files and prev_dir is None:
+                    # 第一次就没有可用的文件块：带着格式提醒重试 1 次
+                    messages = messages + [{"role": "assistant", "content": resp.text},
+                                           {"role": "user", "content": FORMAT_REMINDER}]
+                    resp = call(messages, n)
+                    parsed = parse_files(resp.text, CODER_DIRS)
+                    tokens += resp.prompt_tokens + resp.completion_tokens
+                    latency += resp.latency_s
+            except LLMError as exc:
+                result.verdict, result.error = "error", str(exc)
+                bus.emit("agent_finished", module, agent=cfg.agent, attempt=n, ok=False, error=str(exc))
+                break
+            rejected = parsed.rejected
+            bus.emit("agent_finished", module, agent=cfg.agent, attempt=n, ok=True, tokens=tokens,
+                     latency_s=round(latency, 3), files=sorted(parsed.files), rejected=[p for p, _ in rejected])
 
-        adir = rd.attempt_dir(module, n)
-        if prev_dir is not None:
-            copy_snapshot(prev_dir, adir)
-        adir.mkdir(parents=True, exist_ok=True)
-        write_files(adir, parsed.files)
+            adir = rd.attempt_dir(module, n)
+            if prev_dir is not None:
+                copy_snapshot(prev_dir, adir)
+            adir.mkdir(parents=True, exist_ok=True)
+            write_files(adir, parsed.files)
 
-        bus.emit("verify_started", module, attempt=n)
-        report = verify(adir, task, toolchain=toolchain)      # 不含隐藏测试
-        shutil.rmtree(adir / ".ff_build", ignore_errors=True)
-        (adir / "report.json").write_text(report.for_agent().to_json(), encoding="utf-8")
-        bus.emit("verify_finished", module, attempt=n, verdict=report.verdict,
-                 failed_layer=report.failed_layer, signature=report.signature)
-        rec = AttemptRecord(n, adir, report, attempt_score(report), tokens, latency)
-        result.attempts.append(rec)
-        if store:
-            store.add_attempt(rd.run_id, module, n, cfg.agent, report.verdict, report.failed_layer,
-                              report.signature, tokens, latency)
-        prev_dir = adir
-        if report.failed_layer is None or n > cfg.max_repairs:
-            break
-        messages = messages + [{"role": "assistant", "content": resp.text},
-                               {"role": "user", "content": repair_message(report, n, cfg.max_repairs, rejected, adir)}]
+            bus.emit("verify_started", module, attempt=n)
+            report = verify(adir, task, toolchain=toolchain)      # 不含隐藏测试
+            shutil.rmtree(adir / ".ff_build", ignore_errors=True)
+            (adir / "report.json").write_text(report.for_agent().to_json(), encoding="utf-8")
+            bus.emit("verify_finished", module, attempt=n, verdict=report.verdict,
+                     failed_layer=report.failed_layer, signature=report.signature)
+            rec = AttemptRecord(n, adir, report, attempt_score(report), tokens, latency)
+            result.attempts.append(rec)
+            if store:
+                store.add_attempt(rd.run_id, module, n, cfg.agent, report.verdict, report.failed_layer,
+                                  report.signature, tokens, latency)
+            prev_dir = adir
+            if report.failed_layer is None or n > cfg.max_repairs:
+                break
+            messages = messages + [{"role": "assistant", "content": resp.text},
+                                   {"role": "user", "content": repair_message(report, n, cfg.max_repairs, rejected, adir)}]
+    except KeyboardInterrupt:
+        # 按 Ctrl+C：照常整理已有的尝试、写完记录，再把中断往外抛
+        interrupted = True
+        result.verdict = "interrupted"
 
     if result.attempts:
         best = max(result.attempts, key=lambda a: (a.score, a.n))
@@ -173,10 +188,10 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
         (rd.final_dir / "report.json").write_text(agent_report.to_json(), encoding="utf-8")
         (rd.final_dir / "report.md").write_text(
             agent_report.to_markdown(f"{task.title}（{task.id}）验证报告：第 {best.n} 次尝试"), encoding="utf-8")
-        if result.verdict != "error":
+        if result.verdict not in ("error", "interrupted"):
             result.verdict = agent_report.verdict
     best_rec = next((a for a in result.attempts if a.n == result.best), None)
-    if result.verdict != "error" and best_rec is not None and best_rec.report.failed_layer is None:
+    if result.verdict not in ("error", "interrupted") and best_rec is not None and best_rec.report.failed_layer is None:
         bus.emit("node_done", module, attempt=result.best, verdict=result.verdict)
     else:
         bus.emit("node_failed", module, attempts=len(result.attempts), verdict=result.verdict)
@@ -192,4 +207,6 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
     rd.write_json("run.json", run_info)
     if store:
         store.finish_run(rd.run_id, result.verdict, result.tokens, result.cost, result.wall_s)
+    if interrupted:
+        raise RunInterrupted(result)
     return result

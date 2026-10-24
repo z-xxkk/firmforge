@@ -33,7 +33,7 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 - 评测：`eval` 输出 `results.csv`、`summary.md`；最终是否通过只看 L1–L4 + 隐藏测试，在临时目录判定。
 - 命令：`models`、`run`、`eval`（含 `--estimate`）、`replay`。
 - 模型：fast = deepseek-flash，strong = deepseek-v4-pro，均开启思考模式；成本按北京时间分高峰 / 空闲计价（DECISIONS 第 23、24 条）。
-- 单元测试 110 个（本机 1 个因缺交叉工具链跳过；Docker 中全部通过），其中包括"发给 LLM 的消息和运行目录里都不含隐藏测试内容"。
+- 单元测试 113 个（本机 1 个因缺交叉工具链跳过；Docker 中全部通过），其中包括"发给 LLM 的消息和运行目录里都不含隐藏测试内容"。
 
 ### 阶段 2 验收命令
 

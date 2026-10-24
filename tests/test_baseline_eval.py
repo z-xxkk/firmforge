@@ -17,7 +17,7 @@ from firmforge.evaluation.configs import ConfigError, get_config, parse_configs
 from firmforge.evaluation.metrics import ROW_FIELDS, read_csv
 from firmforge.evaluation.runner import evaluate, judge
 from firmforge.llm import FakeLLM
-from firmforge.orchestrator.baseline import B1, B2, run_baseline
+from firmforge.orchestrator.baseline import B1, B2, RunInterrupted, run_baseline
 from firmforge.runs import read_events
 from firmforge.store import Store
 from firmforge.tasks import adhoc_task, discover_tasks, load_task
@@ -201,6 +201,24 @@ class BaselineTest(_Tmp):
         self.assertIn("没有在你的回复里找到", llm.calls[1]["messages"][-1]["content"])
         self.assertIsNone(res.attempts[0].report.failed_layer)
 
+    def test_ctrl_c_keeps_records(self):
+        t = TASKS["ringbuf"]
+
+        def second_call_interrupted(messages):
+            raise KeyboardInterrupt
+        llm = FakeLLM([broken_reply(t), second_call_interrupted])
+        events = []
+        with self.assertRaises(RunInterrupted) as cm:
+            run_baseline(t, B2, llm=llm, model=MODEL, runs_root=self.tmp / "runs", subscribers=(events.append,))
+        run_dir = cm.exception.run_dir
+        run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual(run["verdict"], "interrupted")
+        self.assertEqual(run["attempts"], 1)
+        self.assertTrue((run_dir / "final" / "src" / "ringbuf.c").is_file())   # 第 1 次的代码照样交付
+        self.assertEqual(events[-1]["type"], "run_finished")
+        self.assertEqual(events[-1]["data"]["verdict"], "interrupted")
+        self.assertIsInstance(cm.exception, KeyboardInterrupt)
+
     def test_llm_error_ends_run(self):
         res, _, events = self.run_b(B2, [])
         self.assertEqual(res.verdict, "error")
@@ -331,6 +349,33 @@ class CliStage2Test(_Tmp):
         self.assertEqual(code, 0)
         self.assertIn("全量预计", out)
         self.assertIn("× 9", out)     # 3 个任务 × 3 次
+
+    def test_ctrl_c_exit_code(self):
+        t = TASKS["ringbuf"]
+
+        def interrupt(messages):
+            raise KeyboardInterrupt
+        code, _, err = self._cli("run", "--task", str(t.root), "--runs-dir", str(self.tmp / "runs"),
+                                 "--db", str(self.tmp / "db"), llm=FakeLLM([interrupt]))
+        self.assertEqual(code, 130)
+        self.assertIn("已按 Ctrl+C 中断", err)
+        self.assertIn(str(self.tmp / "runs"), err)
+
+    def test_heartbeat_while_waiting(self):
+        buf = io.StringIO()
+        printer = cli.LivePrinter(heartbeat_s=0.2, out=buf)
+        try:
+            printer({"ts": 100.0, "type": "agent_started", "node_id": "m",
+                     "data": {"agent": "coder-strong", "attempt": 1}})
+            import time as _t
+            _t.sleep(0.7)
+            printer({"ts": 101.0, "type": "verify_started", "node_id": "m", "data": {"attempt": 1}})
+            text_before = buf.getvalue()
+            _t.sleep(0.5)                    # 不在等待模型时不应再提示
+        finally:
+            printer.close()
+        self.assertIn("模型还在思考", text_before)
+        self.assertEqual(buf.getvalue(), text_before)
 
     def test_usage_errors(self):
         self.assertEqual(self._cli("run")[0], 3)

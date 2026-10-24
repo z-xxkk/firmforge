@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from .config import Toolchain
 from .evaluation.configs import ConfigError, get_config, parse_configs
 from .evaluation.runner import estimate, evaluate
 from .llm import LLMError, OpenAICompatClient
-from .orchestrator.baseline import run_baseline
+from .orchestrator.baseline import RunInterrupted, run_baseline
 from .runs import DEFAULT_RUNS_DIR, read_events
 from .store import Store
 from .tasks import Task, TaskError, adhoc_task, discover_tasks, load_task
@@ -27,6 +28,7 @@ from .verifier.report import FAIL, INCOMPLETE, PASS, SKIPPED, Report
 from .verifier.selfcheck import MUTANT_OK, MUTANT_UNVERIFIABLE, SelfCheckResult
 
 EXIT_PASS, EXIT_FAIL, EXIT_INCOMPLETE, EXIT_USAGE = 0, 1, 2, 3
+EXIT_INTERRUPTED = 130                 # 按 Ctrl+C 中断，沿用 shell 惯例
 MARK = {PASS: "[PASS]", FAIL: "[FAIL]", SKIPPED: "[SKIP]", INCOMPLETE: "[INCO]"}
 VERDICT_EXIT = {PASS: EXIT_PASS, FAIL: EXIT_FAIL, INCOMPLETE: EXIT_INCOMPLETE}
 MAX_DIAGS = 8
@@ -239,6 +241,8 @@ def format_event(e: dict, t0: float) -> str:
         msg = f"模块 {node} 完成，交付第 {d.get('attempt')} 次尝试（{d.get('verdict')}）"
     elif typ == "node_failed":
         msg = f"[FAIL] 模块 {node} 未通过，共尝试 {d.get('attempts')} 次"
+    elif typ == "run_finished" and d.get("verdict") == "interrupted":
+        msg = f"运行被中断：已完成 {d.get('attempts')} 次尝试，token {d.get('tokens')}，成本 {d.get('cost')} 元"
     elif typ == "run_finished":
         msg = (f"运行结束：{MARK.get(d.get('verdict'), '[FAIL]')} {d.get('verdict')}，尝试 {d.get('attempts')} 次，"
                f"token {d.get('tokens')}，成本 {d.get('cost')} 元，用时 {d.get('wall_s')}s")
@@ -247,14 +251,45 @@ def format_event(e: dict, t0: float) -> str:
     return f"[{t:7.1f}s] {msg}"
 
 
-def _live_printer():
-    state = {"t0": None}
+class LivePrinter:
+    """实时打印事件；等待模型回复时每隔 heartbeat_s 秒提示一次，避免看起来像卡住。"""
 
-    def show(e: dict) -> None:
-        if state["t0"] is None:
-            state["t0"] = e["ts"]
-        print(format_event(e, state["t0"]), flush=True)
-    return show
+    def __init__(self, heartbeat_s: float = 30.0, out=None):
+        self.heartbeat_s = heartbeat_s
+        self.out = out
+        self.t0: float | None = None
+        self._waiting_since: float | None = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._beat, daemon=True)
+        self._thread.start()
+
+    def _print(self, text: str) -> None:
+        print(text, flush=True, file=self.out or sys.stdout)
+
+    def __call__(self, e: dict) -> None:
+        with self._lock:
+            if self.t0 is None:
+                self.t0 = e["ts"]
+            self._waiting_since = time.monotonic() if e["type"] == "agent_started" else None
+            self._print(format_event(e, self.t0))
+
+    def _beat(self) -> None:
+        shown = 0
+        while not self._stop.wait(min(1.0, self.heartbeat_s / 4)):
+            with self._lock:
+                if self._waiting_since is None or self.t0 is None:
+                    shown = 0
+                    continue
+                waited = time.monotonic() - self._waiting_since
+                if waited >= (shown + 1) * self.heartbeat_s:
+                    shown = int(waited // self.heartbeat_s)
+                    elapsed = time.time() - self.t0
+                    self._print(f"[{elapsed:7.1f}s] …模型还在思考，已等待 {int(waited)} 秒（开启思考模式时通常要几分钟）")
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2)
 
 
 def cmd_models(args) -> int:
@@ -294,10 +329,12 @@ def cmd_run(args) -> int:
     model = settings.tier(cfg.tier)
     llm = make_llm(settings)
     store = Store(args.db) if args.db else Store()
+    printer = LivePrinter()
     try:
         res = run_baseline(task, cfg, llm=llm, model=model, runs_root=args.runs_dir, store=store,
-                           subscribers=(_live_printer(),), secrets=_secrets(settings), pricing=settings.pricing)
+                           subscribers=(printer,), secrets=_secrets(settings), pricing=settings.pricing)
     finally:
+        printer.close()
         store.close()
     print(f"\n运行目录：{res.run_dir}")
     print(f"交付物：{res.final_dir}（第 {res.best} 次尝试）" if res.best else "没有交付物")
@@ -346,8 +383,12 @@ def cmd_eval(args) -> int:
         raise UsageError(f"{out} 里已经有 results.csv，请换一个 --out 目录，避免覆盖之前的结果")
     print(f"评测：{len(tasks)} 个任务 × {len(configs)} 个配置 × {args.runs} 次 = "
           f"{len(tasks) * len(configs) * args.runs} 次运行")
-    res = evaluate(tasks, configs, args.runs, out, llm=llm, settings=settings,
-                   secrets=_secrets(settings), progress=print)
+    printer = LivePrinter()
+    try:
+        res = evaluate(tasks, configs, args.runs, out, llm=llm, settings=settings, subscribers=(printer,),
+                       secrets=_secrets(settings), progress=print)
+    finally:
+        printer.close()
     print(f"\n结果：{res.csv_path}\n汇总：{res.summary_path}")
     return EXIT_PASS
 
@@ -446,6 +487,10 @@ def main(argv: list[str] | None = None) -> int:
     except LLMError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return EXIT_FAIL
+    except KeyboardInterrupt as exc:
+        where = f"，已有的记录保留在 {exc.run_dir}" if isinstance(exc, RunInterrupted) else ""
+        print(f"\n已按 Ctrl+C 中断{where}。", file=sys.stderr)
+        return EXIT_INTERRUPTED
 
 
 if __name__ == "__main__":
