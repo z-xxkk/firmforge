@@ -17,10 +17,10 @@
 Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 个参考实现 PASS，7 个变异体全部在预期层失败；
 `tests/fixtures/` 的样例各在预期层失败；59 个单元测试全部通过、无跳过。
 
-| 任务 | 实测 flash / RAM / 最大栈帧（字节） | 预算 |
+| 任务 | 实测 flash / RAM / 调用链最坏栈（字节） | 预算 |
 |---|---|---|
 | ringbuf | 272 / 0 / 24 | 544 / 0 / 48 |
-| crc16_modbus | 128 / 0 / 16（查表写法 flash 632） | 1264 / 0 / 32 |
+| crc16_modbus | 128 / 0 / 28（查表写法 flash 632） | 1264 / 0 / 56 |
 | debounce | 72 / 0 / 0 | 144 / 0 / 32 |
 
 **阶段 2（接入 DeepSeek + 单 Agent 基线 + 评测脚本）：已完成，2026-10-24 用真实 API 验收。**
@@ -90,7 +90,8 @@ python3 -m unittest discover -s tests -v
 
 ## 已知局限
 
-- 栈检查只看单个函数的栈帧，没有分析调用链的最坏情况。
+- 调用链栈用量不计外部库函数（如 memcpy）的栈帧；有函数指针间接调用时无法完整计算（本层标为不完整）。
+- 循环上界只靠运行超时兜底，没有静态证明（约束审计 A8）。
 - 分时计价只区分工作日和周末，法定节假日按普通工作日处理。
 - 在 Linux 上用 `docker run -v` 运行时要加 `--user "$(id -u):$(id -g)"`，否则容器内生成的 `.ff_build/` 属于 root。
 - 国内网络下拉取基础镜像需要给 Docker 守护进程配置代理（`/etc/systemd/system/docker.service.d/http-proxy.conf`）。

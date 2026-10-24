@@ -5,10 +5,11 @@ difficulty = 1
 source = "Modbus over Serial Line 规范 V1.02 中的 CRC 生成方法"
 
 [budget]
-# 逐位参考实现实测 flash 128、栈 16；flash 按 const 查表写法实测 632 的 2 倍定，两种写法都能过（DECISIONS 第 20 条）
+# 逐位参考实现实测 flash 128、调用链最坏栈 28（append → crc16_modbus）；flash 按 const 查表写法实测 632 的 2 倍定，
+# 两种写法都能过（DECISIONS 第 20 条）；栈按调用链 × 2（DECISIONS 第 27 条）
 flash_bytes = 1264
 ram_bytes = 0
-stack_bytes = 32
+stack_bytes = 56
 
 [rules]
 extra_forbidden_symbols = []

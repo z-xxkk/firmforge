@@ -60,6 +60,20 @@ class FixtureLayerTest(_TmpCase):
         b = self.run_fixture("uses_malloc")
         self.assertNotEqual(a.signature, b.signature)
 
+    def test_stdio_and_system_calls_fail_l4(self):
+        wd = helpers.copy_fixture("good", self.tmp)
+        src = wd / "src" / "ringbuf.c"
+        src.write_text(src.read_text(encoding="utf-8").replace(
+            '#include "ringbuf.h"\n',
+            '#include <stdio.h>\n#include <stdlib.h>\n\n#include "ringbuf.h"\n\n'
+            'void ringbuf_debug(const ringbuf_t *rb, char *buf, size_t n)\n'
+            '{\n    (void)snprintf(buf, n, "%u", (unsigned)rb->count);\n    if (rb->count > 99u) {\n'
+            '        (void)system("reboot");\n    }\n}\n'), encoding="utf-8")
+        r = verify(wd, RINGBUF, layers=["host_compile", "cross_compile", "static_check"])
+        keys = r.layer("static_check").failing_keys()
+        self.assertIn("forbidden:snprintf", keys)
+        self.assertIn("forbidden:system", keys)
+
     def test_malloc_fails_l4(self):
         r = self.run_fixture("uses_malloc")
         self.assertEqual(r.failed_layer, "static_check")
@@ -79,6 +93,13 @@ class FixtureLayerTest(_TmpCase):
         self.assertEqual(r.failed_layer, "unit_tests")
         self.assertIn("timeout:test_ringbuf", r.layer("unit_tests").failing_keys())
         self.assertIsNone(r.layer("unit_tests").metrics["coverage_pct"])
+
+    @unittest.skipUnless(helpers.HAS_CROSS, "本机没有 arm-none-eabi 工具链")
+    def test_recursion_fails_l3(self):
+        r = self.run_fixture("recursion")
+        self.assertEqual(r.failed_layer, "resources")
+        keys = r.layer("resources").failing_keys()
+        self.assertIn("recursion:ringbuf_count_rec", keys)
 
     @unittest.skipUnless(helpers.HAS_CROSS, "本机没有 arm-none-eabi 工具链")
     def test_over_budget_fails_l3(self):
@@ -183,8 +204,8 @@ class ResourcesLayerTest(_TmpCase):
         tc = Toolchain(cross_size="size")
         ctx = BuildContext(wd, budget_task, tc, build)
         for src in ctx.sources():
-            subprocess.run(["gcc", "-Os", "-std=c11", "-fstack-usage", *ctx.include_flags(), "-c",
-                            str(src), "-o", f"{src.stem}.o"], cwd=cross, check=True)
+            subprocess.run(["gcc", "-Os", "-std=c11", "-fstack-usage", "-fcallgraph-info=su", *ctx.include_flags(),
+                            "-c", str(src), "-o", f"{src.stem}.o"], cwd=cross, check=True)
             ctx.cross_objs.append(cross / f"{src.stem}.o")
         ctx.cross_ok = True
         return ctx
@@ -205,6 +226,13 @@ class ResourcesLayerTest(_TmpCase):
         ctx.cross_objs.append(ctx.build_dir / "cross" / "vla.o")
         lr = L.resources(ctx)
         self.assertIn("budget:dynamic_stack:vla_sum", lr.failing_keys())
+
+    def test_chain_metrics_present(self):
+        lr = L.resources(self._ctx("good"))
+        self.assertIn("stack_chain", lr.metrics)
+        self.assertGreaterEqual(lr.metrics["stack_chain"], lr.metrics["max_stack"])
+        if not helpers.HAS_CROSS:          # 主机上没有交叉编译器，递归检查只能跳过
+            self.assertFalse(lr.complete)
 
     def test_skipped_without_cross_objects(self):
         ctx = BuildContext(self.tmp, RINGBUF, Toolchain(), self.tmp / ".ff_build")

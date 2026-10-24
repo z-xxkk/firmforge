@@ -1,0 +1,9 @@
+graph: { title: "t.c"
+node: { title: "mid" label: "mid\nt.c:4:5\n32 bytes (static)" }
+node: { title: "top" label: "top\nt.c:5:5\n0 bytes (static)" }
+edge: { sourcename: "top" targetname: "mid" label: "t.c:5:61" }
+node: { title: "rec" label: "rec\nt.c:6:5\n0 bytes (static)" }
+node: { title: "indirect" label: "indirect\nt.c:8:5\n0 bytes (static)" }
+node: { title: "__indirect_call" label: "Indirect Call Placeholder" shape : ellipse }
+edge: { sourcename: "indirect" targetname: "__indirect_call" label: "t.c:8:30" }
+}

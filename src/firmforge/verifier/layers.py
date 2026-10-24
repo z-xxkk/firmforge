@@ -29,12 +29,15 @@ TITLES = {
 }
 
 HOST_FLAGS = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic"]
-CROSS_FLAGS = ["-mcpu=cortex-m3", "-mthumb", "-Os", "-ffunction-sections", "-fdata-sections",
-               "-std=c11", "-Wall", "-Wextra", "-Werror", "-fstack-usage"]
+CROSS_ARCH = ["-mcpu=cortex-m3", "-mthumb"]
+CROSS_FLAGS = CROSS_ARCH + ["-Os", "-ffunction-sections", "-fdata-sections",
+                            "-std=c11", "-Wall", "-Wextra", "-Werror", "-fstack-usage", "-fcallgraph-info=su"]
+# 递归检查用不优化的编译：-Os 会把尾递归改成循环、把小函数内联，递归就看不出来了（DECISIONS 第 27 条）
+RECURSION_FLAGS = CROSS_ARCH + ["-O0", "-std=c11", "-fcallgraph-info=su"]
 TEST_FLAGS = ["-std=c11", "-g", "-O0", "-fno-omit-frame-pointer"]
 SANITIZE_FLAGS = ["-fsanitize=address,undefined", "-fno-sanitize-recover=undefined"]
 COVERAGE_FLAGS = ["--coverage"]
-STACK_NOTE = "栈检查只看单个函数的栈帧，没有分析调用链的最坏情况"
+STACK_NOTE = "栈用量按调用链最坏情况计算（-Os 编译结果）；外部库函数（如 memcpy）的栈帧未计入"
 EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 
 
@@ -190,6 +193,121 @@ def parse_su(text: str) -> list[tuple[str, int, str]]:
     return rows
 
 
+CG_NODE = re.compile(r'node:\s*\{\s*title:\s*"(?P<title>[^"]*)"\s*label:\s*"(?P<label>[^"]*)"(?P<rest>[^}]*)\}')
+CG_EDGE = re.compile(r'edge:\s*\{\s*sourcename:\s*"(?P<src>[^"]*)"\s*targetname:\s*"(?P<dst>[^"]*)"')
+CG_STACK = re.compile(r"(\d+) bytes \(([\w,]+)\)")
+INDIRECT_CALL = "__indirect_call"
+
+
+@dataclass
+class CallNode:
+    title: str
+    name: str
+    stack: int | None          # None 表示外部函数，栈帧未知
+    qualifier: str = ""
+
+    @property
+    def external(self) -> bool:
+        return self.stack is None
+
+
+def parse_callgraph(texts: list[str]) -> tuple[dict[str, CallNode], set[tuple[str, str]]]:
+    """解析 GCC -fcallgraph-info 生成的 .ci 文件（VCG 格式），多个文件合并成一张图。"""
+    nodes: dict[str, CallNode] = {}
+    edges: set[tuple[str, str]] = set()
+    for text in texts:
+        for m in CG_NODE.finditer(text):
+            parts = m["label"].split("\\n")
+            sm = CG_STACK.search(m["label"])
+            node = CallNode(m["title"], parts[0], int(sm[1]) if sm else None, sm[2] if sm else "")
+            old = nodes.get(node.title)
+            if old is None or (old.external and not node.external):   # 有定义的优先于外部声明
+                nodes[node.title] = node
+        for m in CG_EDGE.finditer(text):
+            edges.add((m["src"], m["dst"]))
+    return nodes, edges
+
+
+def find_cycles(nodes: dict[str, CallNode], edges: set[tuple[str, str]]) -> list[list[str]]:
+    """找出调用图里的环（直接或间接递归），返回每个环涉及的函数名。Tarjan 强连通分量。"""
+    adj: dict[str, list[str]] = {}
+    for a, b in edges:
+        if a in nodes and b in nodes and not nodes[a].external and not nodes[b].external:
+            adj.setdefault(a, []).append(b)
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    cycles: list[list[str]] = []
+    counter = [0]
+
+    def visit(v: str) -> None:
+        index[v] = low[v] = counter[0]
+        counter[0] += 1
+        stack.append(v)
+        on_stack.add(v)
+        for w in adj.get(v, []):
+            if w not in index:
+                visit(w)
+                low[v] = min(low[v], low[w])
+            elif w in on_stack:
+                low[v] = min(low[v], index[w])
+        if low[v] == index[v]:
+            comp = []
+            while True:
+                w = stack.pop()
+                on_stack.discard(w)
+                comp.append(w)
+                if w == v:
+                    break
+            if len(comp) > 1 or (v, v) in edges:
+                cycles.append(sorted(nodes[t].name for t in comp))
+
+    for v in sorted(t for t, n in nodes.items() if not n.external):
+        if v not in index:
+            visit(v)
+    return cycles
+
+
+def worst_stack_chain(nodes: dict[str, CallNode], edges: set[tuple[str, str]]) -> tuple[int, list[str], set[str], bool]:
+    """调用链最坏栈用量：(字节数, 路径上的函数名, 遇到的外部函数, 是否有间接调用)。图里有环时环内只算一次。"""
+    adj: dict[str, list[str]] = {}
+    for a, b in edges:
+        adj.setdefault(a, []).append(b)
+    memo: dict[str, tuple[int, list[str]]] = {}
+    externals: set[str] = set()
+    indirect = False
+
+    def depth(v: str, visiting: frozenset) -> tuple[int, list[str]]:
+        nonlocal indirect
+        if v in memo:
+            return memo[v]
+        node = nodes.get(v)
+        if v == INDIRECT_CALL:
+            indirect = True
+            return 0, []
+        if node is None or node.external:
+            externals.add(node.name if node else v)
+            return 0, []
+        best, best_path = 0, []
+        for w in sorted(adj.get(v, [])):
+            if w in visiting:          # 环：不再展开，递归另由 find_cycles 判失败
+                continue
+            d, path = depth(w, visiting | {v})
+            if d > best:
+                best, best_path = d, path
+        result = (node.stack + best, [node.name] + best_path)
+        memo[v] = result
+        return result
+
+    worst, worst_path = 0, []
+    for t in sorted(t for t, n in nodes.items() if not n.external):
+        d, path = depth(t, frozenset())
+        if d > worst or not worst_path:
+            worst, worst_path = d, path
+    return worst, worst_path, externals, indirect
+
+
 def parse_nm_undefined(output: str) -> list[str]:
     syms = []
     for line in output.splitlines():
@@ -335,17 +453,39 @@ def resources(ctx: BuildContext) -> LayerResult:
     flash = sum(t + d for _f, t, d, _b in rows)
     ram = sum(d + b for _f, _t, d, b in rows)
 
+    cross_dir = ctx.build_dir / "cross"
     stack_rows = []
-    for su in sorted((ctx.build_dir / "cross").glob("*.su")):
+    for su in sorted(cross_dir.glob("*.su")):
         stack_rows += parse_su(su.read_text(encoding="utf-8", errors="replace"))
     max_func, max_stack = None, 0
     for func, nbytes, _q in stack_rows:
         if nbytes > max_stack:
             max_func, max_stack = func, nbytes
     lr.metrics.update({"flash": flash, "ram": ram, "max_stack": max_stack, "max_stack_func": max_func})
-    lr.notes.append(STACK_NOTE)
     if not stack_rows:
         lr.notes.append("没有找到 .su 栈使用文件")
+
+    # 调用链最坏栈用量（-Os 的调用图）
+    ci_texts = [p.read_text(encoding="utf-8", errors="replace") for p in sorted(cross_dir.glob("*.ci"))]
+    chain = max_stack
+    if ci_texts:
+        nodes, edges = parse_callgraph(ci_texts)
+        chain, path, externals, indirect = worst_stack_chain(nodes, edges)
+        chain = max(chain, max_stack)
+        lr.metrics["stack_chain"] = chain
+        lr.metrics["stack_chain_path"] = " → ".join(path)
+        lr.notes.append(STACK_NOTE)
+        if externals:
+            lr.notes.append(f"调用了外部函数：{', '.join(sorted(externals))}（栈帧未计入）")
+        if indirect:
+            lr.complete = False
+            lr.notes.append("存在间接调用（函数指针），调用链栈用量无法完整计算")
+    else:
+        lr.complete = False
+        lr.notes.append("没有找到调用图（.ci）文件，只检查了单个函数的栈帧")
+
+    # 递归检查（-O0 的调用图）
+    _recursion_check(ctx, lr)
 
     b = ctx.task.budget
     lr.metrics["budget"] = {"flash": b.flash_bytes, "ram": b.ram_bytes, "stack": b.stack_bytes}
@@ -353,8 +493,9 @@ def resources(ctx: BuildContext) -> LayerResult:
         lr.diagnostics.append(Diagnostic("error", f"Flash 用量 {flash} 字节，超出预算 {b.flash_bytes}", "budget:flash"))
     if b.ram_bytes is not None and ram > b.ram_bytes:
         lr.diagnostics.append(Diagnostic("error", f"静态 RAM 用量 {ram} 字节，超出预算 {b.ram_bytes}", "budget:ram"))
-    if b.stack_bytes is not None and max_stack > b.stack_bytes:
-        lr.diagnostics.append(Diagnostic("error", f"函数 {max_func} 栈帧 {max_stack} 字节，超出预算 {b.stack_bytes}",
+    if b.stack_bytes is not None and chain > b.stack_bytes:
+        where = lr.metrics.get("stack_chain_path") or max_func
+        lr.diagnostics.append(Diagnostic("error", f"调用链最坏栈用量 {chain} 字节（{where}），超出预算 {b.stack_bytes}",
                                          "budget:stack"))
     for func, _n, qual in stack_rows:
         if "dynamic" in qual:
@@ -362,6 +503,37 @@ def resources(ctx: BuildContext) -> LayerResult:
                                              f"budget:dynamic_stack:{func}"))
     lr.status = FAIL if lr.diagnostics else PASS
     return lr
+
+
+def _recursion_check(ctx: BuildContext, lr: LayerResult) -> None:
+    cc = ctx.toolchain.resolve("cross_cc")
+    if cc is None:
+        lr.complete = False
+        lr.notes.append(_missing("cross_cc", ctx.toolchain).replace("本项未运行", "未检查递归"))
+        return
+    out_dir = ctx.build_dir / "callgraph_o0"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    texts = []
+    for src in ctx.sources():
+        proc = run_proc([cc, *RECURSION_FLAGS, *ctx.include_flags(), "-c", str(src.resolve()),
+                         "-o", f"{src.stem}.o"], cwd=out_dir)
+        if proc.returncode != 0:
+            _add_log(lr, f"递归检查编译 {src.name}", proc.output)
+            lr.complete = False
+            lr.notes.append(f"递归检查编译 {src.name} 失败，未检查递归")
+            return
+        ci = out_dir / f"{src.stem}.ci"
+        if ci.is_file():
+            texts.append(ci.read_text(encoding="utf-8", errors="replace"))
+    if not texts:
+        lr.complete = False
+        lr.notes.append("没有生成 -O0 调用图，未检查递归")
+        return
+    nodes, edges = parse_callgraph(texts)
+    for cycle in find_cycles(nodes, edges):
+        names = " ↔ ".join(cycle) if len(cycle) > 1 else cycle[0]
+        lr.diagnostics.append(Diagnostic("error", f"存在递归调用：{names}（MISRA C:2012 Rule 17.2 禁止）",
+                                         f"recursion:{','.join(cycle)}"))
 
 
 # ---------------------------------------------------------------- L4 静态检查

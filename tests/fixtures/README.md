@@ -11,3 +11,4 @@
 | test_failure | unit_tests | `ringbuf_free` 少算一个字节，测试失败 |
 | infinite_loop | unit_tests | `ringbuf_read` 数据不足时死循环，超时 |
 | over_budget | resources | 多了一张 2 KB 的常量表，超出 flash 预算（需要 arm-none-eabi 工具链） |
+| recursion | resources | `ringbuf_count` 用递归实现，违反 MISRA C:2012 Rule 17.2（需要 arm-none-eabi 工具链） |

@@ -1,0 +1,19 @@
+graph: { title: "u.c"
+node: { title: "u.c:helper" label: "helper\nu.c:4:12\n16 bytes (static)" }
+node: { title: "memcpy" label: "memcpy\n/usr/include/newlib/string.h:31:9" shape : ellipse }
+edge: { sourcename: "u.c:helper" targetname: "memcpy" label: "u.c:4:43" }
+node: { title: "ext_hook" label: "ext_hook\nu.c:3:13" shape : ellipse }
+edge: { sourcename: "u.c:helper" targetname: "ext_hook" label: "u.c:4:64" }
+node: { title: "api" label: "api\nu.c:5:5\n56 bytes (static)" }
+edge: { sourcename: "api" targetname: "u.c:helper" label: "u.c:5:40" }
+edge: { sourcename: "api" targetname: "u.c:helper" label: "u.c:5:63" }
+node: { title: "rec" label: "rec\nu.c:6:5\n16 bytes (static)" }
+edge: { sourcename: "rec" targetname: "rec" label: "u.c:6:38" }
+node: { title: "u.c:a" label: "a\nu.c:8:12\n16 bytes (static)" }
+edge: { sourcename: "u.c:a" targetname: "u.c:b" label: "u.c:8:34" }
+node: { title: "u.c:b" label: "b\nu.c:9:12\n16 bytes (static)" }
+edge: { sourcename: "u.c:b" targetname: "u.c:a" label: "u.c:9:34" }
+node: { title: "mutual" label: "mutual\nu.c:10:5\n16 bytes (static)" }
+edge: { sourcename: "mutual" targetname: "u.c:a" label: "u.c:10:28" }
+node: { title: "vla" label: "vla\nu.c:11:6\n40 bytes (dynamic)" }
+}

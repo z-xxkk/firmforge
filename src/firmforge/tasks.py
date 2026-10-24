@@ -7,10 +7,27 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_FORBIDDEN_SYMBOLS = (
-    "malloc", "calloc", "realloc", "free", "aligned_alloc",
-    "printf", "sprintf", "fprintf", "puts", "putchar",
+# 默认禁用符号（DECISIONS 第 26 条）
+_DYNAMIC_MEMORY = ("malloc", "calloc", "realloc", "free", "aligned_alloc")      # MISRA C:2012 Rule 21.3
+_STDIO = (                                                                      # Rule 21.6：<stdio.h> 全部 I/O
+    "printf", "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf", "vsprintf", "vsnprintf",
+    "scanf", "fscanf", "sscanf", "vscanf", "vfscanf", "vsscanf",
+    "__isoc99_scanf", "__isoc99_fscanf", "__isoc99_sscanf",                     # glibc 对 scanf 系列的改名
+    "__isoc99_vscanf", "__isoc99_vfscanf", "__isoc99_vsscanf",
+    "fgetc", "fgets", "fputc", "fputs", "getc", "getchar", "gets", "putc", "putchar", "puts", "ungetc",
+    "fread", "fwrite", "fgetpos", "fseek", "fsetpos", "ftell", "rewind",
+    "clearerr", "feof", "ferror", "perror",
+    "fopen", "freopen", "fclose", "fflush", "setbuf", "setvbuf", "remove", "rename", "tmpfile", "tmpnam",
 )
+_TERMINATION = ("abort", "exit", "_Exit", "quick_exit", "getenv", "system")    # Rule 21.8
+_NONLOCAL_JUMP = ("setjmp", "longjmp")                                          # Rule 21.4
+_SIGNAL = ("signal", "raise")                                                   # Rule 21.5
+_PROCESS_NETWORK = (                                                            # 最小权限（OWASP LLM06）
+    "fork", "vfork", "execl", "execle", "execlp", "execv", "execve", "execvp", "popen", "pclose", "kill",
+    "socket", "connect", "bind", "listen", "accept", "send", "recv", "sendto", "recvfrom",
+)
+DEFAULT_FORBIDDEN_SYMBOLS = (_DYNAMIC_MEMORY + _STDIO + _TERMINATION + _NONLOCAL_JUMP + _SIGNAL
+                             + _PROCESS_NETWORK)
 
 CATEGORIES = ("data_structure", "protocol", "state_machine", "driver")
 MUTANT_LAYERS = ("host_compile", "cross_compile", "resources", "static_check", "hidden_tests")

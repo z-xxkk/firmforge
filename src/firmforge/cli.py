@@ -162,7 +162,9 @@ def print_selfcheck(res: SelfCheckResult) -> None:
     fmt = lambda v: "-" if v is None else str(v)
     print(f"  实测资源：flash={fmt(m['flash'])}（预算 {fmt(b.flash_bytes)}），"
           f"ram={fmt(m['ram'])}（预算 {fmt(b.ram_bytes)}），"
-          f"最大栈帧={fmt(m['stack'])}（预算 {fmt(b.stack_bytes)}）")
+          f"调用链最坏栈={fmt(m['stack'])}（预算 {fmt(b.stack_bytes)}）")
+    if m.get("stack_path"):
+        print(f"    * 最坏调用链：{m['stack_path']}")
     if m["flash"] is None:
         print("    * 资源层未运行（需要 arm-none-eabi 工具链），无法实测")
     width = max([len(mr.mutant.file) for mr in res.mutants] + [10]) + 2

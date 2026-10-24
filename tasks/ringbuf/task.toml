@@ -5,7 +5,7 @@ difficulty = 1
 source = "嵌入式常见模块，参考 UART 接收缓冲区的典型写法"
 
 [budget]
-# 参考实现实测（arm-none-eabi-gcc -Os）：flash 272、ram 0、栈 24；按 2 倍定（DECISIONS 第 19、20 条）
+# 参考实现实测（arm-none-eabi-gcc -Os）：flash 272、ram 0、调用链最坏栈 24；按 2 倍定（DECISIONS 第 19、20、27 条）
 flash_bytes = 544
 ram_bytes = 0
 stack_bytes = 48

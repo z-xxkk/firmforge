@@ -2,7 +2,7 @@
 
 import unittest
 
-import helpers  # noqa: F401
+import helpers
 from firmforge.verifier import layers as L
 
 
@@ -98,6 +98,44 @@ class BinutilsParserTest(unittest.TestCase):
                "File '/w/src/ringbuf.c'\nLines executed:87.50% of 16\nCreating 'ringbuf.c.gcov'\n")
         self.assertEqual(L.parse_gcov(out, "ringbuf.c"), (87.5, 16))
         self.assertIsNone(L.parse_gcov(out, "other.c"))
+
+
+class CallgraphParserTest(unittest.TestCase):
+    """样本来自 arm-none-eabi-gcc 13.2 -fcallgraph-info=su 的真实输出（tests/data/）。"""
+
+    def load(self, name):
+        return (helpers.ROOT / "tests" / "data" / name).read_text(encoding="utf-8")
+
+    def test_recursion_found_at_O0(self):
+        nodes, edges = L.parse_callgraph([self.load("callgraph_O0.ci")])
+        self.assertEqual(sorted(L.find_cycles(nodes, edges)), [["a", "b"], ["rec"]])
+        self.assertTrue(nodes["memcpy"].external)
+        self.assertEqual(nodes["api"].stack, 56)
+        self.assertEqual(nodes["vla"].qualifier, "dynamic")
+
+    def test_Os_hides_recursion(self):
+        # -Os 把尾递归优化掉了：这正是递归检查要另用 -O0 的原因
+        nodes, edges = L.parse_callgraph([self.load("callgraph_Os.ci")])
+        self.assertEqual(L.find_cycles(nodes, edges), [])
+
+    def test_worst_chain(self):
+        nodes, edges = L.parse_callgraph([self.load("callgraph_O0.ci")])
+        total, path, externals, indirect = L.worst_stack_chain(nodes, edges)
+        self.assertEqual((total, path), (72, ["api", "helper"]))   # 56 + 16
+        self.assertEqual(externals, {"memcpy", "ext_hook"})
+        self.assertFalse(indirect)
+
+    def test_indirect_call_flagged(self):
+        nodes, edges = L.parse_callgraph([self.load("callgraph_indirect.ci")])
+        total, _path, _ext, indirect = L.worst_stack_chain(nodes, edges)
+        self.assertTrue(indirect)
+        self.assertEqual(total, 32)                                    # top(0) → mid(32)
+
+    def test_merge_prefers_definition(self):
+        a = 'node: { title: "f" label: "f\\nx.c:1:1" shape : ellipse }\n'
+        b = 'node: { title: "f" label: "f\\ny.c:1:1\\n24 bytes (static)" }\n'
+        nodes, _ = L.parse_callgraph([a, b])
+        self.assertEqual(nodes["f"].stack, 24)
 
 
 if __name__ == "__main__":

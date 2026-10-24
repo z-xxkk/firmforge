@@ -5,7 +5,7 @@ difficulty = 1
 source = "嵌入式常见模块：按固定 tick 采样的计数式按键消抖"
 
 [budget]
-# 参考实现实测：flash 72、ram 0、栈 0；flash 按 2 倍定，栈额度取下限 32（DECISIONS 第 20 条）
+# 参考实现实测：flash 72、ram 0、调用链最坏栈 0；flash 按 2 倍定，栈额度取下限 32（DECISIONS 第 20、27 条）
 flash_bytes = 144
 ram_bytes = 0
 stack_bytes = 32

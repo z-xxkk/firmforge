@@ -58,7 +58,12 @@ class TaskLoadTest(unittest.TestCase):
                 load_task(d)
 
     def test_default_forbidden_list(self):
-        self.assertEqual(len(DEFAULT_FORBIDDEN_SYMBOLS), 10)
+        for sym in ("malloc", "free", "printf", "snprintf", "sscanf", "fopen", "exit", "system",
+                    "longjmp", "signal", "fork", "socket"):
+            self.assertIn(sym, DEFAULT_FORBIDDEN_SYMBOLS)
+        self.assertEqual(len(DEFAULT_FORBIDDEN_SYMBOLS), len(set(DEFAULT_FORBIDDEN_SYMBOLS)))
+        for sym in ("memcpy", "memset", "strlen"):          # 普通内存 / 字符串函数允许使用
+            self.assertNotIn(sym, DEFAULT_FORBIDDEN_SYMBOLS)
 
 
 class ToolchainTest(unittest.TestCase):

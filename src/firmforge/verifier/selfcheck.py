@@ -51,7 +51,8 @@ class SelfCheckResult:
         if lr is None or lr.status == SKIPPED:
             return {"flash": None, "ram": None, "stack": None}
         m = lr.metrics
-        return {"flash": m.get("flash"), "ram": m.get("ram"), "stack": m.get("max_stack")}
+        return {"flash": m.get("flash"), "ram": m.get("ram"), "stack": m.get("stack_chain", m.get("max_stack")),
+                "stack_path": m.get("stack_chain_path")}
 
     @property
     def verdict(self) -> str:

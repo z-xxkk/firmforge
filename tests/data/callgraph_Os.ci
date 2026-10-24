@@ -1,0 +1,13 @@
+graph: { title: "u.c"
+node: { title: "u.c:b" label: "b\nu.c:9:12\n0 bytes (static)" }
+node: { title: "u.c:a" label: "a\nu.c:8:12\n0 bytes (static)" }
+edge: { sourcename: "u.c:a" targetname: "u.c:b" label: "u.c:8:34" }
+node: { title: "api" label: "api\nu.c:5:5\n8 bytes (static)" }
+node: { title: "ext_hook" label: "ext_hook\nu.c:3:13" shape : ellipse }
+edge: { sourcename: "api" targetname: "ext_hook" label: "u.c:4:64" }
+edge: { sourcename: "api" targetname: "ext_hook" label: "u.c:4:64" }
+node: { title: "rec" label: "rec\nu.c:6:5\n0 bytes (static)" }
+node: { title: "mutual" label: "mutual\nu.c:10:5\n0 bytes (static)" }
+edge: { sourcename: "mutual" targetname: "u.c:a" label: "u.c:9:34" }
+node: { title: "vla" label: "vla\nu.c:11:6\n8 bytes (dynamic)" }
+}
