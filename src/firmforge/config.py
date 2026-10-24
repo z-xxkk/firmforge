@@ -146,13 +146,56 @@ class LLMSettings:
 
 
 @dataclass(frozen=True)
+class PeakSchedule:
+    """高峰时段：工作日的若干时间窗（本地时间 = UTC + utc_offset_hours），周末全天为空闲。"""
+    utc_offset_hours: float = 8
+    windows: tuple[tuple[int, int], ...] = ()      # (起始分钟, 结束分钟)，左闭右开
+
+    @classmethod
+    def parse(cls, utc_offset_hours: float, peak_hours: list[str]) -> "PeakSchedule":
+        windows = []
+        for item in peak_hours:
+            try:
+                start, end = (x.strip() for x in item.split("-"))
+                sh, sm = (int(v) for v in start.split(":"))
+                eh, em = (int(v) for v in end.split(":"))
+            except ValueError as exc:
+                raise SettingsError(f"peak_hours 格式应为 \"HH:MM-HH:MM\"，收到 {item!r}") from exc
+            windows.append((sh * 60 + sm, eh * 60 + em))
+        return cls(float(utc_offset_hours), tuple(windows))
+
+    def is_peak(self, ts: float) -> bool:
+        import datetime as _dt
+
+        tz = _dt.timezone(_dt.timedelta(hours=self.utc_offset_hours))
+        t = _dt.datetime.fromtimestamp(ts, tz)
+        if t.weekday() >= 5:
+            return False
+        minute = t.hour * 60 + t.minute
+        return any(start <= minute < end for start, end in self.windows)
+
+
+@dataclass(frozen=True)
 class ModelTier:
     name: str = ""
-    price_in_per_mtok: float = 0.0
+    price_in_per_mtok: float = 0.0          # 高峰价（没有分时价时就是唯一价格）
     price_out_per_mtok: float = 0.0
+    price_in_offpeak_per_mtok: float | None = None
+    price_out_offpeak_per_mtok: float | None = None
+    thinking: bool | None = None            # None 表示不传，沿用服务端默认
+    max_tokens: int | None = None
 
-    def cost(self, prompt_tokens: int, completion_tokens: int) -> float:
-        return (prompt_tokens * self.price_in_per_mtok + completion_tokens * self.price_out_per_mtok) / 1e6
+    def cost(self, prompt_tokens: int, completion_tokens: int, *, ts: float | None = None,
+             schedule: PeakSchedule | None = None) -> float:
+        p_in, p_out = self.price_in_per_mtok, self.price_out_per_mtok
+        offpeak = (self.price_in_offpeak_per_mtok is not None and self.price_out_offpeak_per_mtok is not None)
+        if offpeak and ts is not None and schedule is not None and not schedule.is_peak(ts):
+            p_in, p_out = self.price_in_offpeak_per_mtok, self.price_out_offpeak_per_mtok
+        return (prompt_tokens * p_in + completion_tokens * p_out) / 1e6
+
+    def extra_body(self) -> dict:
+        """随请求发送的模型专属参数。"""
+        return {} if self.thinking is None else {"thinking": {"type": "enabled" if self.thinking else "disabled"}}
 
 
 @dataclass(frozen=True)
@@ -162,6 +205,7 @@ class Settings:
     concurrency: dict = field(default_factory=dict)
     loop: dict = field(default_factory=dict)
     scheduler: dict = field(default_factory=dict)
+    pricing: PeakSchedule | None = None
     source: Path | None = None
 
     def tier(self, name: str) -> ModelTier:
@@ -193,10 +237,22 @@ def load_settings(path: Path | str | None = None) -> Settings:
         except tomllib.TOMLDecodeError as exc:
             raise SettingsError(f"{path} 解析失败：{exc}") from exc
     llm = data.get("llm", {})
+    def opt_float(m: dict, key: str) -> float | None:
+        return None if m.get(key) is None else float(m[key])
+
     models = {}
     for name, m in data.get("models", {}).items():
-        models[name] = ModelTier(str(m.get("name", "")), float(m.get("price_in_per_mtok", 0.0)),
-                                 float(m.get("price_out_per_mtok", 0.0)))
+        thinking = m.get("thinking")
+        if thinking is not None and not isinstance(thinking, bool):
+            raise SettingsError(f"[models.{name}] thinking 必须是 true 或 false")
+        models[name] = ModelTier(
+            name=str(m.get("name", "")), price_in_per_mtok=float(m.get("price_in_per_mtok", 0.0)),
+            price_out_per_mtok=float(m.get("price_out_per_mtok", 0.0)),
+            price_in_offpeak_per_mtok=opt_float(m, "price_in_offpeak_per_mtok"),
+            price_out_offpeak_per_mtok=opt_float(m, "price_out_offpeak_per_mtok"),
+            thinking=thinking, max_tokens=int(m["max_tokens"]) if m.get("max_tokens") else None)
+    pr = data.get("pricing")
+    pricing = PeakSchedule.parse(pr.get("utc_offset_hours", 8), pr.get("peak_hours", [])) if pr else None
     return Settings(
         llm=LLMSettings(llm.get("api_key_env", "DEEPSEEK_API_KEY"), llm.get("base_url_env", "DEEPSEEK_BASE_URL"),
                         float(llm.get("timeout_s", 120)), int(llm.get("max_retries", 3))),
@@ -204,5 +260,6 @@ def load_settings(path: Path | str | None = None) -> Settings:
         concurrency=dict(data.get("concurrency", {})),
         loop=dict(data.get("loop", {})),
         scheduler=dict(data.get("scheduler", {})),
+        pricing=pricing,
         source=path,
     )

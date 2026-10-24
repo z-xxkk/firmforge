@@ -20,9 +20,11 @@ class FakeLLM:
         return {"url": "fake://chat/completions", "headers": {"Authorization": "***"}}
 
     def complete(self, messages: list[dict], *, model: str, temperature: float = 0.2,
-                 max_tokens: int = 4096, tools: list[dict] | None = None) -> LLMResponse:
+                 max_tokens: int = 4096, tools: list[dict] | None = None,
+                 extra_body: dict | None = None) -> LLMResponse:
         snapshot = [dict(m) for m in messages]
-        self.calls.append({"messages": snapshot, "model": model, "temperature": temperature})
+        self.calls.append({"messages": snapshot, "model": model, "temperature": temperature,
+                           "max_tokens": max_tokens, "extra_body": extra_body})
         if callable(self._script):
             reply = self._script(snapshot)
         else:

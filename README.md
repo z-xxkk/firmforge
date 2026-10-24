@@ -32,7 +32,8 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 - 单 Agent 基线：B1 一次生成不修正；B2 判定报错直接回喂、最多 3 轮修正；同一个 Agent 同时写实现和测试。
 - 评测：`eval` 输出 `results.csv`、`summary.md`；最终是否通过只看 L1–L4 + 隐藏测试，在临时目录判定。
 - 命令：`models`、`run`、`eval`（含 `--estimate`）、`replay`。
-- 单元测试 106 个（本机 1 个因缺交叉工具链跳过；Docker 中全部通过），其中包括"发给 LLM 的消息和运行目录里都不含隐藏测试内容"。
+- 模型：fast = deepseek-flash，strong = deepseek-v4-pro，均开启思考模式；成本按北京时间分高峰 / 空闲计价（DECISIONS 第 23、24 条）。
+- 单元测试 110 个（本机 1 个因缺交叉工具链跳过；Docker 中全部通过），其中包括"发给 LLM 的消息和运行目录里都不含隐藏测试内容"。
 
 ### 阶段 2 验收命令
 
@@ -79,6 +80,7 @@ python3 -m unittest discover -s tests -v
 ## 已知局限
 
 - 栈检查只看单个函数的栈帧，没有分析调用链的最坏情况。
+- 分时计价只区分工作日和周末，法定节假日按普通工作日处理。
 - 在 Linux 上用 `docker run -v` 运行时要加 `--user "$(id -u):$(id -g)"`，否则容器内生成的 `.ff_build/` 属于 root。
 - 国内网络下拉取基础镜像需要给 Docker 守护进程配置代理（`/etc/systemd/system/docker.service.d/http-proxy.conf`）。
 

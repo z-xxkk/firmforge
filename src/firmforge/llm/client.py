@@ -26,6 +26,8 @@ class LLMResponse:
     latency_s: float
     tool_calls: list | None = None
     raw: dict = field(default_factory=dict)
+    reasoning: str = ""          # 思考模式下的思维链（reasoning_content），只记日志，不回传给模型
+    reasoning_tokens: int = 0
 
 
 class LLMError(RuntimeError):
@@ -38,7 +40,8 @@ class LLMError(RuntimeError):
 
 class LLMClient(Protocol):
     def complete(self, messages: list[dict], *, model: str, temperature: float = 0.2,
-                 max_tokens: int = 4096, tools: list[dict] | None = None) -> LLMResponse: ...
+                 max_tokens: int = 4096, tools: list[dict] | None = None,
+                 extra_body: dict | None = None) -> LLMResponse: ...
 
     def request_info(self) -> dict: ...
 
@@ -124,10 +127,14 @@ class OpenAICompatClient:
         raise LLMError(f"LLM 请求失败（已重试 {self.max_retries} 次）：{last_error}", status)
 
     def complete(self, messages: list[dict], *, model: str, temperature: float = 0.2,
-                 max_tokens: int = 4096, tools: list[dict] | None = None) -> LLMResponse:
+                 max_tokens: int = 4096, tools: list[dict] | None = None,
+                 extra_body: dict | None = None) -> LLMResponse:
+        """extra_body：模型专属参数，原样并入请求体，例如 {"thinking": {"type": "enabled"}}。"""
         body = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
         if tools:
             body["tools"] = tools
+        if extra_body:
+            body.update(extra_body)
         t0 = time.perf_counter()
         data = self._request("POST", "/chat/completions", body)
         latency = time.perf_counter() - t0
@@ -136,10 +143,13 @@ class OpenAICompatClient:
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError(f"LLM 回复格式不对：{str(data)[:200]}") from exc
         usage = data.get("usage") or {}
+        details = usage.get("completion_tokens_details") or {}
         return LLMResponse(text=msg.get("content") or "", model=data.get("model", model),
                            prompt_tokens=int(usage.get("prompt_tokens", 0)),
                            completion_tokens=int(usage.get("completion_tokens", 0)),
-                           latency_s=latency, tool_calls=msg.get("tool_calls"), raw=data)
+                           latency_s=latency, tool_calls=msg.get("tool_calls"), raw=data,
+                           reasoning=msg.get("reasoning_content") or "",
+                           reasoning_tokens=int(details.get("reasoning_tokens", 0) or 0))
 
     def list_models(self) -> list[str]:
         data = self._request("GET", "/models", None)

@@ -296,7 +296,7 @@ def cmd_run(args) -> int:
     store = Store(args.db) if args.db else Store()
     try:
         res = run_baseline(task, cfg, llm=llm, model=model, runs_root=args.runs_dir, store=store,
-                           subscribers=(_live_printer(),), secrets=_secrets(settings))
+                           subscribers=(_live_printer(),), secrets=_secrets(settings), pricing=settings.pricing)
     finally:
         store.close()
     print(f"\n运行目录：{res.run_dir}")

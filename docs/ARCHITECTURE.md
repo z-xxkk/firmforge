@@ -197,15 +197,27 @@ base_url_env = "DEEPSEEK_BASE_URL"
 timeout_s = 120
 max_retries = 3
 
+[pricing]                         # 高峰 / 空闲分时计价（DECISIONS 第 24 条）
+utc_offset_hours = 8              # 按北京时间判断
+peak_hours = ["09:00-12:00", "14:00-18:00"]   # 工作日的高峰时段；其余时段和周末为空闲
+
 [models.fast]                     # 型号以 `firmforge models` 列出的为准
 name = ""
-price_in_per_mtok = 0.0           # 元 / 百万 token，用于成本统计
+thinking = true                   # 思考模式（DECISIONS 第 23 条）
+max_tokens = 65536                # 单次输出上限（含思考内容时要留足）
+price_in_per_mtok = 0.0           # 高峰价，元 / 百万 token（输入按缓存未命中）
 price_out_per_mtok = 0.0
+price_in_offpeak_per_mtok = 0.0   # 空闲价
+price_out_offpeak_per_mtok = 0.0
 
 [models.strong]
 name = ""
+thinking = true
+max_tokens = 65536
 price_in_per_mtok = 0.0
 price_out_per_mtok = 0.0
+price_in_offpeak_per_mtok = 0.0
+price_out_offpeak_per_mtok = 0.0
 
 [concurrency]
 llm = 4                           # 同时进行的 LLM 调用数
@@ -407,7 +419,7 @@ class LLMClient(Protocol):
   - API key 从环境变量读，缺失时给出明确中文报错。
 - **`FakeLLM`**：按预设脚本返回（可以是列表，也可以是根据消息内容决定回复的函数），供单元测试使用。
 - **调用日志**：每次调用都写 `llm_calls.jsonl` 和 `llm_calls/<n>.json`，`Authorization` 请求头替换为 `***`。
-- **成本**：成本 = token 数 × `firmforge.toml` 中对应档位的价格。
+- **成本**：每次调用按发生时间（北京时间）判断高峰或空闲，成本 = token 数 × 对应档位在该时段的价格；思考内容按输出计费。
 
 ## 5. Agent
 

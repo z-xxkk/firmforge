@@ -130,6 +130,7 @@ class BaselineTest(_Tmp):
         self.assertTrue((res.final_dir / "report.md").is_file())
         self.assertGreater(res.tokens, 0)
         self.assertAlmostEqual(res.cost, MODEL.cost(res.prompt_tokens, res.completion_tokens))
+        self.assertIsNone(llm.calls[0]["extra_body"] or None)      # MODEL 没配置 thinking，不传
         types = [e["type"] for e in events]
         self.assertEqual(types[0], "run_started")
         self.assertEqual(types[-1], "run_finished")
@@ -140,6 +141,16 @@ class BaselineTest(_Tmp):
         self.assertEqual(run["total_tokens"], res.tokens)
         self.assertEqual(len(store.query("SELECT * FROM node_attempts")), 1)
         store.close()
+
+    def test_thinking_and_max_tokens_from_tier(self):
+        t = TASKS["ringbuf"]
+        tier = ModelTier("thinker", 2.0, 8.0, thinking=True, max_tokens=65536)
+        llm = FakeLLM([good_reply(t)])
+        res = run_baseline(t, B1, llm=llm, model=tier, runs_root=self.tmp / "runs")
+        self.assertEqual(llm.calls[0]["extra_body"], {"thinking": {"type": "enabled"}})
+        self.assertEqual(llm.calls[0]["max_tokens"], 65536)
+        run = json.loads((res.run_dir / "run.json").read_text(encoding="utf-8"))
+        self.assertTrue(run["thinking"])
 
     def test_b1_does_not_repair(self):
         t = TASKS["ringbuf"]

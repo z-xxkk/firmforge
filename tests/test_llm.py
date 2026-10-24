@@ -9,7 +9,10 @@ import urllib.error
 from pathlib import Path
 
 import helpers
-from firmforge.config import LLMSettings, ModelTier, Settings, SettingsError, load_dotenv, load_settings
+import datetime
+
+from firmforge.config import (LLMSettings, ModelTier, PeakSchedule, Settings, SettingsError, load_dotenv,
+                              load_settings)
 from firmforge.llm import CallLogger, FakeLLM, LLMError, LoggedLLM, OpenAICompatClient, redact_headers
 
 KEY = "sk-test-0123456789abcdef"
@@ -56,6 +59,20 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(req.get_header("Authorization"), f"Bearer {KEY}")
         body = json.loads(req.data)
         self.assertEqual(body["model"], "m")
+
+    def test_thinking_param_and_reasoning(self):
+        body = {"model": "m", "choices": [{"message": {"content": "答案", "reasoning_content": "先想想"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 40,
+                          "completion_tokens_details": {"reasoning_tokens": 30}}}
+        op = ScriptedOpener(body)
+        c, _ = client(op)
+        tier = ModelTier("m", thinking=True)
+        r = c.complete([], model="m", extra_body=tier.extra_body())
+        sent = json.loads(op.requests[0].data)
+        self.assertEqual(sent["thinking"], {"type": "enabled"})
+        self.assertEqual((r.text, r.reasoning, r.reasoning_tokens), ("答案", "先想想", 30))
+        self.assertEqual(ModelTier("m", thinking=False).extra_body(), {"thinking": {"type": "disabled"}})
+        self.assertEqual(ModelTier("m").extra_body(), {})
 
     def test_retries_on_429_then_succeeds(self):
         op = ScriptedOpener(http_error(429, retry_after="3"), http_error(503), OK_BODY)
@@ -162,6 +179,36 @@ class SettingsTest(unittest.TestCase):
 
     def test_cost(self):
         self.assertAlmostEqual(ModelTier("m", 2.0, 8.0).cost(1_000_000, 500_000), 6.0)
+
+    def test_peak_offpeak_pricing(self):
+        sched = PeakSchedule.parse(8, ["09:00-12:00", "14:00-18:00"])
+        tier = ModelTier("m", 9.0, 27.0, 4.5, 13.5)
+
+        def ts(iso):
+            return datetime.datetime.fromisoformat(iso).timestamp()
+        # 2026-10-23 是周五，2026-10-24 是周六
+        cases = [("2026-10-23T09:00:00+08:00", True), ("2026-10-23T11:59:00+08:00", True),
+                 ("2026-10-23T12:00:00+08:00", False), ("2026-10-23T13:30:00+08:00", False),
+                 ("2026-10-23T17:59:59+08:00", True), ("2026-10-23T18:00:00+08:00", False),
+                 ("2026-10-23T02:00:00+00:00", True),   # UTC 02:00 = 北京时间 10:00
+                 ("2026-10-24T10:00:00+08:00", False)]
+        for iso, peak in cases:
+            with self.subTest(iso=iso):
+                self.assertEqual(sched.is_peak(ts(iso)), peak)
+                expected = 36.0 if peak else 18.0
+                self.assertAlmostEqual(tier.cost(1_000_000, 1_000_000, ts=ts(iso), schedule=sched), expected)
+        # 没配空闲价时一律按唯一价格
+        self.assertAlmostEqual(ModelTier("m", 9.0, 27.0).cost(1_000_000, 0, ts=ts(cases[3][0]), schedule=sched), 9.0)
+        with self.assertRaises(SettingsError):
+            PeakSchedule.parse(8, ["9点到12点"])
+
+    def test_repo_pricing_and_thinking(self):
+        s = load_settings(helpers.ROOT / "firmforge.toml")
+        self.assertIsNotNone(s.pricing)
+        for tier in s.models.values():
+            self.assertTrue(tier.thinking)
+            self.assertGreaterEqual(tier.max_tokens, 32768)
+            self.assertIsNotNone(tier.price_in_offpeak_per_mtok)
 
     def test_dotenv(self):
         with tempfile.TemporaryDirectory() as tmp:

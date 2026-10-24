@@ -35,7 +35,8 @@ class CallLogger:
             "n": n, "ts": time.time(), "agent": agent, "model": model, "request": req,
             "params": params, "messages": messages,
             "response": None if response is None else {
-                "text": response.text, "model": response.model,
+                "text": response.text, "reasoning": response.reasoning, "model": response.model,
+                "reasoning_tokens": response.reasoning_tokens,
                 "prompt_tokens": response.prompt_tokens, "completion_tokens": response.completion_tokens,
                 "latency_s": round(response.latency_s, 3), "tool_calls": response.tool_calls},
             "error": error,
@@ -67,11 +68,13 @@ class LoggedLLM:
         return self.inner.request_info()
 
     def complete(self, messages: list[dict], *, model: str, temperature: float = 0.2,
-                 max_tokens: int = 4096, tools: list[dict] | None = None) -> LLMResponse:
-        params = {"temperature": temperature, "max_tokens": max_tokens, "tools": bool(tools)}
+                 max_tokens: int = 4096, tools: list[dict] | None = None,
+                 extra_body: dict | None = None) -> LLMResponse:
+        params = {"temperature": temperature, "max_tokens": max_tokens, "tools": bool(tools),
+                  "extra_body": extra_body or {}}
         try:
             resp = self.inner.complete(messages, model=model, temperature=temperature,
-                                       max_tokens=max_tokens, tools=tools)
+                                       max_tokens=max_tokens, tools=tools, extra_body=extra_body)
         except LLMError as exc:
             self.logger.log(agent=self.agent, model=model, request=self.inner.request_info(),
                             messages=messages, params=params, response=None, error=str(exc))

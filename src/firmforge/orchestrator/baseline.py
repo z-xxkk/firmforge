@@ -16,7 +16,7 @@ from typing import Callable
 
 from ..agents.context import FORMAT_REMINDER, coder_messages, repair_message
 from ..agents.protocol import parse_files, write_files
-from ..config import ModelTier, Toolchain
+from ..config import ModelTier, PeakSchedule, Toolchain
 from ..llm import CallLogger, LLMClient, LLMError, LoggedLLM
 from ..runs import RunDir, copy_snapshot
 from ..store import Store
@@ -35,7 +35,7 @@ class BaselineConfig:
     tier: str = "strong"
     agent: str = "coder-strong"
     temperature: float = 0.2
-    max_tokens: int = 8192
+    max_tokens: int = 8192          # 档位没配置 max_tokens 时使用
 
 
 B1 = BaselineConfig("b1", max_repairs=0)
@@ -64,6 +64,7 @@ class RunResult:
     best: int | None = None      # 交付的是第几次尝试
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    reasoning_tokens: int = 0    # 已包含在 completion_tokens 里
     cost: float = 0.0
     wall_s: float = 0.0
     error: str | None = None
@@ -80,7 +81,8 @@ class RunResult:
 def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: ModelTier,
                  runs_root: Path | str, store: Store | None = None,
                  subscribers: tuple[Callable[[dict], None], ...] = (),
-                 toolchain: Toolchain | None = None, secrets: tuple[str, ...] = ()) -> RunResult:
+                 toolchain: Toolchain | None = None, secrets: tuple[str, ...] = (),
+                 pricing: PeakSchedule | None = None) -> RunResult:
     t0 = time.perf_counter()
     rd = RunDir.create(runs_root, task.id)
     bus = EventBus(rd.run_id, rd.events_path)
@@ -92,7 +94,8 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
     run_info = {
         "run_id": rd.run_id, "task": task.id, "task_root": str(task.root), "spec": str(task.spec_path),
         "config": cfg.name, "agent": cfg.agent, "model_tier": cfg.tier, "model": model.name,
-        "max_repairs": cfg.max_repairs, "temperature": cfg.temperature, "started_at": time.time(),
+        "max_repairs": cfg.max_repairs, "temperature": cfg.temperature, "thinking": model.thinking,
+        "max_tokens": model.max_tokens or cfg.max_tokens, "started_at": time.time(),
     }
     rd.write_json("run.json", run_info)
     if store:
@@ -108,9 +111,13 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
 
     def call(msgs: list[dict], attempt: int):
         bus.emit("agent_started", module, agent=cfg.agent, attempt=attempt)
-        resp = agent_llm.complete(msgs, model=model.name, temperature=cfg.temperature, max_tokens=cfg.max_tokens)
+        resp = agent_llm.complete(msgs, model=model.name, temperature=cfg.temperature,
+                                  max_tokens=model.max_tokens or cfg.max_tokens, extra_body=model.extra_body())
         result.prompt_tokens += resp.prompt_tokens
         result.completion_tokens += resp.completion_tokens
+        result.reasoning_tokens += resp.reasoning_tokens
+        # 按调用结束的时刻判断高峰 / 空闲价
+        result.cost += model.cost(resp.prompt_tokens, resp.completion_tokens, ts=time.time(), schedule=pricing)
         return resp
 
     for n in range(1, cfg.max_repairs + 2):
@@ -174,13 +181,13 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
     else:
         bus.emit("node_failed", module, attempts=len(result.attempts), verdict=result.verdict)
 
-    result.cost = model.cost(result.prompt_tokens, result.completion_tokens)
     result.wall_s = time.perf_counter() - t0
     bus.emit("run_finished", verdict=result.verdict, attempts=len(result.attempts), best=result.best,
              tokens=result.tokens, cost=round(result.cost, 6), wall_s=round(result.wall_s, 2))
     run_info.update({"finished_at": time.time(), "verdict": result.verdict, "attempts": len(result.attempts),
                      "best_attempt": result.best, "prompt_tokens": result.prompt_tokens,
-                     "completion_tokens": result.completion_tokens, "total_tokens": result.tokens,
+                     "completion_tokens": result.completion_tokens, "reasoning_tokens": result.reasoning_tokens,
+                     "total_tokens": result.tokens,
                      "cost": result.cost, "wall_s": result.wall_s, "error": result.error})
     rd.write_json("run.json", run_info)
     if store:

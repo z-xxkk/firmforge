@@ -3,18 +3,31 @@
 [llm]
 api_key_env = "DEEPSEEK_API_KEY"
 base_url_env = "DEEPSEEK_BASE_URL"
-timeout_s = 120
+timeout_s = 600                   # 思考模式回复较慢
 max_retries = 3
 
+# 价格来源：DeepSeek 官网价目表（2026-10-24 由负责人提供），元 / 百万 token，输入按缓存未命中
+[pricing]
+utc_offset_hours = 8                            # 按北京时间判断
+peak_hours = ["09:00-12:00", "14:00-18:00"]     # 工作日高峰；其余时段和周末为空闲
+
 [models.fast]                     # 型号以 `firmforge models` 列出的为准
-name = ""
-price_in_per_mtok = 0.0           # 元 / 百万 token，用于成本统计
-price_out_per_mtok = 0.0
+name = "deepseek-flash"
+thinking = true                   # 思考模式
+max_tokens = 65536                # 单次输出上限（含思考内容）
+price_in_per_mtok = 2.0           # 高峰
+price_out_per_mtok = 8.0
+price_in_offpeak_per_mtok = 1.0   # 空闲
+price_out_offpeak_per_mtok = 4.0
 
 [models.strong]
-name = ""
-price_in_per_mtok = 0.0
-price_out_per_mtok = 0.0
+name = "deepseek-v4-pro"
+thinking = true
+max_tokens = 65536
+price_in_per_mtok = 9.0
+price_out_per_mtok = 27.0
+price_in_offpeak_per_mtok = 4.5
+price_out_offpeak_per_mtok = 13.5
 
 [concurrency]
 llm = 4                           # 同时进行的 LLM 调用数

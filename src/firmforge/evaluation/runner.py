@@ -92,7 +92,8 @@ def evaluate(tasks: list[Task], configs: list[BaselineConfig], runs: int, out_di
                     i += 1
                     progress(f"[{i}/{total}] 任务 {task.id}，配置 {cfg.name}，第 {run_no} 次")
                     res = run_baseline(task, cfg, llm=llm, model=model, runs_root=out / "runs", store=store,
-                                       subscribers=subscribers, toolchain=toolchain, secrets=secrets)
+                                       subscribers=subscribers, toolchain=toolchain, secrets=secrets,
+                                       pricing=settings.pricing)
                     final = judge(res.final_dir, task, toolchain) if res.attempts else None
                     first = None
                     if res.attempts:
