@@ -12,7 +12,8 @@ from firmforge.tasks import DEFAULT_FORBIDDEN_SYMBOLS, TaskError, discover_tasks
 class TaskLoadTest(unittest.TestCase):
     def test_all_tasks_load(self):
         tasks = discover_tasks(helpers.TASKS)
-        self.assertEqual({t.id for t in tasks}, {"ringbuf", "crc16_modbus", "debounce"})
+        self.assertTrue({"ringbuf", "crc16_modbus", "debounce", "median_filter", "soft_timer",
+                         "uart_frame"} <= {t.id for t in tasks})
         for t in tasks:
             with self.subTest(task=t.id):
                 self.assertTrue(t.spec_path.is_file())

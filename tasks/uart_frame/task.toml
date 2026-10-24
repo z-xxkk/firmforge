@@ -1,0 +1,39 @@
+id = "uart_frame"
+title = "串口帧接收状态机"
+category = "protocol"
+difficulty = 2
+source = "常见的\"帧头 + 长度 + 数据 + CRC\"私有串口协议；出错后重新同步的做法参照 OpenMV 串口协议教程（DECISIONS 第 29 条）；CRC 与 Modbus RTU 相同"
+
+[budget]
+# 参考实现实测：flash 304、ram 0、调用链最坏栈 48（feed → check_frame）；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 608
+ram_bytes = 0
+stack_bytes = 96
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/crc_without_len.c"
+replaces = "uart_frame.c"
+expect_fail = "hidden_tests"
+why = "CRC 漏算了长度字节"
+
+[[mutants]]
+file = "mutants/len64_rejected.c"
+replaces = "uart_frame.c"
+expect_fail = "hidden_tests"
+why = "长度刚好 64 时被误判为太长（差一）"
+
+[[mutants]]
+file = "mutants/no_rescan.c"
+replaces = "uart_frame.c"
+expect_fail = "hidden_tests"
+why = "坏帧之后直接清空，不在已收字节里重新找帧头，会丢掉紧跟在噪声后面的好帧"
+
+[[mutants]]
+file = "mutants/stuck_after_error.c"
+replaces = "uart_frame.c"
+expect_fail = "hidden_tests"
+why = "出错后没有回到等帧头的状态，后面的字节越写越多（越界）"

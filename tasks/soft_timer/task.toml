@@ -1,0 +1,33 @@
+id = "soft_timer"
+title = "8 路软件定时器"
+category = "state_machine"
+difficulty = 2
+source = "语义参照 FreeRTOS 软件定时器：周期必须大于 0；单次 / 自动重装；对运行中的定时器重启时从当前时刻重新计时（timers.h 中 xTimerReset 的说明）"
+
+[budget]
+# 参考实现实测：flash 182、ram 0、调用链最坏栈 8；栈额度取下限 32；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 364
+ram_bytes = 0
+stack_bytes = 32
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/late_by_one.c"
+replaces = "soft_timer.c"
+expect_fail = "hidden_tests"
+why = "先判断后递减，晚一个 tick 才到期"
+
+[[mutants]]
+file = "mutants/reload_drift.c"
+replaces = "soft_timer.c"
+expect_fail = "hidden_tests"
+why = "循环定时器重装时多算一个 tick，越走越慢"
+
+[[mutants]]
+file = "mutants/oneshot_repeats.c"
+replaces = "soft_timer.c"
+expect_fail = "hidden_tests"
+why = "单次定时器到期后没有停止，变成了循环"

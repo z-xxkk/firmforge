@@ -1,0 +1,33 @@
+id = "median_filter"
+title = "窗口 5 的中值滤波"
+category = "data_structure"
+difficulty = 2
+source = "嵌入式传感器去毛刺的常见做法；偶数个数取中间两数的平均是统计学通行定义（DECISIONS 第 28 条）"
+
+[budget]
+# 参考实现实测（arm-none-eabi-gcc -Os）：flash 224、ram 0、调用链最坏栈 48（get → median_of）；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 448
+ram_bytes = 0
+stack_bytes = 96
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/sort_in_place.c"
+replaces = "median_filter.c"
+expect_fail = "hidden_tests"
+why = "为求中位数把窗口原地排序，打乱了先后顺序，之后丢错了读数"
+
+[[mutants]]
+file = "mutants/window_four.c"
+replaces = "median_filter.c"
+expect_fail = "hidden_tests"
+why = "窗口只保留 4 个读数"
+
+[[mutants]]
+file = "mutants/even_upper.c"
+replaces = "median_filter.c"
+expect_fail = "hidden_tests"
+why = "偶数个读数时没有取平均，直接取了较大的那个"

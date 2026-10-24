@@ -78,10 +78,10 @@ class CliTest(unittest.TestCase):
         self.assertEqual(_run_cli("verify", "/no/such/dir", "--task", str(helpers.TASKS / "ringbuf"))[0], 3)
         self.assertEqual(_run_cli("check-task")[0], 3)
 
-    def test_tasks_lists_three(self):
+    def test_tasks_lists_all(self):
         code, out, _ = _run_cli("tasks", "--dir", str(helpers.TASKS))
         self.assertEqual(code, 0)
-        for tid in ("ringbuf", "crc16_modbus", "debounce"):
+        for tid in ("ringbuf", "crc16_modbus", "debounce", "median_filter", "soft_timer", "uart_frame"):
             self.assertIn(tid, out)
 
     def test_doctor_runs(self):

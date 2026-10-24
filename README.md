@@ -46,6 +46,21 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 - 模型：fast = deepseek-flash，strong = deepseek-v4-pro，均开启思考模式；成本按北京时间分高峰 / 空闲计价（DECISIONS 第 23、24 条）。
 - 单元测试 114 个（本机 1 个因缺交叉工具链跳过；Docker 中全部通过），其中包括"发给 LLM 的消息和运行目录里都不含隐藏测试内容"。
 
+**阶段 3 准备（进行中）：**
+
+- 约束依据审计（`docs/CONSTRAINTS_AUDIT.md`）与工作流设计依据调研（`docs/WORKFLOW_RESEARCH.md`），据此做出 DECISIONS 第 26–34 条。
+- 已实现：默认禁用符号按 MISRA C:2012 与最小权限原则扩充；资源预算层改为调用链最坏栈，并用 -O0 调用图检查递归。
+- 新增 3 道题（median_filter、soft_timer、uart_frame），Docker 中自检通过：参考实现 PASS，10 个变异体全部在隐藏测试层被抓到；隐藏测试清单待负责人审核（`tasks_inbox/batch1_hidden_tests.md`）。
+- 6 道题的资源预算：
+
+| 任务 | 实测 flash / RAM / 调用链最坏栈 | 预算 |
+|---|---|---|
+| median_filter | 224 / 0 / 48 | 448 / 0 / 96 |
+| soft_timer | 182 / 0 / 8 | 364 / 0 / 32 |
+| uart_frame | 304 / 0 / 48 | 608 / 0 / 96 |
+
+- 单元测试 122 个（Docker 中全部通过）。
+
 ### 阶段 2 验收命令
 
 ```bash
