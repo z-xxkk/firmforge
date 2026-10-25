@@ -1,0 +1,39 @@
+id = "flash_kv"
+title = "Flash 键值存储（断电安全）"
+category = "data_structure"
+difficulty = 3
+source = "参照 Zephyr NVS 文档与源码的原则（追加写、最新为准、先数据后元数据、长度 0 表示删除、没变不写、整理到空扇区）的简化设计（tasks_inbox/batch6_rules.md）"
+
+[budget]
+# 参考实现实测：flash 1298、ram 0、调用链最坏栈 632（kv_write → append → find_latest → read_entry，各层都有 64 字节的值缓冲）；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 2596
+ram_bytes = 0
+stack_bytes = 1264
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/copy_stale_entries.c"
+replaces = "flash_kv.c"
+expect_fail = "hidden_tests"
+why = "整理时把旧条目也复制了，被删除的值会复活"
+
+[[mutants]]
+file = "mutants/header_first.c"
+replaces = "flash_kv.c"
+expect_fail = "hidden_tests"
+why = "整理时先写新扇区头：复制到一半断电，重新上电后选中了不完整的新扇区"
+
+[[mutants]]
+file = "mutants/first_match.c"
+replaces = "flash_kv.c"
+expect_fail = "hidden_tests"
+why = "读的时候找到第一条就返回，拿到的是旧值"
+
+[[mutants]]
+file = "mutants/always_write.c"
+replaces = "flash_kv.c"
+expect_fail = "hidden_tests"
+why = "值没变也写，擦写次数变多"

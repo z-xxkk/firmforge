@@ -64,6 +64,12 @@ FAKE_HAL_SD = ('#include "hal_sd_spi.h"\n'
                'uint8_t hal_sd_xfer(uint8_t out) { (void)out; return 0xFF; }\n')
 
 
+FAKE_HAL_FLASH = ('#include "hal_flash.h"\n'
+                  'hal_flash_status_t hal_flash_read(uint32_t a, uint8_t *b, size_t n) { (void)a; (void)b; (void)n; return HAL_FLASH_ERROR; }\n'
+                  'hal_flash_status_t hal_flash_write(uint32_t a, const uint8_t *d, size_t n) { (void)a; (void)d; (void)n; return HAL_FLASH_ERROR; }\n'
+                  'hal_flash_status_t hal_flash_erase(uint32_t s) { (void)s; return HAL_FLASH_ERROR; }\n')
+
+
 def good_reply(task):
     parts = ["这是实现和测试：\n"]
     for f in sorted(task.reference_dir.glob("*.[ch]")):         # 多文件参考实现还有内部头文件
@@ -77,6 +83,8 @@ def good_reply(task):
         parts.append(block("tests/fake_hal_onewire.c", FAKE_HAL_ONEWIRE))
     if (task.include_dir / "hal_sd_spi.h").is_file():
         parts.append(block("tests/fake_hal_sd.c", FAKE_HAL_SD))
+    if (task.include_dir / "hal_flash.h").is_file():
+        parts.append(block("tests/fake_hal_flash.c", FAKE_HAL_FLASH))
     return "".join(parts)
 
 

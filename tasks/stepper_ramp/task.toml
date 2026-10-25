@@ -1,0 +1,39 @@
+id = "stepper_ramp"
+title = "步进电机梯形加减速"
+category = "state_machine"
+difficulty = 3
+source = "Atmel 应用笔记 AVR446《Linear speed control of stepper motor》（Rev. 8017A）：c0 与 0.676 修正、max_s_lim / accel_lim、带余数的间隔递推、ACCEL/RUN/DECEL/STOP 状态机（tasks_inbox/batch6_rules.md）"
+
+[budget]
+# 参考实现实测：flash 620、ram 0、调用链最坏栈 48；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 1240
+ram_bytes = 0
+stack_bytes = 96
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/no_remainder.c"
+replaces = "stepper_ramp.c"
+expect_fail = "hidden_tests"
+why = "不保留除法余数，间隔序列逐步偏离"
+
+[[mutants]]
+file = "mutants/trapezoid_triangle_swapped.c"
+replaces = "stepper_ramp.c"
+expect_fail = "hidden_tests"
+why = "梯形与三角形两种情形判断写反"
+
+[[mutants]]
+file = "mutants/decel_off_by_one.c"
+replaces = "stepper_ramp.c"
+expect_fail = "hidden_tests"
+why = "减速起点差一步，总步数不对"
+
+[[mutants]]
+file = "mutants/no_first_step_correction.c"
+replaces = "stepper_ramp.c"
+expect_fail = "hidden_tests"
+why = "第一步间隔不乘 0.676 修正"

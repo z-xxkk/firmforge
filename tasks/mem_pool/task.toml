@@ -1,0 +1,39 @@
+id = "mem_pool"
+title = "固定块内存池"
+category = "data_structure"
+difficulty = 3
+source = "Zephyr memory slab 文档与 kernel/mem_slab.c（空闲链表、对齐、分配顺序、指针检查）；SEI CERT C MEM31-C 与 CWE-415（重复释放）（tasks_inbox/batch6_rules.md）"
+
+[budget]
+# 参考实现实测：flash 288、ram 0、调用链最坏栈 32；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 576
+ram_bytes = 0
+stack_bytes = 64
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/no_double_free_check.c"
+replaces = "mem_pool.c"
+expect_fail = "hidden_tests"
+why = "不查重复释放：同一块进入空闲链表两次，之后被分给两个使用者"
+
+[[mutants]]
+file = "mutants/no_alignment_check.c"
+replaces = "mem_pool.c"
+expect_fail = "hidden_tests"
+why = "不查指针是否在块的起点：块中间的地址被当成空闲块放回链表"
+
+[[mutants]]
+file = "mutants/range_off_by_one.c"
+replaces = "mem_pool.c"
+expect_fail = "hidden_tests"
+why = "范围检查差一：紧挨着缓冲区末尾的地址被当成池内"
+
+[[mutants]]
+file = "mutants/peak_not_updated.c"
+replaces = "mem_pool.c"
+expect_fail = "hidden_tests"
+why = "历史最大已用块数不更新"

@@ -1,0 +1,39 @@
+id = "pid_ctrl"
+title = "定点数 PID 控制器"
+category = "state_machine"
+difficulty = 3
+source = "Brett Beauregard《Improving the Beginner's PID》系列：积分抗饱和、输出限幅、对测量值求微分、调参不突变、无扰切换（tasks_inbox/batch6_rules.md）"
+
+[budget]
+# 参考实现实测：flash 564、ram 0、调用链最坏栈 48；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 1128
+ram_bytes = 0
+stack_bytes = 96
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/derivative_on_error.c"
+replaces = "pid_ctrl.c"
+expect_fail = "hidden_tests"
+why = "对误差求微分：设定值突变时输出出现尖峰（微分冲击）"
+
+[[mutants]]
+file = "mutants/no_integral_clamp.c"
+replaces = "pid_ctrl.c"
+expect_fail = "hidden_tests"
+why = "积分不限幅：长时间饱和后设定值回落，输出迟迟不下降"
+
+[[mutants]]
+file = "mutants/ki_outside_integral.c"
+replaces = "pid_ctrl.c"
+expect_fail = "hidden_tests"
+why = "Ki 放在积分外面：运行中改 Ki 时输出突然跳变"
+
+[[mutants]]
+file = "mutants/reset_integral_on_auto.c"
+replaces = "pid_ctrl.c"
+expect_fail = "hidden_tests"
+why = "手动切自动时积分清零：输出从手动值跳到 0 附近"
