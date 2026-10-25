@@ -5,7 +5,8 @@
 - 模块并行与隔离：每个模块的每次尝试都在 nodes/<module>/attempt_<n>/ 里，
   目录内容 = 已完成依赖模块的实现 + 本模块的实现和测试；模块通过后复制进 integration/；
 - 全部模块完成后对 integration/ 做集成判定（全部 Agent 测试）；
-- 人工节点：开启 human_review 时暂停并发 human_wait 事件；评测模式下不开启。
+- 人工节点：开启 human_review 时暂停并发 human_wait 事件；评测模式下不开启；
+- 升级阶梯、经验库、知识库（ARCHITECTURE §8、§9）按配置开关启用，用于消融实验。
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ from ..agents.registry import AgentDef, Registry, default_registry
 from ..agents import roles
 from ..config import ModelTier, Settings, Toolchain
 from ..llm import CallLogger, LLMClient, LLMError, LLMResponse, LoggedLLM
+from ..memory.experience import ExperienceBase
+from ..memory.knowledge import KnowledgeBase
 from ..runs import RunDir
 from ..store import Store
 from ..tasks import Task
@@ -32,7 +35,7 @@ from ..verifier.report import PASS, Report, attempt_score
 from .baseline import RunInterrupted
 from .dag import Module, Plan, PlanError, extract_json, plan_from_text, single_module_plan, MAX_MODULES
 from .events import EventBus
-from .loop import ModuleAttempt, ModuleState, repair_round
+from .loop import ModuleAttempt, ModuleState, failure_points, repair_round
 from .scheduler import Strategy, make_strategy, prioritize
 from .workflow import Step, Workflow, load_workflow
 
@@ -47,14 +50,20 @@ class MultiConfig:
     strategy: str                       # serial | round_robin | random | smart
     review: bool = False
     fixed: dict[str, str] = field(default_factory=dict)   # serial 下各角色固定用的 Agent
+    escalation: bool = False            # 升级阶梯
+    experience: bool = False            # 经验库（检索与写入）
+    knowledge: bool = False             # 知识库（规划时参考；升级第 1 级检索）
     workflow: str = "module_dev"
     kind: str = "multi"
 
 
 B3 = MultiConfig("b3", "serial", review=False, fixed={"coder": "coder-strong"})
 B4 = MultiConfig("b4", "round_robin", review=False)
-FULL = MultiConfig("full", "smart", review=True)
-MULTI = {"b3": B3, "b4": B4, "full": FULL}
+FULL = MultiConfig("full", "smart", review=True, escalation=True, experience=True, knowledge=True)
+FULL_NO_EXP = MultiConfig("full-no-exp", "smart", review=True, escalation=True, experience=False, knowledge=True)
+FULL_NO_ESC = MultiConfig("full-no-esc", "smart", review=True, escalation=False, experience=True, knowledge=True)
+FULL_NO_REVIEW = MultiConfig("full-no-review", "smart", review=False, escalation=True, experience=True, knowledge=True)
+MULTI = {c.name: c for c in (B3, B4, FULL, FULL_NO_EXP, FULL_NO_ESC, FULL_NO_REVIEW)}
 
 
 @dataclass
@@ -66,7 +75,10 @@ class MultiRunResult:
     verdict: str                     # pass | fail | incomplete | error | interrupted | rejected
     plan: Plan | None = None
     modules: dict[str, ModuleState] = field(default_factory=dict)
+    replaced: list[ModuleState] = field(default_factory=list)     # 被重新规划替换掉的模块
     final_report: Report | None = None
+    escalations: int = 0
+    experiences_used: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
     reasoning_tokens: int = 0
@@ -89,7 +101,7 @@ class MultiRunResult:
 
     @property
     def attempt_count(self) -> int:
-        return sum(len(s.attempts) for s in self.modules.values())
+        return sum(len(s.attempts) for s in [*self.modules.values(), *self.replaced])
 
     @property
     def has_code(self) -> bool:
@@ -148,6 +160,8 @@ class _ParseFailure(Exception):
 
 
 HumanCallback = Callable[[Plan], tuple[bool, str]]
+HintCallback = Callable[[str, list[str]], str | None]     # (模块 id, 失败要点) -> 提示；None 表示放弃
+MAX_REPLANS = 1               # 每次运行最多重新规划 1 次
 
 
 class Engine:
@@ -155,11 +169,16 @@ class Engine:
                  registry: Registry | None = None, store: Store | None = None,
                  subscribers: tuple[Callable[[dict], None], ...] = (), toolchain: Toolchain | None = None,
                  secrets: tuple[str, ...] = (), human_review: bool = False, human: HumanCallback | None = None,
-                 workflow: Workflow | None = None):
+                 hint: HintCallback | None = None, workflow: Workflow | None = None, memory: Store | None = None,
+                 knowledge: KnowledgeBase | None = None):
         self.task, self.cfg, self.llm, self.settings = task, cfg, llm, settings
         self.registry = registry or default_registry()
         self.store, self.toolchain = store, toolchain
-        self.human_review, self.human = human_review, human
+        self.human_review, self.human, self.hint = human_review, human, hint
+        self.kb = (knowledge or KnowledgeBase.load()) if cfg.knowledge else None
+        mem = memory or store
+        self.exp = ExperienceBase(mem) if (cfg.experience and mem is not None) else None
+        self.replans = 0
         self.workflow = workflow or load_workflow(cfg.workflow)
         self.loop_cfg = dict(settings.loop)
         conc = settings.concurrency
@@ -187,7 +206,8 @@ class Engine:
         t0 = time.perf_counter()
         info = {"run_id": self.rd.run_id, "task": self.task.id, "task_root": str(self.task.root),
                 "spec": str(self.task.spec_path), "config": self.cfg.name, "strategy": self.cfg.strategy,
-                "review": self.cfg.review, "workflow": f"{self.workflow.name} {self.workflow.version}",
+                "review": self.cfg.review, "escalation": self.cfg.escalation, "experience": self.exp is not None,
+                "knowledge": self.kb is not None, "workflow": f"{self.workflow.name} {self.workflow.version}",
                 "human_review": self.human_review,
                 "agents": {n: {"version": self.registry.get(n).version, "model_tier": self.registry.get(n).model_tier,
                                "model": self._tier(self.registry.get(n)).name} for n in self.registry.names()},
@@ -211,11 +231,13 @@ class Engine:
         self.bus.emit("run_finished", verdict=r.verdict, attempts=r.attempt_count, modules=len(self.states),
                       tokens=r.tokens, cost=round(r.cost, 6), wall_s=round(r.wall_s, 2))
         info.update({"finished_at": time.time(), "verdict": r.verdict, "attempts": r.attempt_count,
-                     "modules": {m: {"status": s.status, "coder": s.coder.name if s.coder else None,
+                     "modules": {m: {"status": s.status, "level": s.level, "coder": s.coder.name if s.coder else None,
                                      "tester": s.tester.name if s.tester else None, "attempts": len(s.attempts),
                                      "delivered": s.delivered().n if s.delivered() else None, "notes": s.notes}
                                  for m, s in self.states.items()},
-                     "fallback_plan": bool(self.plan and self.plan.fallback),
+                     "fallback_plan": bool(self.plan and self.plan.fallback), "replans": self.replans,
+                     "replaced_modules": [st.module.id for st in r.replaced],
+                     "escalations": r.escalations, "experiences_used": r.experiences_used,
                      "prompt_tokens": r.prompt_tokens, "completion_tokens": r.completion_tokens,
                      "reasoning_tokens": r.reasoning_tokens, "total_tokens": r.tokens, "cost": r.cost,
                      "wall_s": r.wall_s, "error": r.error})
@@ -278,7 +300,8 @@ class Engine:
     async def make_plan(self, feedback: str | None = None, previous: Plan | None = None) -> Plan:
         agent, scores = self._assign("plan", "planner", "*")
         self.bus.emit("node_assigned", "plan", agent=agent.name, role="planner", scores=scores)
-        msgs = roles.planner_messages(self.task, self.max_modules, agent.prompt_name)
+        kb = self.kb.search(self._spec_text()[:2000], k=3) if self.kb else []
+        msgs = roles.planner_messages(self.task, self.max_modules, agent.prompt_name, knowledge=kb)
         if feedback and previous is not None:
             msgs = msgs + [{"role": "assistant", "content": f"```json\n{previous.to_json()}\n```"},
                            {"role": "user", "content": roles.planner_feedback_message(feedback)}]
@@ -322,8 +345,7 @@ class Engine:
     # ------------------------------------------------------------ 模块调度（foreach）
 
     async def run_modules(self, subflow: str) -> None:
-        plan = self.plan
-        self.states = {m.id: ModuleState(m) for m in plan.modules}
+        self.states = {m.id: ModuleState(m) for m in self.plan.modules}
         self.result.modules = self.states
         self.integration_dir.mkdir(parents=True, exist_ok=True)
         steps = self.workflow.subflows[subflow]
@@ -339,7 +361,7 @@ class Engine:
                                       reason=f"依赖的模块 {', '.join(bad)} 没有完成")
                 ready = [mid for mid, st in self.states.items() if st.status == "pending"
                          and all(self.states[d].status == "done" for d in st.module.depends_on)]
-                for mid in prioritize(ready, plan):
+                for mid in prioritize(ready, self.plan):          # 重新规划后 self.plan 会变
                     if not self.strategy.parallel and running:
                         break
                     st = self.states[mid]
@@ -363,7 +385,15 @@ class Engine:
             await self._run_sub_step(step, st, by_id)
         mid = st.module.id
         delivered = st.delivered()
+        if st.stop == "replanned":
+            st.status = "replanned"
+            self.bus.emit("node_failed", mid, verdict="replanned", attempts=len(st.attempts),
+                          reason="已重新规划，由新的模块接替")
+            self._record_stats(st)
+            return
         st.status = "done" if st.passed else "failed"
+        if st.status == "done" and self.exp is not None and st.exp_used:
+            self.exp.mark_helped(st.exp_used)
         if st.status == "done":
             self._copy_module(delivered, self.integration_dir, with_tests=True)
             self.bus.emit("node_done", mid, attempt=delivered.n, verdict=delivered.report.verdict,
@@ -398,7 +428,7 @@ class Engine:
             await self.check(st, by="coder+tester")
         elif step.kind == "loop" and step.body == "repair_round":
             limit = self.workflow.resolve_max(step, self.loop_cfg)
-            while not self._cond(step.until, st) and len(st.attempts) < limit:
+            while not self._cond(step.until, st) and len(st.attempts) < limit and st.stop is None:
                 await repair_round(self, st)
         elif step.kind == "subflow":
             sub = self.workflow.subflows[step.subflow]
@@ -417,8 +447,8 @@ class Engine:
         t = self.settings.models.get(agent.model_tier)
         return (t.price_in_per_mtok + t.price_out_per_mtok) if t else 1.0
 
-    def _assign(self, node_id: str, role: str, task_type: str) -> tuple[AgentDef, dict]:
-        candidates = self.registry.find(role, task_type)
+    def _assign(self, node_id: str, role: str, task_type: str, exclude: tuple[str, ...] = ()) -> tuple[AgentDef, dict]:
+        candidates = [a for a in self.registry.find(role, task_type) if a.name not in exclude]
         if not candidates:
             raise ValueError(f"没有注册角色为 {role} 的 Agent")
         stats = self.store.agent_stats(task_type) if (self.store and role == "coder") else {}
@@ -519,7 +549,9 @@ class Engine:
         m = st.module
         st.coder, scores = self._assign(m.id, "coder", m.task_type)
         self.bus.emit("node_assigned", m.id, agent=st.coder.name, role="coder", scores=scores)
-        msgs = roles.coder_messages(self.task, self.plan, m, self._dep_files(m), st.coder.prompt_name)
+        exps = self._experiences(st, f"{m.task_type} {m.title} {' '.join(m.acceptance)} {self.task.title}", "首次编码")
+        msgs = roles.coder_messages(self.task, self.plan, m, self._dep_files(m), st.coder.prompt_name,
+                                    knowledge=st.knowledge, experiences=exps)
         files, rejected = await self.ask(st.coder, msgs, m.id, attempt=1, purpose="编写实现",
                                          parse=self._code_parser(m), fallback=lambda: ({}, []))
         st.code.update(files)
@@ -537,9 +569,12 @@ class Engine:
     async def repair_code(self, st: ModuleState, base: ModuleAttempt, diagnosis: dict, n: int) -> None:
         m = st.module
         limit = int(self.loop_cfg.get("max_attempts_per_module", 6))
-        msgs = roles.coder_messages(self.task, self.plan, m, self._dep_files(m), st.coder.prompt_name)
+        keys = " ".join(base.report.layer(base.report.failed_layer).failing_keys()) if base.report.failed_layer else ""
+        exps = self._experiences(st, f"{base.report.failed_layer or ''} {keys}", "修正") if keys else []
+        msgs = roles.coder_messages(self.task, self.plan, m, self._dep_files(m), st.coder.prompt_name,
+                                    knowledge=st.knowledge)
         msgs.append({"role": "user", "content": roles.coder_repair_message(
-            base.report, base.n, limit, diagnosis, base.code, st.rejected, base.dir)})
+            base.report, base.n, limit, diagnosis, base.code, st.rejected, base.dir, experiences=exps)})
         files, rejected = await self.ask(st.coder, msgs, m.id, attempt=n, purpose="按诊断修改实现",
                                          parse=self._code_parser(m), fallback=lambda: ({}, []))
         st.code.update(files)
@@ -555,6 +590,144 @@ class Engine:
         files, _ = await self.ask(st.tester, msgs, m.id, attempt=n, purpose="按诊断修改测试",
                                   parse=self._test_parser(m), fallback=lambda: ({}, []))
         st.tests.update(files)
+
+    # ------------------------------------------------------------ 经验库、知识库与升级阶梯
+
+    def _spec_text(self) -> str:
+        return self.task.spec_path.read_text(encoding="utf-8")
+
+    def _experiences(self, st: ModuleState, query: str, where: str) -> list:
+        if self.exp is None:
+            return []
+        found = self.exp.search(query, k=3, category=st.module.task_type)
+        if found:
+            ids = [e.id for e in found]
+            self.exp.mark_used(ids)
+            st.exp_used.extend(ids)
+            self.result.experiences_used += len(ids)
+            self.bus.emit("experience_used", st.module.id, ids=ids, where=where,
+                          patterns=[e.pattern for e in found])
+        return found
+
+    async def save_experience(self, st: ModuleState, base: ModuleAttempt, diagnosis: dict) -> None:
+        """修正让失败层前进或直接通过：由诊断 Agent 总结一条经验（pattern 用判定器的失败 key）。"""
+        if self.exp is None or not base.report.failed_layer:
+            return
+        layer = base.report.failed_layer
+        pattern = " ".join(sorted(set(base.report.layer(layer).failing_keys())))[:300]
+        if not pattern:
+            return
+        agent, _ = self._assign(st.module.id, "diagnoser", st.module.task_type)
+        msgs = roles.experience_messages(self.task, st.module, pattern, base.report, diagnosis)
+
+        def parse(text: str):
+            try:
+                fix = str(extract_json(text).get("fix", "")).strip()
+            except PlanError as exc:
+                raise _ParseFailure(roles.json_retry_message(str(exc)), str(exc)) from exc
+            if not fix:
+                raise _ParseFailure(roles.json_retry_message("fix 为空"), "fix 为空")
+            return fix, {"purpose_result": "经验"}
+
+        fix = await self.ask(agent, msgs, st.module.id, attempt=base.n, purpose="总结经验", parse=parse,
+                             fallback=lambda: diagnosis.get("summary", ""))
+        if not fix:
+            return
+        eid, merged = self.exp.save(st.module.task_type, layer, pattern, fix, self.rd.run_id)
+        self.bus.emit("experience_saved", st.module.id, id=eid, merged=merged, layer=layer, pattern=pattern)
+
+    def consult_knowledge(self, st: ModuleState, base: ModuleAttempt) -> list[str]:
+        """升级第 1 级：按失败的 key 和模块说明检索知识库，之后的编码上下文都带上。返回条目标题。"""
+        if self.kb is None:
+            return []
+        layer = base.report.failed_layer
+        keys = " ".join(base.report.layer(layer).failing_keys()) if layer else ""
+        st.knowledge = self.kb.search(f"{layer or ''} {keys} {st.module.title} {' '.join(st.module.acceptance)}", k=3)
+        return [c.title for c in st.knowledge]
+
+    async def rewrite(self, st: ModuleState, base: ModuleAttempt) -> bool:
+        """升级第 2 级：换一个编码 Agent 从头重写，只给需求、接口和失败要点。没有可换的返回 False。"""
+        m = st.module
+        excluded = tuple({*st.excluded, *( [st.coder.name] if st.coder else [])})
+        if not [a for a in self.registry.find("coder", m.task_type) if a.name not in excluded]:
+            return False
+        st.excluded = list(excluded)
+        st.coder, scores = self._assign(m.id, "coder", m.task_type, exclude=excluded)
+        scores = {**scores, "reason": f"升级换 Agent：{scores.get('reason', '')}"}
+        self.bus.emit("node_assigned", m.id, agent=st.coder.name, role="coder", scores=scores)
+        n = len(st.attempts) + 1
+        msgs = roles.coder_messages(self.task, self.plan, m, self._dep_files(m), st.coder.prompt_name,
+                                    knowledge=st.knowledge)
+        msgs.append({"role": "user", "content": roles.coder_rewrite_message(failure_points(st),
+                                                                            base.report.failed_layer)})
+        files, rejected = await self.ask(st.coder, msgs, m.id, attempt=n, purpose="换 Agent 从头重写",
+                                         parse=self._code_parser(m), fallback=lambda: ({}, []))
+        st.code, st.tests = dict(files), dict(base.tests)
+        st.rejected = rejected
+        return True
+
+    def can_replan(self) -> bool:
+        return self.replans < MAX_REPLANS and self.plan is not None
+
+    async def replan(self, st: ModuleState) -> bool:
+        """升级第 3 级：回到规划层修改这个模块的接口或拆分方式。已完成或正在进行的其他模块必须原样保留。"""
+        if not self.can_replan():
+            return False
+        self.replans += 1
+        failing = st.module.id
+        frozen = [mid for mid, s in self.states.items() if mid != failing and s.status in ("done", "running")]
+        agent, scores = self._assign("plan", "planner", "*")
+        self.bus.emit("node_assigned", "plan", agent=agent.name, role="planner", scores=scores)
+        msgs = roles.planner_messages(self.task, self.max_modules, agent.prompt_name)
+        msgs += [{"role": "assistant", "content": f"```json\n{self.plan.to_json()}\n```"},
+                 {"role": "user", "content": roles.planner_replan_message(failing, failure_points(st), frozen)}]
+        for k in range(PLAN_RETRIES + 1):
+            resp = await self.call(agent, msgs, "plan", attempt=k + 1, purpose="重新规划")
+            try:
+                plan = plan_from_text(resp.text, self.task, self.max_modules)
+                problems = [f"模块 {mid} 已经完成或正在进行，必须原样保留" for mid in frozen
+                            if mid not in plan.by_id or plan.by_id[mid].to_dict() != self.states[mid].module.to_dict()]
+                if problems:
+                    raise PlanError(problems)
+            except PlanError as exc:
+                self._finished(agent, "plan", k + 1, resp, ok=True, valid=False, problems=exc.problems)
+                msgs = msgs + [{"role": "assistant", "content": resp.text},
+                               {"role": "user", "content": roles.planner_retry_message(exc.problems)}]
+                continue
+            self._finished(agent, "plan", k + 1, resp, ok=True, valid=True, modules=[m.id for m in plan.modules])
+            self._apply_replan(plan, st, frozen)
+            return True
+        return False
+
+    def _apply_replan(self, plan: Plan, failing: ModuleState, frozen: list[str]) -> None:
+        old = self.plan
+        self.rd.write_json(f"dag_before_replan_{self.replans}.json", old.to_dict())
+        new_states: dict[str, ModuleState] = {}
+        for m in plan.modules:
+            if m.id in frozen:
+                new_states[m.id] = self.states[m.id]
+            else:
+                ns = ModuleState(m)
+                ns.level = 3                   # 接替的模块再修不好就直接转人工
+                new_states[m.id] = ns
+        # 规划里删掉的、还没开始的模块直接丢弃；失败的那个模块留作记录
+        self.result.replaced.append(failing)
+        self.plan = self.result.plan = plan
+        self.states = self.result.modules = new_states
+        self.rd.write_json("dag.json", plan.to_dict())
+        self.bus.emit("plan_ready", "plan", modules=[m.to_dict() for m in plan.modules],
+                      critical_path=plan.critical_path(), fallback=False, problems=[], replan=True,
+                      replaced=failing.module.id)
+
+    async def ask_human(self, st: ModuleState) -> str | None:
+        """升级第 4 级：转人工。没有回调（评测模式）就返回 None。"""
+        if self.hint is None:
+            return None
+        points = failure_points(st)
+        self.bus.emit("human_wait", st.module.id, reason="升级到转人工", points=points)
+        hint = await in_thread(self.hint, st.module.id, points)
+        self.bus.emit("human_done", st.module.id, approved=hint is not None, comment=hint or "")
+        return hint
 
     def _public_header_text(self) -> str:
         return "\n".join(h.read_text(encoding="utf-8") for h in sorted(self.task.include_dir.glob("*.h")))
@@ -700,7 +873,8 @@ class Engine:
 
     def _modules_markdown(self) -> str:
         lines = ["", "## 模块", "", "| 模块 | 结果 | 编码 | 测试 | 尝试次数 | 交付第几次 | 备注 |", "|---|---|---|---|---|---|---|"]
-        for mid, s in self.states.items():
+        for s in [*self.states.values(), *self.result.replaced]:
+            mid = s.module.id
             d = s.delivered()
             notes = "；".join(s.notes).replace("|", "/") or "-"
             lines.append(f"| {mid} | {s.status} | {s.coder.name if s.coder else '-'} | "

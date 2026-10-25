@@ -48,12 +48,12 @@ def run_config(task: Task, cfg: RunConfig, *, llm: LLMClient, settings: Settings
                store: Store | None = None, subscribers: tuple[Callable[[dict], None], ...] = (),
                toolchain: Toolchain | None = None, secrets: tuple[str, ...] = (), token_budget: int | None = None,
                registry: Registry | None = None, human_review: bool = False,
-               human=None) -> RunResult | MultiRunResult:
+               human=None, hint=None, memory: Store | None = None) -> RunResult | MultiRunResult:
     """按配置类型运行一次：单 Agent 基线或多 Agent 引擎。命令行和评测共用。"""
     if cfg.kind == "multi":
         return run_multi(task, cfg, llm=llm, settings=settings, runs_root=runs_root, registry=registry, store=store,
                          subscribers=subscribers, toolchain=toolchain, secrets=secrets,
-                         human_review=human_review, human=human)
+                         human_review=human_review, human=human, hint=hint, memory=memory)
     return run_baseline(task, cfg, llm=llm, model=settings.tier(cfg.tier), runs_root=runs_root, store=store,
                         subscribers=subscribers, toolchain=toolchain, secrets=secrets, pricing=settings.pricing,
                         token_budget=token_budget)
@@ -80,7 +80,8 @@ def make_row(task: Task, cfg: RunConfig, run_no: int, res: RunResult | MultiRunR
         "flash": res_layer.metrics.get("flash") if res_layer else None,
         "ram": res_layer.metrics.get("ram") if res_layer else None,
         "coverage_pct": ut.metrics.get("coverage_pct") if ut else None,
-        "failed_layer": failed, "escalations": 0, "experiences_used": 0,
+        "failed_layer": failed, "escalations": getattr(res, "escalations", 0),
+        "experiences_used": getattr(res, "experiences_used", 0),
     }
 
 
@@ -100,7 +101,8 @@ def full_budget(rows: list[dict], task_id: str) -> int:
 def evaluate(tasks: list[Task], configs: list[RunConfig], runs: int, out_dir: Path | str, *,
              llm: LLMClient, settings: Settings, toolchain: Toolchain | None = None,
              subscribers: tuple[Callable[[dict], None], ...] = (), secrets: tuple[str, ...] = (),
-             progress: Callable[[str], None] = lambda s: None, registry: Registry | None = None) -> EvalOutput:
+             progress: Callable[[str], None] = lambda s: None, registry: Registry | None = None,
+             memory: Store | None = None) -> EvalOutput:
     out = Path(out_dir)
     (out / "judges").mkdir(parents=True, exist_ok=True)
     store = Store(out / "firmforge.db")       # 每个实验用独立的数据库
@@ -118,7 +120,7 @@ def evaluate(tasks: list[Task], configs: list[RunConfig], runs: int, out_dir: Pa
                     progress(f"[{i}/{total}] 任务 {task.id}，配置 {cfg.name}，第 {run_no} 次{extra}")
                     res = run_config(task, cfg, llm=llm, settings=settings, runs_root=out / "runs", store=store,
                                      subscribers=subscribers, toolchain=toolchain, secrets=secrets,
-                                     token_budget=budget, registry=registry)
+                                     token_budget=budget, registry=registry, memory=memory)
                     final = judge(res.final_dir, task, toolchain) if res.has_code else None
                     first = None
                     if res.has_code:

@@ -107,6 +107,16 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 - 评测配置 b1、b2、b3、b4、full、b5；b5 的 token 预算自动取同一实验里 full 的平均值；`summary.md` 新增"每通过一题的平均 token 和成本"。
 - 单元测试 161 个，Docker 中全部通过、无跳过。其中包括：测试 Agent 的消息里没有实现代码（修正轮也一样）、模块并行与依赖顺序（看事件时间戳）、诊断分派、回滚、四种调度策略与 smart 的公式、审查只修 1 次、人工节点、b5 预算、所有角色都看不到隐藏测试；以及把 Modbus 拆成 crc → frame → slave 三个模块跑完整流程，交付物通过隐藏测试。以上全部用假 LLM，真实模型的表现要等验收。
 
+**阶段 4（升级、经验库、知识库、桌面软件）：进行中。**
+
+- 新增 10 道偏难题的清单与第四批规则草稿，待负责人审核（`tasks_inbox/stage4_task_list.md`、`tasks_inbox/batch4_rules.md`）。
+- 升级阶梯：同一个错误签名连续出现或本级修了 3 轮还没过就升一级——检索知识库 → 换 Agent 从头重写 → 重新规划 → 转人工；每升一级发 `escalated` 事件。
+- 经验库（`memory/experience.py`）：修正让失败层前进时由诊断 Agent 总结一条经验，相似的合并；编码时按需求关键词或失败的 key 检索 top-3 放进上下文。
+- 知识库（`kb/` 下 7 篇自写摘要，`memory/knowledge.py`），用标准库实现的 BM25 检索（`memory/bm25.py`），中文按单字和双字切分。
+- 消融配置 `full-no-exp`、`full-no-esc`、`full-no-review`；`results.csv` 的 escalations、experiences_used 两列有了真实数值；`eval --memory` 可沿用另一个实验的经验库。
+- 单元测试 176 个，Docker 中全部通过。新增的包括：同一个错误连续出现时逐级升级到第 4 级、重新规划不能改动已完成的模块、转人工时负责人的提示交给编码 Agent、第一次运行记下的经验在第二次运行里被用上。以上全部用假 LLM，真实模型的表现要等验收。
+- 还没做：桌面软件（先出界面草图）、10 道新题的代码。
+
 ### 阶段 3 验收命令（需要 `.env` 里的 key，会产生费用）
 
 正式评测按 DECISIONS 第 49 条用 `--configs b2,full,b5`。

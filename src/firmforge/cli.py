@@ -230,13 +230,26 @@ def format_event(e: dict, t0: float) -> str:
     elif typ == "plan_ready":
         mods = d.get("modules", [])
         parts = [m["id"] + (f"（依赖 {', '.join(m['depends_on'])}）" if m.get("depends_on") else "") for m in mods]
-        msg = f"规划完成：{len(mods)} 个模块：{'、'.join(parts)}"
+        what = f"重新规划完成（替换模块 {d.get('replaced')}）" if d.get("replan") else "规划完成"
+        msg = f"{what}：{len(mods)} 个模块：{'、'.join(parts)}"
         if d.get("fallback"):
             msg += "（规划 Agent 多次不合格，退化为单模块）"
+    elif typ == "human_wait" and d.get("reason"):
+        msg = f"[{node}] 等待负责人给出提示（{d['reason']}）"
     elif typ == "human_wait":
         msg = f"等待负责人确认规划（第 {d.get('round')} 次）"
+    elif typ == "human_done" and node != "confirm_plan":
+        msg = f"[{node}] 负责人给出了提示：{d.get('comment')}" if d.get("approved") else f"[{node}] 负责人放弃了这个模块"
     elif typ == "human_done":
         msg = "负责人确认了规划" if d.get("approved") else f"负责人没有确认规划：{d.get('comment')}"
+    elif typ == "escalated":
+        msg = f"[{node}] 升级到第 {d.get('level')} 级（{d.get('name')}）：{d.get('reason')}"
+        if d.get("knowledge"):
+            msg += "；找到资料：" + "、".join(d["knowledge"])
+    elif typ == "experience_used":
+        msg = f"[{node}] {d.get('where')}时参考了 {len(d.get('ids', []))} 条过往经验"
+    elif typ == "experience_saved":
+        msg = f"[{node}] {'合并进已有经验' if d.get('merged') else '记下一条新经验'}（{d.get('layer')}：{d.get('pattern')}）"
     elif typ == "node_ready":
         msg = f"模块 {node} 就绪（{d.get('title', '')}）"
     elif typ == "node_assigned":
@@ -287,6 +300,8 @@ def format_event(e: dict, t0: float) -> str:
         msg = f"模块 {node} 完成，交付第 {d.get('attempt')} 次尝试（{d.get('verdict')}）"
     elif typ == "node_failed" and d.get("verdict") == "interrupted":
         msg = f"模块 {node} 被中断，已完成 {d.get('attempts')} 次尝试"
+    elif typ == "node_failed" and d.get("verdict") == "replanned":
+        msg = f"模块 {node} 已重新规划，由新的模块接替"
     elif typ == "node_failed" and d.get("verdict") == "skipped":
         msg = f"[SKIP] 模块 {node} 跳过：{d.get('reason')}"
     elif typ == "node_failed":
@@ -402,6 +417,18 @@ def terminal_confirm(plan: Plan) -> tuple[bool, str]:
     return ans == "", ans
 
 
+def terminal_hint(module_id: str, points: list[str]) -> str | None:
+    """升级阶梯第 4 级（转人工）的终端版：列出失败要点，输入提示让编码 Agent 再改一次；直接回车 = 放弃。"""
+    print(f"\n模块 {module_id} 升级到转人工，失败要点：")
+    for p in points:
+        print(f"  - {p}")
+    try:
+        ans = input("输入给编码 Agent 的提示后回车；直接回车 = 放弃这个模块：").strip()
+    except EOFError:
+        ans = ""
+    return ans or None
+
+
 def cmd_run(args) -> int:
     task = _run_task(args)
     cfg = get_config(args.config)
@@ -420,7 +447,8 @@ def cmd_run(args) -> int:
     try:
         res = run_config(task, cfg, llm=llm, settings=settings, runs_root=args.runs_dir, store=store,
                          subscribers=(printer,), secrets=_secrets(settings), token_budget=args.token_budget,
-                         human_review=args.human_review, human=terminal_confirm if args.human_review else None)
+                         human_review=args.human_review, human=terminal_confirm if args.human_review else None,
+                         hint=terminal_hint if args.human_review else None)
     finally:
         printer.close()
         store.close()
@@ -488,12 +516,17 @@ def cmd_eval(args) -> int:
         raise UsageError(f"{out} 里已经有 results.csv，请换一个 --out 目录，避免覆盖之前的结果")
     print(f"评测：{len(tasks)} 个任务 × {len(configs)} 个配置 × {args.runs} 次 = "
           f"{len(tasks) * len(configs) * args.runs} 次运行")
+    if args.memory and not Path(args.memory).is_file():
+        raise UsageError(f"找不到经验库数据库 {args.memory}")
+    memory = Store(args.memory) if args.memory else None
     printer = LivePrinter()
     try:
         res = evaluate(tasks, configs, args.runs, out, llm=llm, settings=settings, subscribers=(printer,),
-                       secrets=_secrets(settings), progress=_say)
+                       secrets=_secrets(settings), progress=_say, memory=memory)
     finally:
         printer.close()
+        if memory:
+            memory.close()
     print(f"\n结果：{res.csv_path}\n汇总：{res.summary_path}")
     return EXIT_PASS
 
@@ -553,7 +586,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--spec", help="需求文档（与 --include 一起使用）")
     s.add_argument("--include", help="公共头文件目录")
     s.add_argument("--config", default="b2", help="配置：b1、b2、b3、b4、full、b5（默认 b2）")
-    s.add_argument("--human-review", action="store_true", help="规划完成后停下来等你确认（多 Agent 配置）")
+    s.add_argument("--human-review", action="store_true",
+                   help="规划完成后停下来等你确认；升级到转人工时也在终端询问（多 Agent 配置）")
     s.add_argument("--token-budget", type=int, help="b5 的 token 预算（与 full 同等花费）")
     s.add_argument("--runs-dir", default=DEFAULT_RUNS_DIR, help="运行目录的上级目录（默认 .ff_runs）")
     s.add_argument("--db", help="SQLite 数据库路径（默认 .ff_data/firmforge.db）")
@@ -565,6 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--runs", type=int, default=1, help="每个组合重复几次（默认 1）")
     s.add_argument("--out", required=True, help="输出目录，如 results/first")
     s.add_argument("--estimate", action="store_true", help="只跑 1 个任务 1 次，推算全量 token 和成本")
+    s.add_argument("--memory", help="沿用另一个数据库里的经验库（默认每个实验独立）")
     s.set_defaults(func=cmd_eval)
 
     s = sub.add_parser("replay", help="在终端按时间顺序回放一次运行")

@@ -90,6 +90,12 @@ def workflows_dir() -> Path:
     return cwd if cwd.is_dir() else project_root() / "workflows"
 
 
+def kb_dir() -> Path:
+    """知识库目录 kb/*.md：优先当前目录，否则用安装目录。"""
+    cwd = Path.cwd() / "kb"
+    return cwd if cwd.is_dir() else project_root() / "kb"
+
+
 def unity_dir() -> Path:
     return project_root() / "third_party" / "unity"
 

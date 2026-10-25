@@ -51,11 +51,19 @@ def _system(name: str, task: Task, **extra) -> str:
 
 # ---------------------------------------------------------------- 规划
 
-def planner_messages(task: Task, max_modules: int, prompt: str = "planner.md") -> list[dict]:
+def _knowledge_block(chunks) -> str:
+    return ("\n\n## 参考资料（知识库）\n\n" + "\n\n".join(c.render() for c in chunks)) if chunks else ""
+
+
+def _experience_block(exps) -> str:
+    return ("\n\n## 过往经验（之前同类问题是这样修好的，仅供参考）\n\n" + "\n".join(e.render() for e in exps)) if exps else ""
+
+
+def planner_messages(task: Task, max_modules: int, prompt: str = "planner.md", knowledge=()) -> list[dict]:
     funcs = "\n".join(f"- `{f}`" for f in public_functions(task)) or "（无）"
     user = (f"# 任务：{task.title}\n\n## 需求文档\n\n{_spec(task)}\n\n"
             f"## 公共接口头文件（只读，位于 include/）\n\n{_headers_block(task)}\n\n"
-            f"## 必须由某个模块负责实现的公共函数\n\n{funcs}\n\n请输出规划 JSON。")
+            f"## 必须由某个模块负责实现的公共函数\n\n{funcs}{_knowledge_block(knowledge)}\n\n请输出规划 JSON。")
     return [{"role": "system", "content": load_prompt(prompt).safe_substitute(max_modules=max_modules)},
             {"role": "user", "content": user}]
 
@@ -69,24 +77,35 @@ def planner_feedback_message(comment: str) -> str:
     return f"负责人没有确认这份规划，意见如下：\n\n{comment}\n\n请按意见修改后重新输出完整的规划 JSON。"
 
 
+def planner_replan_message(module_id: str, failures: list[str], frozen: list[str]) -> str:
+    """升级阶梯第 3 级：模块反复修不好，回到规划层修改它的接口或拆分方式。"""
+    lines = "\n".join(f"- {x}" for x in failures) or "- （没有诊断记录）"
+    keep = "、".join(frozen) or "（无）"
+    return (f"模块 {module_id} 多次修改仍然没有通过判定器检查，失败要点：\n\n{lines}\n\n"
+            f"请重新规划：可以修改 {module_id} 的接口或把它拆成几个更小的模块，受影响的下游模块可以一起调整。\n"
+            f"已经完成或正在进行的模块必须原样保留（id、文件、职责、接口都不能变）：{keep}。\n"
+            "请输出完整的规划 JSON。")
+
+
 # ---------------------------------------------------------------- 编码
 
 def coder_messages(task: Task, plan: Plan, module: Module, dep_files: dict[str, str],
-                   prompt: str = "coder_module.md") -> list[dict]:
+                   prompt: str = "coder_module.md", knowledge=(), experiences=()) -> list[dict]:
     """首次编码：需求 + 公共头文件 + 完整规划（DECISIONS 第 33 条）+ 本模块 + 依赖模块的头文件。"""
     dep_headers = {p: c for p, c in dep_files.items() if p.endswith(".h")}
     user = (f"# 任务：{task.title}\n\n## 需求文档\n\n{_spec(task)}\n\n"
             f"## 公共接口头文件（只读，位于 include/）\n\n{_headers_block(task)}\n\n"
             f"## 完整规划（全部模块的划分、职责与接口）\n\n```json\n{plan.to_json()}\n```\n\n"
             f"## 你负责的模块：{module.id}\n\n{_module_block(module)}\n\n"
-            f"## 已完成的依赖模块的头文件\n\n{_files_block(dep_headers)}\n\n"
+            f"## 已完成的依赖模块的头文件\n\n{_files_block(dep_headers)}"
+            f"{_knowledge_block(knowledge)}{_experience_block(experiences)}\n\n"
             f"请输出本模块的文件：{', '.join(module.files)}。")
     return [{"role": "system", "content": _system(prompt, task)}, {"role": "user", "content": user}]
 
 
 def coder_repair_message(report: Report, attempt: int, max_attempts: int, diagnosis: dict | None,
                          current: dict[str, str], rejected: list[tuple[str, str]] | None = None,
-                         workdir: Path | None = None) -> str:
+                         workdir: Path | None = None, experiences=()) -> str:
     agent_report = report.for_agent()
     layer = agent_report.failed_layer or "无"
     parts = [f"判定器检查没有通过（第 {attempt} 次尝试，最多 {max_attempts} 次）。",
@@ -98,8 +117,30 @@ def coder_repair_message(report: Report, attempt: int, max_attempts: int, diagno
     parts.append(f"## 本模块当前的代码\n\n{_files_block(current)}")
     if rejected:
         parts.append("上一轮这些文件被拒绝写入：\n" + "\n".join(f"- {p}：{why}" for p, why in rejected))
+    if experiences:
+        parts.append(_experience_block(experiences).strip())
     parts.append("请按诊断结论修改，按同样的格式输出需要修改的完整文件。")
     return "\n\n".join(parts)
+
+
+def coder_rewrite_message(failures: list[str], failed_layer: str | None) -> str:
+    """升级阶梯第 2 级：换一个 Agent 从头重写，只给失败要点，不给旧代码（DECISIONS 第 32 条）。"""
+    lines = "\n".join(f"- {x}" for x in failures) or "- （没有诊断记录）"
+    return (f"之前另一位工程师写的实现多次修改仍然没有通过检查（最后卡在 {failed_layer or '未知'} 层），失败要点：\n\n"
+            f"{lines}\n\n请你从头重写本模块，避开上面这些问题，不要沿用之前的思路。")
+
+
+def human_hint_message(hint: str) -> str:
+    return f"负责人看过之后给出的提示：\n\n{hint}\n\n请按提示修改，按同样的格式输出需要修改的完整文件。"
+
+
+def experience_messages(task: Task, module: Module, pattern: str, before: Report, diagnosis: dict,
+                        prompt: str = "experience.md") -> list[dict]:
+    user = (f"# 任务：{task.title}（模块 {module.id}，类别 {module.task_type}）\n\n"
+            f"## 修改前的失败\n\n失败的 key：`{pattern}`\n\n{report_details(before.for_agent())}\n\n"
+            f"## 诊断与修改指令\n\n- 根因：{diagnosis.get('summary', '')}\n- 修改指令：{diagnosis.get('instructions', '')}\n\n"
+            "按这个指令修改后，失败层前进了（或者直接通过了）。请总结经验。")
+    return [{"role": "system", "content": load_prompt(prompt).template}, {"role": "user", "content": user}]
 
 
 def review_fix_message(issues: list[dict], current: dict[str, str]) -> str:

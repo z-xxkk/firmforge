@@ -122,9 +122,10 @@ class ConfigsTest(unittest.TestCase):
         self.assertEqual(get_config("b2").max_repairs, 3)
         self.assertEqual([c.name for c in parse_configs("b1, b2")], ["b1", "b2"])
         self.assertEqual(get_config("full").kind, "multi")
+        self.assertFalse(get_config("full-no-exp").experience)
         with self.assertRaises(ConfigError) as cm:
-            get_config("full-no-exp")
-        self.assertIn("阶段 4", str(cm.exception))
+            get_config("full-no-magic")
+        self.assertIn("目前可用", str(cm.exception))
 
 
 @unittest.skipUnless(helpers.HAS_CC, "本机没有 gcc")
@@ -411,7 +412,7 @@ class CliStage2Test(_Tmp):
 
     def test_usage_errors(self):
         self.assertEqual(self._cli("run")[0], 3)
-        self.assertEqual(self._cli("run", "--task", str(helpers.TASKS / "ringbuf"), "--config", "full-no-exp")[0], 3)
+        self.assertEqual(self._cli("run", "--task", str(helpers.TASKS / "ringbuf"), "--config", "full-no-magic")[0], 3)
         self.assertEqual(self._cli("eval", "--configs", "b9", "--out", str(self.tmp))[0], 3)
         self.assertEqual(self._cli("replay", str(self.tmp))[0], 3)
 

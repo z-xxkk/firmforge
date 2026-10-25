@@ -1,4 +1,4 @@
-"""SQLite 存储（ARCHITECTURE §2.10）：runs、node_attempts、agent_stats（能力画像）。"""
+"""SQLite 存储（ARCHITECTURE §2.10）：runs、node_attempts、agent_stats（能力画像）、experiences（经验库）。"""
 
 from __future__ import annotations
 
@@ -45,6 +45,17 @@ CREATE TABLE IF NOT EXISTS agent_stats (
     total_cost REAL DEFAULT 0,
     PRIMARY KEY (agent, version, task_type)
 );
+CREATE TABLE IF NOT EXISTS experiences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL,
+    layer TEXT NOT NULL,
+    pattern TEXT NOT NULL,
+    fix TEXT NOT NULL,
+    source_run TEXT,
+    created_at REAL,
+    uses INTEGER DEFAULT 0,
+    helped INTEGER DEFAULT 0
+);
 """
 
 
@@ -67,6 +78,13 @@ class Store:
         with self._lock:
             self._conn.execute(sql, args)
             self._conn.commit()
+
+    def execute(self, sql: str, args: tuple = ()) -> int:
+        """执行一条写语句，返回 lastrowid。"""
+        with self._lock:
+            cur = self._conn.execute(sql, args)
+            self._conn.commit()
+            return cur.lastrowid
 
     def start_run(self, run_id: str, task_id: str, config: str | dict) -> None:
         cfg = config if isinstance(config, str) else json.dumps(config, ensure_ascii=False)

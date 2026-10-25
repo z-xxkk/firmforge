@@ -1,4 +1,4 @@
-"""评测配置（ARCHITECTURE §10）：b1、b2、b5 是单 Agent，b3、b4、full 是多 Agent；消融配置在阶段 4 加入。"""
+"""评测配置（ARCHITECTURE §10）：b1、b2、b5 是单 Agent，b3、b4、full 和 3 个消融配置是多 Agent。"""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ from ..orchestrator.engine import MULTI, MultiConfig
 
 RunConfig = BaselineConfig | MultiConfig
 ALL = {"b1": BASELINES["b1"], "b2": BASELINES["b2"], "b3": MULTI["b3"], "b4": MULTI["b4"],
-       "full": MULTI["full"], "b5": BASELINES["b5"]}
-LATER = {"full-no-exp": 4, "full-no-esc": 4, "full-no-review": 4}
+       "full": MULTI["full"], "full-no-exp": MULTI["full-no-exp"], "full-no-esc": MULTI["full-no-esc"],
+       "full-no-review": MULTI["full-no-review"], "b5": BASELINES["b5"]}
+LATER: dict[str, int] = {}
 
 
 class ConfigError(ValueError):
