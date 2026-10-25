@@ -185,6 +185,8 @@
 
 ## 附录 A：评测任务清单（20 个候选）
 
+**2026-10-25 调整（DECISIONS 第 55 条）**：阶段 3 评测出现天花板（b2、full 都 10 题全过），下表第 4–9、12、15–18 行这些难度 1–2 的候选不再做，改为 `tasks_inbox/stage4_task_list.md` 里的 10 道难度 3 新题：xmodem_rx、mavlink_parser、onewire_ds18b20、isotp、sd_spi_init、at_parser、pid_ctrl、stepper_ramp、mem_pool、flash_kv。下表保留作为历史记录。
+
 **分工（2026-10-24 调整，DECISIONS 第 25 条）**：项目没有队友。每道题由 Claude Code 起草全套内容，草稿包括：
 - 功能描述、每个函数的输入输出；
 - 边界情况和 NULL 怎么处理；
