@@ -244,7 +244,7 @@ def format_event(e: dict, t0: float) -> str:
         if role == "planner":
             msg = f"规划分配给 {d.get('agent')}"
         else:
-            what = f" 的{ROLE_NAMES[role]}" if role in ROLE_NAMES else ""
+            what = f" 的{ROLE_NAMES[role]}" if role in ROLE_NAMES else " "
             msg = f"模块 {node}{what}分配给 {d.get('agent')}"
         msg += f"（{reason}）" if reason else ""
     elif typ == "agent_started":

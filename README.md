@@ -75,7 +75,23 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 
 - 评测任务共 10 道（数据结构 2、协议 4、状态机 3、驱动 2，难度 1–3），`check-task --all` 全部通过；单元测试 122 个（Docker 中全部通过）。
 
-**阶段 3（多 Agent + 编排引擎 + 调度器）：代码和单元测试已完成，等待用真实 API 验收。**
+**阶段 3（多 Agent + 编排引擎 + 调度器）：已完成，2026-10-25 用真实 API 验收。**
+
+验收结果：
+- `run --task tasks/modbus_slave --config full`：规划拆成 crc、pdu、slave 3 个模块，crc 与 pdu 同时进行，slave 等两者完成后开始；交付物通过全部 18 个隐藏测试，花费 1.44 元、约 14 分钟。
+- 每次分配的得分明细在实时输出和 `node_assigned` 事件里（成功率、成本、负载、探索四项）。
+- 正式评测 `results/stage3`（未提交到仓库）：按 DECISIONS 第 49 条只跑 b2、full、b5，10 道题各 1 次，共约 15.1 元、约 3 小时（周日空闲价）：
+
+| 配置 | 最终通过 | 首次通过 | 平均 token | 每通过一题成本 |
+|---|---|---|---|---|
+| b2 单 Agent + 修正 | 10 / 10 | 8 / 10 | 28576 | 0.35 元 |
+| full 多 Agent | 10 / 10 | 9 / 10 | 61541 | 0.48 元 |
+| b5 同等花费从头重写 | 9 / 10（mpu6050_drv 没过） | 6 / 10 | 52550 | 0.75 元 |
+
+如实说明：
+- 每个组合只跑 1 次，b2 与 full 都是 10 题全过，差异在随机波动范围内，**这组数据不能说明多 Agent 比单 Agent 更强**；题目对当前模型偏简单，出现了"天花板"。
+- 能看出的是：同等花费下"从头重写"（b5）不如"带着报错修改"（b2、full）；full 的花费主要在测试 Agent（strong 档），编码 Agent 全部被 smart 分给了便宜的 coder-fast（15 个模块都一次或修改后通过，coder-strong 一次也没被选中）。
+- 修正循环在真实模型上走通了：debounce 诊断为 code（缺 `<stddef.h>`）交给编码 Agent，modbus 的一个模块诊断为 test（测试的头文件包含写错）交给测试 Agent，两次都修好。
 
 计划与提示词草案见 `docs/STAGE3_PLAN.md`，模型档位、接口字段等决定见 DECISIONS 第 37–48 条。
 
@@ -92,6 +108,8 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 - 单元测试 161 个，Docker 中全部通过、无跳过。其中包括：测试 Agent 的消息里没有实现代码（修正轮也一样）、模块并行与依赖顺序（看事件时间戳）、诊断分派、回滚、四种调度策略与 smart 的公式、审查只修 1 次、人工节点、b5 预算、所有角色都看不到隐藏测试；以及把 Modbus 拆成 crc → frame → slave 三个模块跑完整流程，交付物通过隐藏测试。以上全部用假 LLM，真实模型的表现要等验收。
 
 ### 阶段 3 验收命令（需要 `.env` 里的 key，会产生费用）
+
+正式评测按 DECISIONS 第 49 条用 `--configs b2,full,b5`。
 
 ```bash
 docker build -t firmforge -f docker/Dockerfile .
