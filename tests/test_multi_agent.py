@@ -32,7 +32,7 @@ from firmforge.orchestrator.workflow import WorkflowError, load_workflow, parse_
 from firmforge.runs import read_events
 from firmforge.store import Store
 from firmforge.tasks import discover_tasks
-from test_baseline_eval import FAKE_HAL_I2C, FAKE_HAL_SPI, block, hidden_markers
+from test_baseline_eval import FAKE_HAL_I2C, FAKE_HAL_ONEWIRE, FAKE_HAL_SPI, block, hidden_markers
 
 FAST = ModelTier("fake-fast", 2.0, 8.0)
 STRONG = ModelTier("fake-strong", 9.0, 27.0)
@@ -166,6 +166,8 @@ def smoke_tester_reply(task, module_id):
         fake = FAKE_HAL_I2C
     if (task.include_dir / "hal_spi.h").is_file():
         fake = FAKE_HAL_SPI
+    if (task.include_dir / "hal_onewire.h").is_file():
+        fake = FAKE_HAL_ONEWIRE
     return block(f"tests/test_{module_id}.c", unity_test(header, extra=fake))
 
 

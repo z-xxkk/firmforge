@@ -1,0 +1,39 @@
+id = "mavlink_parser"
+title = "MAVLink 解析器"
+category = "protocol"
+difficulty = 3
+source = "MAVLink 官方文档《Packet Serialization》与 C 参考实现 checksum.h：v1/v2 帧格式、CRC-16/MCRF4XX + CRC_EXTRA、v2 负载截断、签名、不兼容标志（tasks_inbox/batch4_rules.md）"
+
+[budget]
+# 参考实现实测：flash 812、ram 0、调用链最坏栈 72（feed → check_frame）；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 1624
+ram_bytes = 0
+stack_bytes = 144
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/no_crc_extra.c"
+replaces = "mavlink_parser.c"
+expect_fail = "hidden_tests"
+why = "校验时漏掉 CRC_EXTRA，所有真实帧都会被判为校验错"
+
+[[mutants]]
+file = "mutants/crc_high_first.c"
+replaces = "mavlink_parser.c"
+expect_fail = "hidden_tests"
+why = "校验值按高字节在前比较（规范规定低字节在前）"
+
+[[mutants]]
+file = "mutants/no_zero_fill.c"
+replaces = "mavlink_parser.c"
+expect_fail = "hidden_tests"
+why = "v2 截断的负载不补 0，末尾残留上一条消息的数据"
+
+[[mutants]]
+file = "mutants/skip_bad_frame.c"
+replaces = "mavlink_parser.c"
+expect_fail = "hidden_tests"
+why = "坏帧整个跳过，藏在坏帧里的真帧丢失"

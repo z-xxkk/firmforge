@@ -1,0 +1,39 @@
+id = "xmodem_rx"
+title = "XMODEM 接收端"
+category = "protocol"
+difficulty = 3
+source = "Chuck Forsberg 编《XMODEM/YMODEM Protocol Reference》：块格式、CRC 握手、重复块、失步、10 次重试、两个 CAN 取消（tasks_inbox/batch4_rules.md）"
+
+[budget]
+# 参考实现实测：flash 550、ram 0、调用链最坏栈 20；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 1100
+ram_bytes = 0
+stack_bytes = 40
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/wrap_to_one.c"
+replaces = "xmodem_rx.c"
+expect_fail = "hidden_tests"
+why = "块号 FFh 之后回到 01h（原文规定回到 00h）"
+
+[[mutants]]
+file = "mutants/crc_low_first.c"
+replaces = "xmodem_rx.c"
+expect_fail = "hidden_tests"
+why = "CRC 按低字节在前拼（原文规定高字节在前）"
+
+[[mutants]]
+file = "mutants/duplicate_nak.c"
+replaces = "xmodem_rx.c"
+expect_fail = "hidden_tests"
+why = "重复块回 NAK，发送方没收到 ACK 时会一直重发"
+
+[[mutants]]
+file = "mutants/single_can.c"
+replaces = "xmodem_rx.c"
+expect_fail = "hidden_tests"
+why = "一个 CAN 就当取消（原文要求连续两个，单个可能是线路干扰）"

@@ -109,13 +109,13 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 
 **阶段 4（升级、经验库、知识库、桌面软件）：进行中。**
 
-- 新增 10 道偏难题的清单与第四批规则草稿，待负责人审核（`tasks_inbox/stage4_task_list.md`、`tasks_inbox/batch4_rules.md`）。
+- 新增 10 道难度 3 新题的清单与第四批规则已审核（DECISIONS 第 55、56 条）。第四批 3 道题（xmodem_rx、mavlink_parser、onewire_ds18b20）已写完，Docker 中自检通过：参考实现 PASS，12 个变异体全部被隐藏测试抓到；隐藏测试清单待审核（`tasks_inbox/batch4_hidden_tests.md`）。评测集现为 13 道，`check-task --all` 全部通过。
 - 升级阶梯：同一个错误签名连续出现或本级修了 3 轮还没过就升一级——检索知识库 → 换 Agent 从头重写 → 重新规划 → 转人工；每升一级发 `escalated` 事件。
 - 经验库（`memory/experience.py`）：修正让失败层前进时由诊断 Agent 总结一条经验，相似的合并；编码时按需求关键词或失败的 key 检索 top-3 放进上下文。
 - 知识库（`kb/` 下 7 篇自写摘要，`memory/knowledge.py`），用标准库实现的 BM25 检索（`memory/bm25.py`），中文按单字和双字切分。
 - 消融配置 `full-no-exp`、`full-no-esc`、`full-no-review`；`results.csv` 的 escalations、experiences_used 两列有了真实数值；`eval --memory` 可沿用另一个实验的经验库。
 - 单元测试 176 个，Docker 中全部通过。新增的包括：同一个错误连续出现时逐级升级到第 4 级、重新规划不能改动已完成的模块、转人工时负责人的提示交给编码 Agent、第一次运行记下的经验在第二次运行里被用上。以上全部用假 LLM，真实模型的表现要等验收。
-- 还没做：桌面软件（先出界面草图）、10 道新题的代码。
+- 还没做：桌面软件（先出界面草图）、剩下 7 道新题（第五、六批）。
 
 ### 阶段 3 验收命令（需要 `.env` 里的 key，会产生费用）
 

@@ -1,0 +1,39 @@
+id = "onewire_ds18b20"
+title = "1-Wire 温度传感器 DS18B20 驱动"
+category = "driver"
+difficulty = 3
+source = "Maxim 应用笔记 AN187《1-Wire Search Algorithm》（2002-03-28）与 DS18B20 数据手册：ROM 搜索、CRC-8、匹配 ROM、温度格式与分辨率（tasks_inbox/batch4_rules.md）"
+
+[budget]
+# 参考实现实测：flash 584、ram 0、调用链最坏栈 72（不含 hal_onewire 实现）；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 1168
+ram_bytes = 0
+stack_bytes = 144
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/disc_compare_reversed.c"
+replaces = "onewire_ds18b20.c"
+expect_fail = "hidden_tests"
+why = "分歧点比较写反（AN187 表 3），会漏找设备或反复找同一个"
+
+[[mutants]]
+file = "mutants/msb_first.c"
+replaces = "onewire_ds18b20.c"
+expect_fail = "hidden_tests"
+why = "命令和数据高位先发（1-Wire 规定低位先发）"
+
+[[mutants]]
+file = "mutants/unsigned_temp.c"
+replaces = "onewire_ds18b20.c"
+expect_fail = "hidden_tests"
+why = "温度寄存器当成无符号数，负温度换算错"
+
+[[mutants]]
+file = "mutants/no_scratch_crc.c"
+replaces = "onewire_ds18b20.c"
+expect_fail = "hidden_tests"
+why = "不校验暂存器 CRC，线路干扰的数据被当成真温度"

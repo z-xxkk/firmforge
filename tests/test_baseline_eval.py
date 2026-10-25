@@ -53,6 +53,12 @@ FAKE_HAL_SPI = ('#include "hal_spi.h"\n'
                 '{ (void)t; (void)tl; (void)r; (void)rl; return HAL_SPI_ERROR; }\n')
 
 
+FAKE_HAL_ONEWIRE = ('#include "hal_onewire.h"\n'
+                    'bool hal_ow_reset(void) { return false; }\n'
+                    'void hal_ow_write_bit(uint8_t bit) { (void)bit; }\n'
+                    'uint8_t hal_ow_read_bit(void) { return 1; }\n')
+
+
 def good_reply(task):
     parts = ["这是实现和测试：\n"]
     for f in sorted(task.reference_dir.glob("*.[ch]")):         # 多文件参考实现还有内部头文件
@@ -62,6 +68,8 @@ def good_reply(task):
         parts.append(block("tests/fake_hal_i2c.c", FAKE_HAL_I2C))
     if (task.include_dir / "hal_spi.h").is_file():
         parts.append(block("tests/fake_hal_spi.c", FAKE_HAL_SPI))
+    if (task.include_dir / "hal_onewire.h").is_file():
+        parts.append(block("tests/fake_hal_onewire.c", FAKE_HAL_ONEWIRE))
     return "".join(parts)
 
 
