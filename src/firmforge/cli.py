@@ -17,9 +17,12 @@ from pathlib import Path
 from . import __version__, config
 from .config import Toolchain
 from .evaluation.configs import ConfigError, get_config, parse_configs
-from .evaluation.runner import estimate, evaluate
+from .agents.registry import RegistryError
+from .evaluation.runner import estimate, evaluate, run_config
 from .llm import LLMError, OpenAICompatClient
-from .orchestrator.baseline import RunInterrupted, run_baseline
+from .orchestrator.baseline import RunInterrupted
+from .orchestrator.dag import Plan
+from .orchestrator.workflow import WorkflowError
 from .runs import DEFAULT_RUNS_DIR, read_events
 from .store import Store
 from .tasks import Task, TaskError, adhoc_task, discover_tasks, load_task
@@ -209,46 +212,90 @@ def _secrets(settings: config.Settings) -> tuple[str, ...]:
     return (key,) if key else ()
 
 
+ROLE_NAMES = {"planner": "规划", "coder": "编码", "tester": "测试", "reviewer": "审查", "diagnoser": "诊断"}
+
+
 def format_event(e: dict, t0: float) -> str:
     """把一个事件格式化成一行中文，实时显示和回放共用。"""
     d = e.get("data", {})
     t = e.get("ts", t0) - t0
     node = e.get("node_id")
     typ = e.get("type")
+    role = d.get("role")
+    who = f"[{node}] " if role else ""          # 多 Agent 运行的 Agent 事件前面标出模块
     if typ == "run_started":
         msg = f"运行开始：任务 {d.get('task')}，配置 {d.get('config')}，模型 {d.get('model')}"
+        if d.get("strategy"):
+            msg += f"，调度 {d['strategy']}"
+    elif typ == "plan_ready":
+        mods = d.get("modules", [])
+        parts = [m["id"] + (f"（依赖 {', '.join(m['depends_on'])}）" if m.get("depends_on") else "") for m in mods]
+        msg = f"规划完成：{len(mods)} 个模块：{'、'.join(parts)}"
+        if d.get("fallback"):
+            msg += "（规划 Agent 多次不合格，退化为单模块）"
+    elif typ == "human_wait":
+        msg = f"等待负责人确认规划（第 {d.get('round')} 次）"
+    elif typ == "human_done":
+        msg = "负责人确认了规划" if d.get("approved") else f"负责人没有确认规划：{d.get('comment')}"
     elif typ == "node_ready":
         msg = f"模块 {node} 就绪（{d.get('title', '')}）"
     elif typ == "node_assigned":
         reason = d.get("scores", {}).get("reason", "")
-        msg = f"模块 {node} 分配给 {d.get('agent')}" + (f"（{reason}）" if reason else "")
-    elif typ == "agent_started":
-        msg = f"{d.get('agent')} 开始第 {d.get('attempt')} 次编写"
-    elif typ == "agent_finished":
-        if d.get("ok"):
-            msg = (f"{d.get('agent')} 交卷：{', '.join(d.get('files', [])) or '没有文件'}；"
-                   f"token {d.get('tokens')}，耗时 {d.get('latency_s')}s")
-            if d.get("rejected"):
-                msg += f"；被拒绝的路径：{', '.join(d['rejected'])}"
+        if role == "planner":
+            msg = f"规划分配给 {d.get('agent')}"
         else:
-            msg = f"[FAIL] {d.get('agent')} 调用失败：{d.get('error')}"
+            what = f" 的{ROLE_NAMES[role]}" if role in ROLE_NAMES else ""
+            msg = f"模块 {node}{what}分配给 {d.get('agent')}"
+        msg += f"（{reason}）" if reason else ""
+    elif typ == "agent_started":
+        msg = f"{who}{d.get('agent')} 开始" + (d.get("purpose") or f"第 {d.get('attempt')} 次编写")
+    elif typ == "agent_finished":
+        if not d.get("ok"):
+            msg = f"[FAIL] {who}{d.get('agent')} 调用失败：{d.get('error')}"
+        else:
+            cost = f"token {d.get('tokens')}，耗时 {d.get('latency_s')}s"
+            if d.get("parse_error"):
+                msg = f"{who}{d.get('agent')} 的输出无法使用（{d['parse_error']}）；{cost}"
+            elif role == "planner":
+                ok = d.get("valid")
+                msg = (f"{who}{d.get('agent')} 交出规划：" + ("通过检查" if ok else "没通过检查："
+                       + "；".join(d.get("problems", [])[:3])) + f"；{cost}")
+            elif role == "diagnoser":
+                msg = f"{who}{d.get('agent')} 诊断完成：责任 {d.get('blame')}；{cost}"
+            elif role == "reviewer":
+                msg = f"{who}{d.get('agent')} 审查完成：{d.get('verdict')}，{d.get('issues')} 条意见；{cost}"
+            else:
+                msg = f"{who}{d.get('agent')} 交卷：{', '.join(d.get('files', [])) or '没有文件'}；{cost}"
+                if d.get("rejected"):
+                    msg += f"；被拒绝的路径：{', '.join(d['rejected'])}"
     elif typ == "verify_started":
-        msg = f"第 {d.get('attempt')} 次判定开始"
+        pre = f"[{node}] " if d.get("scope") == "module" else ""
+        msg = "集成判定开始" if d.get("scope") == "all" else f"{pre}第 {d.get('attempt')} 次判定开始"
     elif typ == "verify_finished":
         v = d.get("verdict")
-        msg = f"{MARK.get(v, '[????]')} 第 {d.get('attempt')} 次判定：{v}"
+        what = "集成判定" if d.get("scope") == "all" else (
+            f"[{node}] " if d.get("scope") == "module" else "") + f"第 {d.get('attempt')} 次判定"
+        msg = f"{MARK.get(v, '[????]')} {what}：{v}"
         if d.get("failed_layer"):
             msg += f"，首个失败层 {d['failed_layer']}，签名 {d.get('signature')}"
+    elif typ == "diagnosis":
+        msg = (f"[{node}] 诊断第 {d.get('attempt')} 次：责任 {d.get('blame')} → 交给{ROLE_NAMES.get(d.get('route'), d.get('route'))}"
+               f" Agent（把握 {d.get('confidence')}）：{d.get('summary')}")
+    elif typ == "rollback":
+        msg = f"[{node}] 回滚：第 {d.get('from_attempt')} 次 → 第 {d.get('to_attempt')} 次（{d.get('reason')}）"
     elif typ == "node_done":
         msg = f"模块 {node} 完成，交付第 {d.get('attempt')} 次尝试（{d.get('verdict')}）"
     elif typ == "node_failed" and d.get("verdict") == "interrupted":
         msg = f"模块 {node} 被中断，已完成 {d.get('attempts')} 次尝试"
+    elif typ == "node_failed" and d.get("verdict") == "skipped":
+        msg = f"[SKIP] 模块 {node} 跳过：{d.get('reason')}"
     elif typ == "node_failed":
         msg = f"[FAIL] 模块 {node} 未通过，共尝试 {d.get('attempts')} 次"
     elif typ == "run_finished" and d.get("verdict") == "interrupted":
         msg = f"运行被中断：已完成 {d.get('attempts')} 次尝试，token {d.get('tokens')}，成本 {d.get('cost')} 元"
     elif typ == "run_finished":
-        msg = (f"运行结束：{MARK.get(d.get('verdict'), '[FAIL]')} {d.get('verdict')}，尝试 {d.get('attempts')} 次，"
+        mods = f"{d['modules']} 个模块，" if d.get("modules") else ""
+        msg = (f"运行结束：{MARK.get(d.get('verdict'), '[FAIL]')} {d.get('verdict')}，{mods}尝试 {d.get('attempts')} 次，"
                f"token {d.get('tokens')}，成本 {d.get('cost')} 元，用时 {d.get('wall_s')}s")
     else:
         msg = f"{typ} {node or ''} {json.dumps(d, ensure_ascii=False)}"
@@ -263,6 +310,7 @@ class LivePrinter:
         self.out = out
         self.t0: float | None = None
         self._waiting_since: float | None = None
+        self._in_flight = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._beat, daemon=True)
@@ -275,7 +323,14 @@ class LivePrinter:
         with self._lock:
             if self.t0 is None:
                 self.t0 = e["ts"]
-            self._waiting_since = time.monotonic() if e["type"] == "agent_started" else None
+            if e["type"] == "agent_started":
+                self._in_flight += 1
+            elif e["type"] == "agent_finished":
+                self._in_flight = max(0, self._in_flight - 1)
+            elif e["type"] in ("run_finished", "verify_started"):
+                self._in_flight = 0
+            # 每来一个事件就重新计时；还有 Agent 在等回复才提示
+            self._waiting_since = time.monotonic() if self._in_flight else None
             self._print(format_event(e, self.t0))
 
     def _beat(self) -> None:
@@ -326,22 +381,52 @@ def _run_task(args) -> Task:
     raise UsageError("请给出 --task <任务目录>，或者同时给出 --spec 和 --include")
 
 
+def terminal_confirm(plan: Plan) -> tuple[bool, str]:
+    """人工节点的终端版：列出规划，回车确认，输入意见则让规划 Agent 重做。"""
+    print("\n规划结果：")
+    for m in plan.modules:
+        deps = f"，依赖 {', '.join(m.depends_on)}" if m.depends_on else ""
+        print(f"  - {m.id}：{m.title}（{', '.join(m.files)}{deps}）")
+        for fn in m.provides:
+            print(f"      负责公共函数 {fn}")
+        for path, protos in m.interface.items():
+            for proto in protos:
+                print(f"      接口 {path}：{proto}")
+    try:
+        ans = input("确认这个规划吗？直接回车 = 确认；输入修改意见后回车 = 让规划 Agent 重做：").strip()
+    except EOFError:
+        ans = ""
+    return ans == "", ans
+
+
 def cmd_run(args) -> int:
     task = _run_task(args)
     cfg = get_config(args.config)
     settings = config.load_settings()
-    model = settings.tier(cfg.tier)
+    if cfg.kind == "baseline":
+        settings.tier(cfg.tier)
+        if cfg.fresh_restarts and args.token_budget is None:
+            raise UsageError(f"配置 {cfg.name} 需要 --token-budget（单独运行时手动给出；评测里自动取 full 的平均）")
+    elif args.token_budget is not None:
+        raise UsageError("--token-budget 只用于 b5")
+    if args.human_review and cfg.kind != "multi":
+        raise UsageError("--human-review 只用于多 Agent 配置（b3、b4、full）")
     llm = make_llm(settings)
     store = Store(args.db) if args.db else Store()
     printer = LivePrinter()
     try:
-        res = run_baseline(task, cfg, llm=llm, model=model, runs_root=args.runs_dir, store=store,
-                           subscribers=(printer,), secrets=_secrets(settings), pricing=settings.pricing)
+        res = run_config(task, cfg, llm=llm, settings=settings, runs_root=args.runs_dir, store=store,
+                         subscribers=(printer,), secrets=_secrets(settings), token_budget=args.token_budget,
+                         human_review=args.human_review, human=terminal_confirm if args.human_review else None)
     finally:
         printer.close()
         store.close()
     print(f"\n运行目录：{res.run_dir}")
-    print(f"交付物：{res.final_dir}（第 {res.best} 次尝试）" if res.best else "没有交付物")
+    if cfg.kind == "multi":
+        print(f"规划：{res.run_dir / 'dag.json'}")
+        print(f"交付物：{res.final_dir}" if res.has_code else "没有交付物")
+    else:
+        print(f"交付物：{res.final_dir}（第 {res.best} 次尝试）" if res.best else "没有交付物")
     if res.error:
         print(f"错误：{res.error}", file=sys.stderr)
         return EXIT_FAIL
@@ -372,7 +457,11 @@ def cmd_eval(args) -> int:
         raise UsageError("--runs 至少为 1")
     settings = config.load_settings()
     for cfg in configs:
-        settings.tier(cfg.tier)       # 先检查型号都填了
+        if cfg.kind == "baseline":
+            settings.tier(cfg.tier)   # 先检查型号都填了（多 Agent 的档位在引擎启动时检查）
+    if any(c.kind == "multi" for c in configs):
+        for tier in ("fast", "strong"):
+            settings.tier(tier)
     llm = make_llm(settings)
     out = Path(args.out)
     if args.estimate:
@@ -451,13 +540,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--task", help="任务目录")
     s.add_argument("--spec", help="需求文档（与 --include 一起使用）")
     s.add_argument("--include", help="公共头文件目录")
-    s.add_argument("--config", default="b2", help="配置：b1 或 b2（默认 b2）")
+    s.add_argument("--config", default="b2", help="配置：b1、b2、b3、b4、full、b5（默认 b2）")
+    s.add_argument("--human-review", action="store_true", help="规划完成后停下来等你确认（多 Agent 配置）")
+    s.add_argument("--token-budget", type=int, help="b5 的 token 预算（与 full 同等花费）")
     s.add_argument("--runs-dir", default=DEFAULT_RUNS_DIR, help="运行目录的上级目录（默认 .ff_runs）")
     s.add_argument("--db", help="SQLite 数据库路径（默认 .ff_data/firmforge.db）")
     s.set_defaults(func=cmd_run)
 
     s = sub.add_parser("eval", help="批量评测：任务 × 配置 × 重复次数")
-    s.add_argument("--configs", required=True, help="配置列表，逗号分隔，如 b1,b2")
+    s.add_argument("--configs", required=True, help="配置列表，逗号分隔，如 b1,b2,b3,b4,full,b5（b5 要排在 full 后面）")
     s.add_argument("--tasks", default="all", help="all 或任务 id 列表，逗号分隔")
     s.add_argument("--runs", type=int, default=1, help="每个组合重复几次（默认 1）")
     s.add_argument("--out", required=True, help="输出目录，如 results/first")
@@ -485,7 +576,7 @@ def main(argv: list[str] | None = None) -> int:
     config.load_default_dotenv()
     try:
         return args.func(args)
-    except (UsageError, config.SettingsError, ConfigError) as exc:
+    except (UsageError, config.SettingsError, ConfigError, RegistryError, WorkflowError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return EXIT_USAGE
     except LLMError as exc:

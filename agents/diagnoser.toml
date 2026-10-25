@@ -1,0 +1,8 @@
+name = "diagnoser"
+role = "diagnoser"
+version = "1.0.0"
+model_tier = "strong"             # 固定 strong（DECISIONS 第 31 条）
+temperature = 0.2
+prompt = "prompts/diagnoser.md"
+task_types = ["*"]
+description = "诊断 Agent：判断错在代码还是测试，给出修改指令"

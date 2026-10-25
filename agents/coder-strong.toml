@@ -1,0 +1,8 @@
+name = "coder-strong"
+role = "coder"
+version = "1.0.0"
+model_tier = "strong"
+temperature = 0.2
+prompt = "prompts/coder_module.md"
+task_types = ["*"]
+description = "能力强档编码 Agent，用于状态机、驱动等较难任务"

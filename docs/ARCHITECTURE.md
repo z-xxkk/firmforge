@@ -264,21 +264,50 @@ id = "integrate"
 kind = "verify"
 scope = "all"
 
-[subflow.module_impl]
-steps = [
-  { id = "write", kind = "parallel", branches = ["code", "test"] },   # 编码与写测试并行
-  { id = "code", kind = "agent", role = "coder" },
-  { id = "test", kind = "agent", role = "tester" },
-  { id = "check", kind = "verify", scope = "module" },
-  { id = "review", kind = "agent", role = "reviewer", when = "verify_passed" },
-  { id = "repair", kind = "loop", until = "verify_passed", body = "repair_round",
-    max = "loop.max_attempts_per_module" },
-]
+[[subflow.module_impl.steps]]     # TOML 1.0 的内联表不能跨行，所以用表数组
+id = "write"
+kind = "parallel"
+branches = ["code", "test"]       # 编码与写测试并行
+
+[[subflow.module_impl.steps]]
+id = "code"
+kind = "agent"
+role = "coder"
+
+[[subflow.module_impl.steps]]
+id = "test"
+kind = "agent"
+role = "tester"
+
+[[subflow.module_impl.steps]]
+id = "check"
+kind = "verify"
+scope = "module"
+
+[[subflow.module_impl.steps]]
+id = "repair"
+kind = "loop"
+until = "verify_passed"
+body = "repair_round"
+max = "loop.max_attempts_per_module"
+
+[[subflow.module_impl.steps]]
+id = "review_gate"
+kind = "condition"
+if = "verify_passed"
+then = ["review"]
+
+[[subflow.module_impl.steps]]
+id = "review"
+kind = "agent"
+role = "reviewer"
 ```
 
 节点类型有七种：`agent`、`verify`、`parallel`、`condition`、`loop`、`subflow`/`foreach`、`human`。
 
-- 被 `parallel` 引用为分支的步骤（上例的 `code`、`test`）只在并行组里执行，不会再按顺序单独执行一次。
+- 被 `parallel` 或 `condition` 引用的步骤（上例的 `code`、`test`、`review`）只在引用处执行，不会再按顺序单独执行一次。
+- 审查放在修正循环之后，由 `condition` 判断"客观层已通过"再执行，这样修正后才通过的模块也会被审查。
+- 任何步骤都可以带 `when`（预定义条件）；`subflow` 步骤在当前模块里执行另一个子流程。
 - `repair_round` 是引擎内置的复合步骤，过程是：诊断 → 按 blame 路由给 coder 或 tester → 再判定，升级逻辑也在里面（见 §8）。
 
 条件只能用预定义名称，不能用 `eval`：
@@ -293,22 +322,29 @@ steps = [
 ```json
 {
   "modules": [
-    {"id": "crc16", "title": "CRC16 计算", "task_type": "data_structure",
+    {"id": "crc16", "title": "CRC16 计算", "task_type": "protocol",
      "files": ["src/crc16.c", "src/crc16_internal.h"],
-     "provides": ["crc16_modbus"], "depends_on": [],
+     "provides": [], "depends_on": [],
+     "interface": {"src/crc16_internal.h": ["uint16_t crc16_calc(const uint8_t *data, size_t len);"]},
      "acceptance": ["'123456789' 的 CRC 为 0x4B37"]},
     {"id": "frame_rx", "title": "接收状态机", "task_type": "state_machine",
-     "files": ["src/frame_rx.c", "src/frame_rx.h"],
-     "provides": ["frame_rx_feed"], "depends_on": ["crc16"], "acceptance": ["..."]}
+     "files": ["src/frame_rx.c"],
+     "provides": ["frame_rx_feed"], "depends_on": ["crc16"], "interface": {}, "acceptance": ["..."]}
   ]
 }
 ```
+
+- `provides`：本模块实现的**公共头文件**函数名；
+- `interface`：本模块提供给其他模块的内部头文件 → 函数原型列表（DECISIONS 第 38 条）。头文件由提供方模块写，使用方把提供方列进 `depends_on`；
+- 驱动类任务里 `hal_*.h` 声明的函数由外部（测试替身）提供，不需要任何模块 `provides`。
 
 引擎校验以下几点，不通过就让规划 Agent 重做，最多 2 次：
 - 无环；
 - id 唯一；
 - 模块之间文件不重叠；
-- 公共头文件里的每个函数都被某个模块 `provides`；
+- 公共头文件（`hal_*.h` 除外）里的每个函数都由且只由一个模块 `provides`，`provides` 里不能有公共头文件之外的名字；
+- `interface` 的头文件必须在本模块的 `files` 里；
+- 模块数 1–5 个；
 - 文件路径都在 `src/` 下。
 
 简单任务允许只有一个模块。
@@ -340,7 +376,9 @@ llm_calls.jsonl     每次调用的摘要：agent、模型、token、耗时、�
 llm_calls/<n>.json  完整的请求消息与回复（请求头脱敏），用于复盘
 dag.json            规划结果
 nodes/<module>/attempt_<n>/   src/ tests/ report.json diagnosis.json   ← 快照
+nodes/<module>/review.json    审查意见
 integration/        合并后的工作目录
+first/              每个模块第一次尝试合在一起（评测算首次通过率用）
 final/              交付物：src/ tests/ report.json report.md
 ```
 
@@ -351,7 +389,7 @@ final/              交付物：src/ tests/ report.json report.md
 ```
 runs(id, created_at, task_id, config, verdict, total_tokens, cost, wall_s)
 node_attempts(run_id, node_id, attempt, agent, verdict, failed_layer, signature, tokens, latency_s)
-agent_stats(agent, version, task_type, attempts, first_pass, successes, total_tokens, total_latency_s)
+agent_stats(agent, version, task_type, attempts, first_pass, successes, total_tokens, total_latency_s, total_cost)
 experiences(id, category, layer, pattern, fix, source_run, created_at, uses, helped)
 ```
 
@@ -442,18 +480,19 @@ Agent 要输出文件时，一律使用下面的格式。解析器只接受该�
 |---|---|---|---|
 | planner 规划 | spec、公共头文件、知识库检索结果 | `dag.json`（§2.7） | 无 |
 | coder 编码 | 模块说明、**完整的规划结果（全部模块的划分、职责、接口）**、公共头文件、依赖模块的头文件、预算和禁用符号、经验库提示；修正轮还有：诊断指令、上一轮代码、给 Agent 看的报告摘录 | 实现文件 | `src/` |
-| tester 测试 | **只有** spec 和头文件，看不到实现 | `tests/test_<module>.c`（Unity，自带 main 和 RUN_TEST） | `tests/` |
+| tester 测试 | **只有** spec、公共头文件和规划（含接口原型），看不到实现 | `tests/test_<module>.c`（Unity，自带 main 和 RUN_TEST；HAL 替身也写在这个文件里） | 只能写 `tests/test_<module>.c` |
 | reviewer 审查 | 实现代码、L1–L4 报告 | `{"verdict": "ok"\|"needs_fix", "issues": [{"severity","file","line","rule","message"}]}` | 无 |
 | diagnoser 诊断（固定用 strong 档，DECISIONS 第 31 条） | 给 Agent 看的失败报告、实现、测试、本模块历次签名 | `{"blame": "code"\|"test"\|"interface"\|"spec", "summary", "instructions", "confidence"}` | 无 |
 
 规则：
 
-- **测试 Agent 看不到实现**：tester 的上下文里不能出现 `src/*.c` 的内容。这条要有单元测试守住。
+- **测试 Agent 看不到实现**：tester 的上下文里不能出现 `src/*.c` 的内容。修正轮交给 tester 的报告摘录和诊断指令，先删去 gcc 引用的源码行和与实现代码相同的片段。这条要有单元测试守住。
+- **编码 Agent 只能写本模块的文件**：规划里本模块 `files` 以外的路径一律拒绝并记录。
 - **审查只作提示**：审查在客观层（L1–L5）全部通过后才运行。如果出现 high 级别的 `needs_fix`，最多触发 1 次额外的编码轮。之后不管审查意见如何，都不能阻止通过，意见写进最终报告。
 - **诊断决定修正路由**：
   - `blame = code`：交给 coder；
   - `blame = test`：交给 tester；
-  - `blame = interface`：直接升级到"重新规划"；
+  - `blame = interface`：直接升级到"重新规划"（阶段 4；阶段 3 按 code 处理并在报告里标注，DECISIONS 第 39 条）；
   - `blame = spec`：在报告里标记"需求歧义"，然后按 code 处理。
 
 ### 5.3 注册表
@@ -488,13 +527,13 @@ registry.get(name, version=None)
 
 调度器回答两个问题：先做哪个就绪节点，交给哪个 Agent。
 
-**优先级**：就绪节点按"到终点的最长路径长度"降序排列（关键路径优先），相同时按任务难度降序。
+**优先级**：就绪节点按"到终点的最长路径长度"降序排列（关键路径优先），相同时按规划里的顺序（模块没有单独的难度）。
 
 **策略接口**：`choose(node, candidates, stats, load) -> (agent, score_breakdown)`，有以下实现：
 
 | 策略 | 用途 | 规则 |
 |---|---|---|
-| `serial` | 基线 B3 | 一次只跑一个节点，按拓扑序；固定用该角色注册的第一个 Agent |
+| `serial` | 基线 B3 | 一次只跑一个节点（模块内的编码和写测试也先后进行），按拓扑序；固定用配置指定的 Agent（B3 是 coder-strong，与 B1/B2 同一个模型），没指定时用该角色注册的第一个 |
 | `round_robin` | 基线 B4 | 并行；Agent 轮流分配 |
 | `random` | 对照 | 并行；随机选（固定种子） |
 | `smart` | 完整系统 | 并行；按下式打分取最高 |
@@ -509,7 +548,8 @@ N         = 此类任务的总尝试次数，n_a = 该 Agent 在此类任务上�
 ```
 
 - 得分明细随 `node_assigned` 事件发出，界面上可以看到"为什么选它"。
-- 升级到"换 Agent"时，调度器会把当前 Agent 排除在候选之外。
+- 成本项：所有候选都有实测成本之前，用模型档位的标价（输入 + 输出单价）比较相对成本。
+- 升级到"换 Agent"时，调度器会把当前 Agent 排除在候选之外（阶段 4）。
 
 ## 8. 自我循环
 
@@ -554,8 +594,8 @@ firmforge eval --configs b1,b2,b3,b4,full --tasks all --runs 3 --out results/<�
 |---|---|
 | `b1` | 单 Agent（coder-strong）一次生成，不修正 |
 | `b2` | 单 Agent + 修正循环（报错直接回喂，最多 3 轮） |
-| `b3` | 多 Agent，`serial` 调度，固定分配，无升级、无经验库 |
-| `b4` | 多 Agent，`round_robin` 调度，无升级、无经验库 |
+| `b3` | 多 Agent，`serial` 调度，固定用 coder-strong，无审查、无升级、无经验库 |
+| `b4` | 多 Agent，`round_robin` 调度，无审查、无升级、无经验库 |
 | `full` | 多 Agent，`smart` 调度，升级 + 经验库 + 审查 |
 | `full-no-exp` / `full-no-esc` / `full-no-review` | 消融实验 |
 | `b5` | 同等花费对照（DECISIONS 第 30 条）：单 Agent（coder-strong）每次从头生成、不带报错，直到通过或用完 token 预算；预算 = 同一实验中 `full` 在该任务上的平均 token。因此 `b5` 必须和 `full` 一起跑，且排在 `full` 之后 |

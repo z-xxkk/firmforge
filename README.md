@@ -46,11 +46,11 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 - 模型：fast = deepseek-flash，strong = deepseek-v4-pro，均开启思考模式；成本按北京时间分高峰 / 空闲计价（DECISIONS 第 23、24 条）。
 - 单元测试 114 个（本机 1 个因缺交叉工具链跳过；Docker 中全部通过），其中包括"发给 LLM 的消息和运行目录里都不含隐藏测试内容"。
 
-**阶段 3 准备（进行中）：**
+**阶段 3 准备：已完成（2026-10-25）。**
 
 - 约束依据审计（`docs/CONSTRAINTS_AUDIT.md`）与工作流设计依据调研（`docs/WORKFLOW_RESEARCH.md`），据此做出 DECISIONS 第 26–34 条。
 - 已实现：默认禁用符号按 MISRA C:2012 与最小权限原则扩充；资源预算层改为调用链最坏栈，并用 -O0 调用图检查递归。
-- 新增 3 道题（median_filter、soft_timer、uart_frame），Docker 中自检通过：参考实现 PASS，10 个变异体全部在隐藏测试层被抓到；隐藏测试清单待负责人审核（`tasks_inbox/batch1_hidden_tests.md`）。
+- 新增 3 道题（median_filter、soft_timer、uart_frame），Docker 中自检通过：参考实现 PASS，10 个变异体全部在隐藏测试层被抓到；隐藏测试清单已审核（`tasks_inbox/batch1_hidden_tests.md`）。
 - 6 道题的资源预算：
 
 | 任务 | 实测 flash / RAM / 调用链最坏栈 | 预算 |
@@ -59,14 +59,14 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 | soft_timer | 182 / 0 / 8 | 364 / 0 / 32 |
 | uart_frame | 304 / 0 / 48 | 608 / 0 / 96 |
 
-- 第二批 2 道题（button_events、mpu6050_drv），规则先查资料再定（DECISIONS 第 35 条）；Docker 中自检通过，7 个变异体全部被隐藏测试抓到；隐藏测试清单待审核（`tasks_inbox/batch2_hidden_tests.md`）。
+- 第二批 2 道题（button_events、mpu6050_drv），规则先查资料再定（DECISIONS 第 35 条）；Docker 中自检通过，7 个变异体全部被隐藏测试抓到；隐藏测试清单已审核（`tasks_inbox/batch2_hidden_tests.md`）。
 
 | 任务 | 实测 flash / RAM / 调用链最坏栈 | 预算 |
 |---|---|---|
 | button_events | 180 / 0 / 0 | 360 / 0 / 32 |
 | mpu6050_drv | 368 / 0 / 48 | 736 / 0 / 96 |
 
-- 第三批 2 道题（w25q_drv、modbus_slave），规则依据 Winbond 数据手册与 Modbus 官方规范（DECISIONS 第 36 条）；Docker 中自检通过，8 个变异体全部被隐藏测试抓到；隐藏测试清单待审核（`tasks_inbox/batch3_hidden_tests.md`）。
+- 第三批 2 道题（w25q_drv、modbus_slave），规则依据 Winbond 数据手册与 Modbus 官方规范（DECISIONS 第 36 条）；Docker 中自检通过，8 个变异体全部被隐藏测试抓到；隐藏测试清单已审核（`tasks_inbox/batch3_hidden_tests.md`）。
 
 | 任务 | 实测 flash / RAM / 调用链最坏栈 | 预算 |
 |---|---|---|
@@ -74,6 +74,32 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 | modbus_slave | 466 / 0 / 56 | 932 / 0 / 112 |
 
 - 评测任务共 10 道（数据结构 2、协议 4、状态机 3、驱动 2，难度 1–3），`check-task --all` 全部通过；单元测试 122 个（Docker 中全部通过）。
+
+**阶段 3（多 Agent + 编排引擎 + 调度器）：代码和单元测试已完成，等待用真实 API 验收。**
+
+计划与提示词草案见 `docs/STAGE3_PLAN.md`，模型档位、接口字段等决定见 DECISIONS 第 37–48 条。
+
+- 6 个 Agent（`agents/*.toml`）：规划、测试、诊断用 strong 档，审查用 fast 档，编码有 coder-fast 和 coder-strong 两个；每个角色一份提示词（`prompts/`）。注册表支持按角色和任务类别查找、同名多版本取最新。
+- 规划结果校验（`orchestrator/dag.py`）：无环、id 唯一、文件不重叠、路径在 `src/` 下、公共函数由且只由一个模块负责、接口头文件属于本模块；不合格带着问题清单重做，最多 2 次，仍不合格退化为单模块。
+- 工作流模板 `workflows/module_dev.toml`，引擎按模板解释执行七种节点（agent、verify、parallel、condition、loop、subflow/foreach、human）。
+- 执行引擎（`orchestrator/engine.py`）：asyncio，LLM 4 路、判定 4 路并发；没有依赖关系的模块同时进行，同一模块里编码和写测试同时进行；每次尝试一个隔离目录；全部模块完成后集成判定；按 Ctrl+C 不必等正在进行的请求返回。
+- 角色隔离：测试 Agent 只看到需求、公共头文件和规划，修正轮交给它的报告和诊断指令先删去实现代码片段；编码 Agent 只能写本模块的文件，并且能看到完整规划和依赖模块的头文件。
+- 修正循环（`orchestrator/loop.py`）：诊断 → 按责任交给编码或测试 Agent → 再判定，最多 6 次；这次比历史最好的一次差，就从最好的那次重新开始（rollback 事件）。
+- 调度器（`orchestrator/scheduler.py`）：serial、round_robin、random、smart；smart 每次分配都把成功率、成本、负载、探索四项得分写进 `node_assigned` 事件。能力画像存在 SQLite 的 `agent_stats` 表。
+- 审查：只在客观层全部通过后运行，high 级问题最多触发 1 次额外修改，修改没通过就退回，意见写进报告。
+- 人工节点：`--human-review` 时规划完成后在终端停下等确认，输入意见则让规划 Agent 重做。
+- 评测配置 b1、b2、b3、b4、full、b5；b5 的 token 预算自动取同一实验里 full 的平均值；`summary.md` 新增"每通过一题的平均 token 和成本"。
+- 单元测试 160 个，Docker 中全部通过、无跳过。其中包括：测试 Agent 的消息里没有实现代码（修正轮也一样）、模块并行与依赖顺序（看事件时间戳）、诊断分派、回滚、四种调度策略与 smart 的公式、审查只修 1 次、人工节点、b5 预算、所有角色都看不到隐藏测试；以及把 Modbus 拆成 crc → frame → slave 三个模块跑完整流程，交付物通过隐藏测试。以上全部用假 LLM，真实模型的表现要等验收。
+
+### 阶段 3 验收命令（需要 `.env` 里的 key，会产生费用）
+
+```bash
+docker build -t firmforge -f docker/Dockerfile .
+docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge run --task tasks/modbus_slave --config full
+docker run --rm -it --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge run --task tasks/modbus_slave --config full --human-review
+docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge eval --configs b1,b2,b3,b4,full,b5 --tasks all --runs 1 --out results/stage3 --estimate
+docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge eval --configs b1,b2,b3,b4,full,b5 --tasks all --runs 1 --out results/stage3
+```
 
 ### 阶段 2 验收命令
 

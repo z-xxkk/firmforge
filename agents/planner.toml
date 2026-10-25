@@ -1,0 +1,8 @@
+name = "planner"
+role = "planner"
+version = "1.0.0"
+model_tier = "strong"             # 拆错了后面全白做（DECISIONS 第 37 条）
+temperature = 0.2
+prompt = "prompts/planner.md"
+task_types = ["*"]
+description = "规划 Agent：把需求拆成模块，写明职责、接口和依赖"

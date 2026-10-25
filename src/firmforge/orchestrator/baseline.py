@@ -2,6 +2,8 @@
 
 B1：单 Agent（coder-strong）一次生成，不修正。
 B2：单 Agent + 修正循环，判定报错直接回喂，最多 3 轮，没有诊断 Agent，也没有升级。
+B5：同等花费对照（DECISIONS 第 30 条）：单 Agent 每次从头生成、不带报错，直到通过或用完 token 预算。
+    只在已花的 token 还没达到预算时才开始新的一次。
 
 同一个 Agent 同时写实现和单元测试（DECISIONS 第 21 条）。
 """
@@ -36,11 +38,15 @@ class BaselineConfig:
     agent: str = "coder-strong"
     temperature: float = 0.2
     max_tokens: int = 8192          # 档位没配置 max_tokens 时使用
+    fresh_restarts: bool = False    # True：每次从头生成，不带报错（b5）
+    max_attempts: int = 30          # fresh_restarts 时的次数上限，防止预算填错时停不下来
+    kind: str = "baseline"
 
 
 B1 = BaselineConfig("b1", max_repairs=0)
 B2 = BaselineConfig("b2", max_repairs=3)
-BASELINES = {"b1": B1, "b2": B2}
+B5 = BaselineConfig("b5", max_repairs=0, fresh_restarts=True)
+BASELINES = {"b1": B1, "b2": B2, "b5": B5}
 
 
 class RunInterrupted(KeyboardInterrupt):
@@ -86,12 +92,31 @@ class RunResult:
     def final_dir(self) -> Path:
         return self.run_dir / "final"
 
+    @property
+    def attempt_count(self) -> int:
+        return len(self.attempts)
+
+    @property
+    def has_code(self) -> bool:
+        return bool(self.attempts)
+
+    @property
+    def final_report(self) -> Report | None:
+        best = next((a for a in self.attempts if a.n == self.best), None)
+        return best.report if best else None
+
+    @property
+    def first_dir(self) -> Path | None:
+        return self.attempts[0].dir if self.attempts else None
+
 
 def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: ModelTier,
                  runs_root: Path | str, store: Store | None = None,
                  subscribers: tuple[Callable[[dict], None], ...] = (),
                  toolchain: Toolchain | None = None, secrets: tuple[str, ...] = (),
-                 pricing: PeakSchedule | None = None) -> RunResult:
+                 pricing: PeakSchedule | None = None, token_budget: int | None = None) -> RunResult:
+    if cfg.fresh_restarts and token_budget is None:
+        raise ValueError(f"配置 {cfg.name} 需要 token 预算（与 full 同等花费）")
     t0 = time.perf_counter()
     rd = RunDir.create(runs_root, task.id)
     bus = EventBus(rd.run_id, rd.events_path)
@@ -104,7 +129,8 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
         "run_id": rd.run_id, "task": task.id, "task_root": str(task.root), "spec": str(task.spec_path),
         "config": cfg.name, "agent": cfg.agent, "model_tier": cfg.tier, "model": model.name,
         "max_repairs": cfg.max_repairs, "temperature": cfg.temperature, "thinking": model.thinking,
-        "max_tokens": model.max_tokens or cfg.max_tokens, "started_at": time.time(),
+        "max_tokens": model.max_tokens or cfg.max_tokens, "token_budget": token_budget,
+        "fresh_restarts": cfg.fresh_restarts, "started_at": time.time(),
     }
     rd.write_json("run.json", run_info)
     if store:
@@ -112,7 +138,8 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
 
     bus.emit("run_started", task=task.id, config=cfg.name, model=model.name)
     bus.emit("node_ready", module, title=task.title)
-    bus.emit("node_assigned", module, agent=cfg.agent, scores={"reason": "单 Agent 基线，固定分配"})
+    reason = ("单 Agent 同等花费对照，每次从头生成" if cfg.fresh_restarts else "单 Agent 基线，固定分配")
+    bus.emit("node_assigned", module, agent=cfg.agent, scores={"reason": reason})
 
     messages = coder_messages(task)
     prev_dir: Path | None = None
@@ -131,7 +158,15 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
 
     interrupted = False
     try:
-        for n in range(1, cfg.max_repairs + 2):
+        n = 0
+        while True:
+            n += 1
+            if cfg.fresh_restarts:
+                if n > cfg.max_attempts or (n > 1 and result.tokens >= token_budget):
+                    break
+                messages, prev_dir = coder_messages(task), None      # 从头生成：不带上一次的代码和报错
+            elif n > cfg.max_repairs + 1:
+                break
             try:
                 resp = call(messages, n)
                 parsed = parse_files(resp.text, CODER_DIRS)
@@ -170,8 +205,12 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
             if store:
                 store.add_attempt(rd.run_id, module, n, cfg.agent, report.verdict, report.failed_layer,
                                   report.signature, tokens, latency)
+            if report.failed_layer is None:
+                break
+            if cfg.fresh_restarts:
+                continue
             prev_dir = adir
-            if report.failed_layer is None or n > cfg.max_repairs:
+            if n > cfg.max_repairs:
                 break
             messages = messages + [{"role": "assistant", "content": resp.text},
                                    {"role": "user", "content": repair_message(report, n, cfg.max_repairs, rejected, adir)}]

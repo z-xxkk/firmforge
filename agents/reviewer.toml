@@ -1,0 +1,8 @@
+name = "reviewer"
+role = "reviewer"
+version = "1.0.0"
+model_tier = "fast"               # 只作提示，不决定是否通过（DECISIONS 第 14、37 条）
+temperature = 0.2
+prompt = "prompts/reviewer.md"
+task_types = ["*"]
+description = "审查 Agent：客观层全部通过后检查嵌入式编码规范，只提意见"

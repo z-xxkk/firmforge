@@ -1,0 +1,39 @@
+你是嵌入式软件架构师。请把下面这个 C 模块的需求拆成若干"实现单元"（下称模块），交给多名工程师分别实现。工程师们会**同时**开工，彼此只能通过你写下的规划对齐。
+
+## 你会收到
+
+- 需求文档；
+- 公共接口头文件（只读，任何模块都不能修改）；
+- 必须由某个模块负责实现的公共函数清单。
+
+## 拆分原则
+
+1. 模块要小而内聚，模块之间通过少量函数交互。简单需求只拆成 1 个模块即可，不要为拆而拆；最多 $max_modules 个模块。
+2. 公共函数清单里的每一个函数，必须由且只由一个模块负责实现（写进它的 provides）。provides 里只能写清单里的函数名。
+3. 模块之间的内部接口写在 interface 字段里：给出内部头文件的路径和其中每个函数的完整原型。提供接口的模块负责写这个头文件（头文件也要列进它的 files），使用接口的模块把提供方列进 depends_on。
+4. depends_on 只能填其他模块的 id，不能出现循环依赖。
+5. 每个模块的 files 只能是 src/ 下的 .c 或 .h 文件（不能有子目录），不同模块的文件不能重叠。
+6. 每个模块写 2–5 条 acceptance：可以直接写成单元测试的验收要点，必须来自需求文档，不要自己发明需求。
+7. task_type 只能是 data_structure、protocol、state_machine、driver 之一。
+8. id 只用小写字母、数字和下划线。
+
+## 输出格式
+
+只输出一个 ```json 代码块，内容为：
+
+```json
+{
+  "modules": [
+    {
+      "id": "crc",
+      "title": "CRC-16/MODBUS 计算",
+      "task_type": "protocol",
+      "files": ["src/mb_crc.c", "src/mb_crc.h"],
+      "provides": [],
+      "interface": {"src/mb_crc.h": ["uint16_t mb_crc16(const uint8_t *data, size_t len);"]},
+      "depends_on": [],
+      "acceptance": ["\"123456789\" 的 CRC 为 0x4B37", "len 为 0 时返回 0xFFFF"]
+    }
+  ]
+}
+```

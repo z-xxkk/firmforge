@@ -1,4 +1,4 @@
-"""SQLite 存储（ARCHITECTURE §2.10）。阶段 2 只有 runs 与 node_attempts 两张表。"""
+"""SQLite 存储（ARCHITECTURE §2.10）：runs、node_attempts、agent_stats（能力画像）。"""
 
 from __future__ import annotations
 
@@ -32,6 +32,18 @@ CREATE TABLE IF NOT EXISTS node_attempts (
     tokens INTEGER DEFAULT 0,
     latency_s REAL,
     PRIMARY KEY (run_id, node_id, attempt)
+);
+CREATE TABLE IF NOT EXISTS agent_stats (
+    agent TEXT NOT NULL,
+    version TEXT NOT NULL,
+    task_type TEXT NOT NULL,
+    attempts INTEGER DEFAULT 0,
+    first_pass INTEGER DEFAULT 0,
+    successes INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    total_latency_s REAL DEFAULT 0,
+    total_cost REAL DEFAULT 0,
+    PRIMARY KEY (agent, version, task_type)
 );
 """
 
@@ -69,6 +81,26 @@ class Store:
                     failed_layer: str | None, signature: str | None, tokens: int, latency_s: float) -> None:
         self._exec("INSERT OR REPLACE INTO node_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                    (run_id, node_id, attempt, agent, verdict, failed_layer, signature, tokens, latency_s))
+
+    def add_agent_stat(self, agent: str, version: str, task_type: str, *, first_pass: bool, success: bool,
+                       tokens: int, latency_s: float, cost: float) -> None:
+        """记一次"Agent 负责一个模块"的结果：尝试 1 次，首次即通过、最终通过各记 0 或 1。"""
+        self._exec(
+            "INSERT INTO agent_stats VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(agent, version, task_type) DO UPDATE SET attempts = attempts + 1, "
+            "first_pass = first_pass + excluded.first_pass, successes = successes + excluded.successes, "
+            "total_tokens = total_tokens + excluded.total_tokens, "
+            "total_latency_s = total_latency_s + excluded.total_latency_s, "
+            "total_cost = total_cost + excluded.total_cost",
+            (agent, version, task_type, int(first_pass), int(success), tokens, latency_s, cost))
+
+    def agent_stats(self, task_type: str) -> dict[str, dict]:
+        """某类任务上各 Agent 的累计画像（同名各版本合并）。"""
+        rows = self.query("SELECT agent, SUM(attempts) AS attempts, SUM(first_pass) AS first_pass, "
+                          "SUM(successes) AS successes, SUM(total_tokens) AS total_tokens, "
+                          "SUM(total_latency_s) AS total_latency_s, SUM(total_cost) AS total_cost "
+                          "FROM agent_stats WHERE task_type = ? GROUP BY agent", (task_type,))
+        return {r["agent"]: r for r in rows}
 
     def query(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._lock:

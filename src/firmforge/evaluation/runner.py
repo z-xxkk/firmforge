@@ -13,13 +13,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from ..agents.registry import Registry
 from ..config import Settings, Toolchain
 from ..llm import LLMClient
-from ..orchestrator.baseline import BaselineConfig, RunResult, run_baseline
+from ..orchestrator.baseline import RunResult, run_baseline
+from ..orchestrator.engine import MultiRunResult, run_multi
 from ..store import Store
 from ..tasks import Task
 from ..verifier import verify
 from ..verifier.report import PASS, Report
+from .configs import RunConfig
 from .metrics import read_csv, summarize, write_csv
 
 JUDGE_LAYERS = ["host_compile", "cross_compile", "resources", "static_check"]
@@ -41,11 +44,26 @@ def _passed(report: Report | None) -> bool:
     return report is not None and report.verdict == PASS
 
 
-def make_row(task: Task, cfg: BaselineConfig, run_no: int, res: RunResult,
+def run_config(task: Task, cfg: RunConfig, *, llm: LLMClient, settings: Settings, runs_root: Path | str,
+               store: Store | None = None, subscribers: tuple[Callable[[dict], None], ...] = (),
+               toolchain: Toolchain | None = None, secrets: tuple[str, ...] = (), token_budget: int | None = None,
+               registry: Registry | None = None, human_review: bool = False,
+               human=None) -> RunResult | MultiRunResult:
+    """按配置类型运行一次：单 Agent 基线或多 Agent 引擎。命令行和评测共用。"""
+    if cfg.kind == "multi":
+        return run_multi(task, cfg, llm=llm, settings=settings, runs_root=runs_root, registry=registry, store=store,
+                         subscribers=subscribers, toolchain=toolchain, secrets=secrets,
+                         human_review=human_review, human=human)
+    return run_baseline(task, cfg, llm=llm, model=settings.tier(cfg.tier), runs_root=runs_root, store=store,
+                        subscribers=subscribers, toolchain=toolchain, secrets=secrets, pricing=settings.pricing,
+                        token_budget=token_budget)
+
+
+def make_row(task: Task, cfg: RunConfig, run_no: int, res: RunResult | MultiRunResult,
              first: Report | None, final: Report | None) -> dict:
     res_layer = final.layer("resources") if final else None
-    best = next((a for a in res.attempts if a.n == res.best), None)
-    ut = best.report.layer("unit_tests") if best else None
+    agent_report = res.final_report
+    ut = agent_report.layer("unit_tests") if agent_report else None
     if res.verdict == "error":
         failed = "llm_error"
     elif final is None:
@@ -57,7 +75,7 @@ def make_row(task: Task, cfg: BaselineConfig, run_no: int, res: RunResult,
     return {
         "task": task.id, "category": task.category, "difficulty": task.difficulty,
         "config": cfg.name, "run": run_no, "first_pass": _passed(first), "final_pass": _passed(final),
-        "attempts": len(res.attempts), "tokens": res.tokens, "cost": round(res.cost, 6),
+        "attempts": res.attempt_count, "tokens": res.tokens, "cost": round(res.cost, 6),
         "wall_s": round(res.wall_s, 2),
         "flash": res_layer.metrics.get("flash") if res_layer else None,
         "ram": res_layer.metrics.get("ram") if res_layer else None,
@@ -73,10 +91,16 @@ class EvalOutput:
     summary_path: Path
 
 
-def evaluate(tasks: list[Task], configs: list[BaselineConfig], runs: int, out_dir: Path | str, *,
+def full_budget(rows: list[dict], task_id: str) -> int:
+    """b5 的 token 预算：同一实验里 full 在该任务上的平均 token。"""
+    xs = [int(r["tokens"]) for r in rows if r["task"] == task_id and r["config"] == "full"]
+    return round(sum(xs) / len(xs)) if xs else 0
+
+
+def evaluate(tasks: list[Task], configs: list[RunConfig], runs: int, out_dir: Path | str, *,
              llm: LLMClient, settings: Settings, toolchain: Toolchain | None = None,
              subscribers: tuple[Callable[[dict], None], ...] = (), secrets: tuple[str, ...] = (),
-             progress: Callable[[str], None] = lambda s: None) -> EvalOutput:
+             progress: Callable[[str], None] = lambda s: None, registry: Registry | None = None) -> EvalOutput:
     out = Path(out_dir)
     (out / "judges").mkdir(parents=True, exist_ok=True)
     store = Store(out / "firmforge.db")       # 每个实验用独立的数据库
@@ -87,17 +111,19 @@ def evaluate(tasks: list[Task], configs: list[BaselineConfig], runs: int, out_di
     try:
         for task in tasks:
             for cfg in configs:
-                model = settings.tier(cfg.tier)
+                budget = full_budget(rows, task.id) if getattr(cfg, "fresh_restarts", False) else None
                 for run_no in range(1, runs + 1):
                     i += 1
-                    progress(f"[{i}/{total}] 任务 {task.id}，配置 {cfg.name}，第 {run_no} 次")
-                    res = run_baseline(task, cfg, llm=llm, model=model, runs_root=out / "runs", store=store,
-                                       subscribers=subscribers, toolchain=toolchain, secrets=secrets,
-                                       pricing=settings.pricing)
-                    final = judge(res.final_dir, task, toolchain) if res.attempts else None
+                    extra = f"，token 预算 {budget}（full 的平均）" if budget is not None else ""
+                    progress(f"[{i}/{total}] 任务 {task.id}，配置 {cfg.name}，第 {run_no} 次{extra}")
+                    res = run_config(task, cfg, llm=llm, settings=settings, runs_root=out / "runs", store=store,
+                                     subscribers=subscribers, toolchain=toolchain, secrets=secrets,
+                                     token_budget=budget, registry=registry)
+                    final = judge(res.final_dir, task, toolchain) if res.has_code else None
                     first = None
-                    if res.attempts:
-                        first = final if res.best == 1 else judge(res.attempts[0].dir, task, toolchain)
+                    if res.has_code:
+                        same = getattr(res, "best", None) == 1
+                        first = final if same else judge(res.first_dir, task, toolchain)
                     judge_info = {"run_id": res.run_id, "final": final.to_dict() if final else None,
                                   "first": first.to_dict() if first else None}
                     (out / "judges" / f"{res.run_id}.json").write_text(
@@ -117,12 +143,13 @@ def evaluate(tasks: list[Task], configs: list[BaselineConfig], runs: int, out_di
     return EvalOutput(rows, csv_path, summary_path)
 
 
-def estimate(tasks: list[Task], configs: list[BaselineConfig], runs: int, out_dir: Path | str, *,
+def estimate(tasks: list[Task], configs: list[RunConfig], runs: int, out_dir: Path | str, *,
              llm: LLMClient, settings: Settings, toolchain: Toolchain | None = None,
-             secrets: tuple[str, ...] = (), progress: Callable[[str], None] = lambda s: None) -> dict:
+             secrets: tuple[str, ...] = (), progress: Callable[[str], None] = lambda s: None,
+             registry: Registry | None = None) -> dict:
     """只跑第 1 个任务、每个配置 1 次，按规模推算总 token 和成本。"""
     sample = evaluate(tasks[:1], configs, 1, Path(out_dir) / "estimate", llm=llm, settings=settings,
-                      toolchain=toolchain, secrets=secrets, progress=progress)
+                      toolchain=toolchain, secrets=secrets, progress=progress, registry=registry)
     scale = len(tasks) * runs
     per_config = {r["config"]: {"tokens": r["tokens"], "cost": r["cost"]} for r in sample.rows}
     return {

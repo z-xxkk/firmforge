@@ -56,6 +56,17 @@ def summarize(rows: list[dict], title: str = "评测汇总") -> str:
         lines.append(f"| {c} | {mean_std([r['final_pass'] for r in rs], 2)} | {mean_std([r['first_pass'] for r in rs], 2)} "
                      f"| {mean_std([r['attempts'] for r in rs])} | {mean_std([r['tokens'] for r in rs], 0)} "
                      f"| {mean_std([r['cost'] for r in rs], 4)} | {mean_std([r['wall_s'] for r in rs])} |")
+    lines += ["", "## 同等花费比较：每通过一题的平均花费", "",
+              "总 token（成本）÷ 最终通过的次数（DECISIONS 第 30 条）。一题都没通过时记为 -。", "",
+              "| 配置 | 通过次数 / 运行次数 | 每通过一题 token | 每通过一题成本（元） |", "|---|---|---|---|"]
+    for c in configs:
+        rs = [r for r in rows if r["config"] == c]
+        passes = sum(1 for r in rs if _num(r["final_pass"]) == 1.0)
+        tok = sum(_num(r["tokens"]) or 0 for r in rs)
+        cost = sum(_num(r["cost"]) or 0 for r in rs)
+        per_tok = f"{tok / passes:.0f}" if passes else "-"
+        per_cost = f"{cost / passes:.4f}" if passes else "-"
+        lines.append(f"| {c} | {passes} / {len(rs)} | {per_tok} | {per_cost} |")
     cats = sorted(set(r["category"] for r in rows))
     lines += ["", "## 按任务类别的最终通过率", "", "| 类别 | " + " | ".join(configs) + " |",
               "|---|" + "---|" * len(configs)]

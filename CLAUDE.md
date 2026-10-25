@@ -67,7 +67,8 @@ firmforge check-task --all                     # 自检评测任务：参考实�
 firmforge verify <workdir> --task tasks/<id>   # 对一个工作目录跑判定器
 firmforge models                               # 列出 DeepSeek 可用型号（需要 .env 里的 key）
 firmforge run --task tasks/<id> --config b2    # 单 Agent 跑一个任务，生成 .ff_runs/<run_id>/
-firmforge eval --configs b1,b2 --tasks all --runs 1 --out results/<实验名>
+firmforge run --task tasks/<id> --config full --human-review   # 多 Agent；规划后停下等确认
+firmforge eval --configs b1,b2,b3,b4,full,b5 --tasks all --runs 1 --out results/<实验名>   # b5 要排在 full 后面
 firmforge replay .ff_runs/<run_id> --speed 4   # 终端回放
 docker build -t firmforge -f docker/Dockerfile .
 docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge <子命令>

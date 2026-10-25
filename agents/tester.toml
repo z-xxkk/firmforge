@@ -1,0 +1,8 @@
+name = "tester"
+role = "tester"
+version = "1.0.0"
+model_tier = "strong"             # 测试写错会把对的代码判错（DECISIONS 第 37 条）
+temperature = 0.2
+prompt = "prompts/tester.md"
+task_types = ["*"]
+description = "测试 Agent：只看需求和接口写单元测试，看不到实现"

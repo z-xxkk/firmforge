@@ -1,0 +1,8 @@
+name = "coder-fast"
+role = "coder"
+version = "1.0.0"
+model_tier = "fast"
+temperature = 0.2
+prompt = "prompts/coder_module.md"
+task_types = ["*"]
+description = "快速档编码 Agent：便宜，适合简单模块"

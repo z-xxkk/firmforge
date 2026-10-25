@@ -78,6 +78,18 @@ def prompts_dir() -> Path:
     return cwd if cwd.is_dir() else project_root() / "prompts"
 
 
+def agents_dir() -> Path:
+    """Agent 定义目录 agents/*.toml：优先当前目录，否则用安装目录。"""
+    cwd = Path.cwd() / "agents"
+    return cwd if cwd.is_dir() else project_root() / "agents"
+
+
+def workflows_dir() -> Path:
+    """工作流模板目录 workflows/*.toml：优先当前目录，否则用安装目录。"""
+    cwd = Path.cwd() / "workflows"
+    return cwd if cwd.is_dir() else project_root() / "workflows"
+
+
 def unity_dir() -> Path:
     return project_root() / "third_party" / "unity"
 
