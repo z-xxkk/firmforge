@@ -453,6 +453,11 @@ def _eval_tasks(spec: str) -> list[Task]:
     return chosen
 
 
+def _say(text: str) -> None:
+    """进度行立即输出：docker run 不带 -t 时标准输出是块缓冲，不 flush 就要等很久才看到。"""
+    print(text, flush=True)
+
+
 def cmd_eval(args) -> int:
     configs = parse_configs(args.configs)
     tasks = _eval_tasks(args.tasks)
@@ -468,8 +473,12 @@ def cmd_eval(args) -> int:
     llm = make_llm(settings)
     out = Path(args.out)
     if args.estimate:
-        est = estimate(tasks, configs, args.runs, out, llm=llm, settings=settings,
-                       secrets=_secrets(settings), progress=print)
+        printer = LivePrinter()
+        try:
+            est = estimate(tasks, configs, args.runs, out, llm=llm, settings=settings, subscribers=(printer,),
+                           secrets=_secrets(settings), progress=_say)
+        finally:
+            printer.close()
         print(f"\n估算（按任务 {est['sample_task']} 实测 × {est['scale']}）：")
         for name, v in est["per_config"].items():
             print(f"  {name}：单次 token {v['tokens']}，成本 {v['cost']:.4f} 元")
@@ -482,7 +491,7 @@ def cmd_eval(args) -> int:
     printer = LivePrinter()
     try:
         res = evaluate(tasks, configs, args.runs, out, llm=llm, settings=settings, subscribers=(printer,),
-                       secrets=_secrets(settings), progress=print)
+                       secrets=_secrets(settings), progress=_say)
     finally:
         printer.close()
     print(f"\n结果：{res.csv_path}\n汇总：{res.summary_path}")

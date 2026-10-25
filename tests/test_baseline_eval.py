@@ -379,6 +379,7 @@ class CliStage2Test(_Tmp):
                                      "--out", str(self.tmp / "e"), "--estimate", llm=llm)
         self.assertEqual(code, 0)
         self.assertIn("全量预计", out)
+        self.assertIn("运行开始：任务", out)            # 估算时也实时显示事件
         self.assertIn(f"× {len(TASKS) * 3}", out)     # 全部任务 × 3 次
 
     def test_ctrl_c_exit_code(self):

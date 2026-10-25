@@ -146,10 +146,11 @@ def evaluate(tasks: list[Task], configs: list[RunConfig], runs: int, out_dir: Pa
 def estimate(tasks: list[Task], configs: list[RunConfig], runs: int, out_dir: Path | str, *,
              llm: LLMClient, settings: Settings, toolchain: Toolchain | None = None,
              secrets: tuple[str, ...] = (), progress: Callable[[str], None] = lambda s: None,
-             registry: Registry | None = None) -> dict:
+             registry: Registry | None = None, subscribers: tuple[Callable[[dict], None], ...] = ()) -> dict:
     """只跑第 1 个任务、每个配置 1 次，按规模推算总 token 和成本。"""
     sample = evaluate(tasks[:1], configs, 1, Path(out_dir) / "estimate", llm=llm, settings=settings,
-                      toolchain=toolchain, secrets=secrets, progress=progress, registry=registry)
+                      toolchain=toolchain, secrets=secrets, progress=progress, registry=registry,
+                      subscribers=subscribers)
     scale = len(tasks) * runs
     per_config = {r["config"]: {"tokens": r["tokens"], "cost": r["cost"]} for r in sample.rows}
     return {
