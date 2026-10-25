@@ -1,0 +1,39 @@
+id = "at_parser"
+title = "AT 指令响应解析"
+category = "state_machine"
+difficulty = 3
+source = "ITU-T V.250（07/2003）响应格式与结果码、3GPP TS 27.007 Rel-19 的 +CME ERROR 与 +CSQ（tasks_inbox/batch5_rules.md）"
+
+[budget]
+# 参考实现实测：flash 963、ram 0、调用链最坏栈 24；按 2 倍定，栈取 48（DECISIONS 第 19、20、27 条）
+flash_bytes = 1926
+ram_bytes = 0
+stack_bytes = 48
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/urc_before_prefix.c"
+replaces = "at_parser.c"
+expect_fail = "hidden_tests"
+why = "先判主动上报：AT+CREG? 进行中的 +CREG 回答被当成上报"
+
+[[mutants]]
+file = "mutants/echo_as_info.c"
+replaces = "at_parser.c"
+expect_fail = "hidden_tests"
+why = "不认回显，模组回显的命令被当成信息文本"
+
+[[mutants]]
+file = "mutants/cme_not_final.c"
+replaces = "at_parser.c"
+expect_fail = "hidden_tests"
+why = "+CME ERROR 不当最终结果码，命令一直不结束"
+
+[[mutants]]
+file = "mutants/rssi_off_by_one.c"
+replaces = "at_parser.c"
+expect_fail = "hidden_tests"
+why = "rssi 换算 dBm 差一档（0 应为 −113 dBm）"

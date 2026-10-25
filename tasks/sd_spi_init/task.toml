@@ -1,0 +1,39 @@
+id = "sd_spi_init"
+title = "SD 卡 SPI 模式初始化与读块"
+category = "driver"
+difficulty = 3
+source = "ChaN《How to Use MMC/SDC》与 Linux 内核 SD 驱动（mmc.h、sd.h、sd_ops.c、mmc_spi.c）：CMD0/CMD8/ACMD41/CMD58/CMD16/CMD17、CRC7、R1、HCS/CCS（tasks_inbox/batch5_rules.md）"
+
+[budget]
+# 参考实现实测：flash 662、ram 0、调用链最坏栈 80（sd_init → command → sd_crc7）；按 2 倍定（DECISIONS 第 19、20、27 条）
+flash_bytes = 1324
+ram_bytes = 0
+stack_bytes = 160
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/cmd8_bad_crc.c"
+replaces = "sd_card.c"
+expect_fail = "hidden_tests"
+why = "CMD8 的 CRC 写错（SPI 模式下 CMD0、CMD8 的 CRC 必须正确）"
+
+[[mutants]]
+file = "mutants/hc_byte_address.c"
+replaces = "sd_card.c"
+expect_fail = "hidden_tests"
+why = "大容量卡也按块号 × 512 给地址（大容量卡要给块号）"
+
+[[mutants]]
+file = "mutants/no_hcs.c"
+replaces = "sd_card.c"
+expect_fail = "hidden_tests"
+why = "ACMD41 不带 HCS 位，大容量卡永远不会就绪"
+
+[[mutants]]
+file = "mutants/single_poll.c"
+replaces = "sd_card.c"
+expect_fail = "hidden_tests"
+why = "只等 1 个字节就判定没有回应（回应可能晚到最多 8 个字节）"

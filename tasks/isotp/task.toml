@@ -1,0 +1,39 @@
+id = "isotp"
+title = "ISO-TP 传输层（ISO 15765-2）"
+category = "protocol"
+difficulty = 3
+source = "AUTOSAR《Specification of CAN Transport Layer》CP R21-11 与 Linux 内核 net/can/isotp.c：帧格式、序号回绕、流控、块大小、最小间隔、意外帧处理（tasks_inbox/batch5_rules.md）"
+
+[budget]
+# 参考实现实测：flash 872、ram 0、调用链最坏栈 24；按 2 倍定，栈不低于 32 字节时取 48（DECISIONS 第 19、20、27 条）
+flash_bytes = 1744
+ram_bytes = 0
+stack_bytes = 48
+
+[rules]
+extra_forbidden_symbols = []
+allowed_symbols = []
+
+[[mutants]]
+file = "mutants/sn_wrap_to_one.c"
+replaces = "isotp.c"
+expect_fail = "hidden_tests"
+why = "连续帧序号 15 之后回到 1（应回到 0）"
+
+[[mutants]]
+file = "mutants/ignore_block_size.c"
+replaces = "isotp.c"
+expect_fail = "hidden_tests"
+why = "不按对方的块大小停下来等流控，会把对方缓冲区冲垮"
+
+[[mutants]]
+file = "mutants/reserved_stmin_zero.c"
+replaces = "isotp.c"
+expect_fail = "hidden_tests"
+why = "保留的最小间隔当成 0（应按 127 毫秒）"
+
+[[mutants]]
+file = "mutants/no_fc_after_ff.c"
+replaces = "isotp.c"
+expect_fail = "hidden_tests"
+why = "接收端收到首帧不回流控，对方一直等下去"
