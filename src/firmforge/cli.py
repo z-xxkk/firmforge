@@ -310,7 +310,7 @@ class LivePrinter:
         self.out = out
         self.t0: float | None = None
         self._waiting_since: float | None = None
-        self._in_flight = 0
+        self._in_flight: set[tuple] = set()
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._beat, daemon=True)
@@ -323,12 +323,15 @@ class LivePrinter:
         with self._lock:
             if self.t0 is None:
                 self.t0 = e["ts"]
+            # 按（模块, Agent）记录正在等回复的调用：并行时一个模块开始判定，不影响另一个模块还在等的 Agent；
+            # 单 Agent 基线带格式提醒重试时会连发两次 agent_started，用集合也不会多算
+            key = (e.get("node_id"), e.get("data", {}).get("agent"))
             if e["type"] == "agent_started":
-                self._in_flight += 1
+                self._in_flight.add(key)
             elif e["type"] == "agent_finished":
-                self._in_flight = max(0, self._in_flight - 1)
-            elif e["type"] in ("run_finished", "verify_started"):
-                self._in_flight = 0
+                self._in_flight.discard(key)
+            elif e["type"] == "run_finished":
+                self._in_flight.clear()
             # 每来一个事件就重新计时；还有 Agent 在等回复才提示
             self._waiting_since = time.monotonic() if self._in_flight else None
             self._print(format_event(e, self.t0))

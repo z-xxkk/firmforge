@@ -748,6 +748,20 @@ class CliStage3Test(_Tmp):
         self.assertIn("负责公共函数 ringbuf_init", out)
         self.assertIn("负责人确认了规划", out)
 
+    def test_heartbeat_continues_while_other_module_waits(self):
+        buf = io.StringIO()
+        printer = cli.LivePrinter(heartbeat_s=0.2, out=buf)
+        try:
+            printer({"ts": 100.0, "type": "agent_started", "node_id": "pdu", "data": {"agent": "tester", "attempt": 1}})
+            printer({"ts": 100.0, "type": "agent_started", "node_id": "crc", "data": {"agent": "tester", "attempt": 1}})
+            printer({"ts": 101.0, "type": "agent_finished", "node_id": "crc",
+                     "data": {"agent": "tester", "ok": True, "files": []}})
+            printer({"ts": 101.0, "type": "verify_started", "node_id": "crc", "data": {"attempt": 1, "scope": "module"}})
+            time.sleep(0.7)
+        finally:
+            printer.close()
+        self.assertIn("模型还在思考", buf.getvalue())         # pdu 的测试 Agent 还在等
+
     def test_usage_errors(self):
         base = ("run", "--task", str(RB.root), "--runs-dir", str(self.tmp / "runs"), "--db", str(self.tmp / "db"))
         self.assertEqual(self._cli(*base, "--config", "b5")[0], 3)                 # 缺 --token-budget
