@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>FirmForge 界面示意</title>
+<style>
+:root{
+  --mask:#1F4D3A;      /* 阻焊绿：DAG 画布底色 */
+  --mask-trace:#3F8A63;/* 阻焊下的走线 */
+  --silk:#EEF2EC;      /* 丝印白：画布上的文字和轮廓 */
+  --gold:#D4AF37;      /* 沉金：焊盘、已满足的依赖 */
+  --chrome:#E4E7EA;    /* 机壳灰：外框 */
+  --panel:#F6F7F8;
+  --ink:#1D2328;
+  --ink2:#5A646C;
+  --rule:#C9CED3;
+  --run:#FF8A1F; --fail:#E5483B; --pass:#2FA864; --off:#55675D;
+  --code:"JetBrains Mono","Noto Sans Mono",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;background:var(--chrome);color:var(--ink);
+  font:13px/1.45 "Noto Sans CJK SC","Microsoft YaHei",sans-serif;display:grid;
+  grid-template-rows:44px 1fr 210px 26px;overflow:hidden}
+.tool{display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--rule);background:var(--panel)}
+.btn{border:1px solid var(--rule);background:#fff;border-radius:4px;padding:4px 12px;font:inherit;color:var(--ink)}
+.btn.primary{background:var(--mask);color:var(--silk);border-color:var(--mask);font-weight:600}
+.seg{display:flex;border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.seg span{padding:4px 10px;background:#fff}.seg span.on{background:var(--ink);color:#fff}
+.sp{flex:1}.muted{color:var(--ink2)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:1px}
+main{display:grid;grid-template-columns:250px 1fr 330px;min-height:0}
+aside{background:var(--panel);padding:12px;overflow:hidden}
+aside.l{border-right:1px solid var(--rule)} aside.r{border-left:1px solid var(--rule)}
+h2{font-size:13px;font-weight:600;margin:4px 0 8px}
+h2+p{margin-top:-6px;margin-bottom:8px}
+.list{border:1px solid var(--rule);background:#fff;border-radius:4px;height:300px;overflow:hidden}
+.list div{display:flex;justify-content:space-between;padding:4px 8px;font-family:var(--code);font-size:12px}
+.list div.sel{background:#DCE8E1}
+.list i{font-style:normal;color:var(--ink2);font-family:"Noto Sans CJK SC",sans-serif}
+.field{margin-top:12px}.field label{display:block;color:var(--ink2);margin-bottom:3px}
+select,input{font:inherit;width:100%;padding:4px 6px;border:1px solid var(--rule);border-radius:4px;background:#fff}
+.chk{display:flex;gap:6px;align-items:center;margin-top:12px}
+.run{width:100%;margin-top:16px;padding:8px}
+.board{background:var(--mask);position:relative;overflow:hidden}
+table{border-collapse:collapse;width:100%}
+th,td{white-space:nowrap;text-align:left;padding:4px 4px;border-bottom:1px solid var(--rule);font-weight:400}
+th{color:var(--ink2);font-size:12px}
+td.c{font-family:var(--code);font-size:12px}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+.why{margin-top:6px;color:var(--ink2);font-size:12px}
+.bottom{display:grid;grid-template-columns:1fr 520px;border-top:1px solid var(--rule);background:var(--panel);min-height:0}
+.tabs{display:flex;gap:16px;padding:6px 12px 0;border-bottom:1px solid var(--rule)}
+.tabs span{padding-bottom:5px}.tabs span.on{border-bottom:2px solid var(--mask);font-weight:600}
+.log{padding:6px 12px;font-size:12px}
+.log div{display:grid;grid-template-columns:70px 64px 1fr;gap:8px;padding:2px 0}
+.log b{font-weight:400;font-family:var(--code)}
+.rep{border-left:1px solid var(--rule);padding:8px 12px}
+.header{display:flex;gap:6px;margin:8px 0}
+.pin{flex:1;border-radius:3px;padding:6px 4px;text-align:center;color:#fff;font-size:12px}
+.pin small{display:block;opacity:.85;font-size:11px}
+.detail{font-family:var(--code);font-size:11.5px;background:#fff;border:1px solid var(--rule);border-radius:4px;padding:6px 8px;color:#3a2222;white-space:pre;overflow:hidden;height:74px}
+.status{display:flex;gap:22px;align-items:center;padding:0 12px;background:var(--ink);color:#D8DEE2;font-size:12px}
+.status b{font-weight:400;font-family:var(--code)}
+</style>
+</head>
+<body>
+<div class="tool">
+  <button class="btn primary">新建运行</button>
+  <button class="btn">打开历史运行</button>
+  <span class="muted" style="margin-left:14px">后端</span>
+  <div class="seg"><span class="on">docker</span><span>本机</span></div>
+  <span class="sp"></span>
+  <span><span class="dot" style="background:var(--pass)"></span>工具链齐全</span>
+  <button class="btn">检查环境</button>
+</div>
+
+<main>
+<aside class="l">
+  <h2>选任务</h2>
+  <div class="seg" style="margin-bottom:8px"><span class="on">评测题</span><span>自己写需求</span></div>
+  <div class="list">
+    <div><span>ringbuf</span><i>难度 1</i></div>
+    <div><span>crc16</span><i>难度 1</i></div>
+    <div><span>median_filter</span><i>难度 1</i></div>
+    <div><span>uart_frame</span><i>难度 2</i></div>
+    <div><span>button_event</span><i>难度 2</i></div>
+    <div><span>w25q_driver</span><i>难度 2</i></div>
+    <div class="sel"><span>modbus_slave</span><i>难度 3</i></div>
+    <div><span>xmodem_rx</span><i>难度 3</i></div>
+    <div><span>mavlink_parser</span><i>难度 3</i></div>
+    <div><span>isotp</span><i>难度 3</i></div>
+    <div><span>sd_spi_init</span><i>难度 3</i></div>
+    <div><span>flash_kv</span><i>难度 3</i></div>
+  </div>
+  <div class="field"><label>配置</label><select><option>full：多 Agent 完整系统</option></select></div>
+  <label class="chk"><input type="checkbox" checked style="width:auto">规划完成后等我确认</label>
+  <button class="btn primary run">开始运行</button>
+</aside>
+
+<section class="board">
+<svg width="860" height="620" viewBox="0 0 860 620" font-family="'JetBrains Mono', 'Noto Sans Mono', monospace">
+  <defs>
+    <pattern id="via" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="20" cy="20" r="1.1" fill="#2B5E47"/>
+    </pattern>
+  </defs>
+  <rect width="860" height="620" fill="url(#via)"/>
+  <!-- 走线：依赖 -->
+  <g fill="none" stroke-width="3" stroke-linejoin="round">
+    <path d="M430 138 V160 L410 180 H262 L240 202 V236" stroke="var(--gold)"/>
+    <path d="M430 138 V160 L450 180 H598 L620 202 V236" stroke="var(--gold)"/>
+    <path d="M240 340 V362 L262 384 H408 L430 406 V426" stroke="var(--gold)"/>
+    <path d="M620 340 V362 L598 384 H452 L430 406 V426" stroke="var(--mask-trace)"/>
+    <path d="M430 530 V556" stroke="var(--mask-trace)"/>
+    <path d="M300 283 H560" stroke="var(--gold)" stroke-dasharray="0" opacity=".0"/>
+  </g>
+  <g fill="var(--gold)"><circle cx="430" cy="138" r="5"/><circle cx="240" cy="236" r="5"/><circle cx="620" cy="236" r="5"/><circle cx="240" cy="340" r="5"/><circle cx="430" cy="426" r="5"/></g>
+
+  <!-- 封装：规划 -->
+  <g transform="translate(340,34)">
+    <rect width="180" height="104" fill="none" stroke="var(--silk)" stroke-width="1.5"/>
+    <circle cx="12" cy="12" r="3" fill="var(--silk)"/>
+    <text x="24" y="30" fill="var(--silk)" font-size="15" font-weight="700">plan</text>
+    <text x="24" y="50" fill="var(--silk)" font-size="12" font-family="'Noto Sans CJK SC', sans-serif" opacity=".8">由 planner 负责</text>
+    <circle cx="160" cy="24" r="6" fill="var(--pass)"/><text x="138" y="50" fill="var(--silk)" font-size="11" font-family="'Noto Sans CJK SC', sans-serif">完成</text>
+    <text x="24" y="78" fill="var(--silk)" font-size="11" font-family="'Noto Sans CJK SC', sans-serif" opacity=".7">3 个模块，已确认</text>
+  </g>
+
+  <!-- 封装：crc 通过 -->
+  <g transform="translate(130,236)">
+    <rect width="220" height="104" fill="none" stroke="var(--silk)" stroke-width="1.5"/>
+    <circle cx="12" cy="12" r="3" fill="var(--silk)"/>
+    <text x="24" y="30" fill="var(--silk)" font-size="15" font-weight="700">crc</text>
+    <text x="24" y="50" fill="var(--silk)" font-size="12" font-family="'Noto Sans CJK SC', sans-serif" opacity=".8">coder-fast 写，第 1/6 次</text>
+    <circle cx="200" cy="24" r="6" fill="var(--pass)"/><text x="178" y="50" fill="var(--silk)" font-size="11" font-family="'Noto Sans CJK SC', sans-serif">通过</text>
+    <g transform="translate(24,66)"><g font-family="'Noto Sans CJK SC', sans-serif" font-size="9.5" fill="var(--silk)" opacity=".75" text-anchor="middle"><text x="11" y="27">主机</text><text x="41" y="27">交叉</text><text x="71" y="27">资源</text><text x="101" y="27">静态</text><text x="131" y="27">单测</text></g>
+      <rect x="0"   width="22" height="14" fill="var(--gold)"/><rect x="30"  width="22" height="14" fill="var(--gold)"/>
+      <rect x="60"  width="22" height="14" fill="var(--gold)"/><rect x="90"  width="22" height="14" fill="var(--gold)"/>
+      <rect x="120" width="22" height="14" fill="var(--gold)"/>
+    </g>
+  </g>
+
+  <!-- 封装：pdu 进行中，升级 1 -->
+  <g transform="translate(510,236)">
+    <rect x="-4" y="-4" width="228" height="112" fill="none" stroke="var(--run)" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <rect width="220" height="104" fill="none" stroke="var(--silk)" stroke-width="1.5"/>
+    <circle cx="12" cy="12" r="3" fill="var(--silk)"/>
+    <text x="24" y="30" fill="var(--silk)" font-size="15" font-weight="700">pdu</text>
+    <text x="24" y="50" fill="var(--silk)" font-size="12" font-family="'Noto Sans CJK SC', sans-serif" opacity=".8">coder-fast 写，第 2/6 次</text>
+    <circle cx="200" cy="24" r="6" fill="var(--run)"/><text x="166" y="50" fill="var(--silk)" font-size="11" font-family="'Noto Sans CJK SC', sans-serif">进行中</text>
+    <g transform="translate(62,15)"><rect width="56" height="20" rx="2" fill="none" stroke="var(--run)"/><text x="7" y="14" fill="var(--run)" font-size="11" font-family="'Noto Sans CJK SC', sans-serif">升级 1</text></g>
+    <g transform="translate(24,66)"><g font-family="'Noto Sans CJK SC', sans-serif" font-size="9.5" fill="var(--silk)" opacity=".75" text-anchor="middle"><text x="11" y="27">主机</text><text x="41" y="27">交叉</text><text x="71" y="27">资源</text><text x="101" y="27">静态</text><text x="131" y="27">单测</text></g>
+      <rect x="0"   width="22" height="14" fill="var(--gold)"/><rect x="30"  width="22" height="14" fill="var(--gold)"/>
+      <rect x="60"  width="22" height="14" fill="var(--gold)"/><rect x="90"  width="22" height="14" fill="var(--gold)"/>
+      <rect x="120" width="22" height="14" fill="var(--run)"/>
+    </g>
+  </g>
+
+  <!-- 封装：rtu 等待 -->
+  <g transform="translate(320,426)" opacity=".75">
+    <rect width="220" height="104" fill="none" stroke="var(--silk)" stroke-width="1.5" stroke-dasharray="2 3"/>
+    <circle cx="12" cy="12" r="3" fill="var(--silk)"/>
+    <text x="24" y="30" fill="var(--silk)" font-size="15" font-weight="700">rtu</text>
+    <text x="24" y="50" fill="var(--silk)" font-size="12" font-family="'Noto Sans CJK SC', sans-serif" opacity=".8">等 pdu 完成</text>
+    <circle cx="200" cy="24" r="6" fill="var(--off)" stroke="var(--silk)" stroke-width=".8"/><text x="178" y="50" fill="var(--silk)" font-size="11" font-family="'Noto Sans CJK SC', sans-serif">等待</text>
+    <g transform="translate(24,66)"><g font-family="'Noto Sans CJK SC', sans-serif" font-size="9.5" fill="var(--silk)" opacity=".75" text-anchor="middle"><text x="11" y="27">主机</text><text x="41" y="27">交叉</text><text x="71" y="27">资源</text><text x="101" y="27">静态</text><text x="131" y="27">单测</text></g><g fill="none" stroke="var(--gold)" stroke-width="1.2">
+      <rect x="0" width="22" height="14"/><rect x="30" width="22" height="14"/><rect x="60" width="22" height="14"/><rect x="90" width="22" height="14"/><rect x="120" width="22" height="14"/></g>
+    </g>
+  </g>
+
+  <!-- 集成判定：连接器 -->
+  <g transform="translate(360,556)" opacity=".75">
+    <rect width="140" height="40" fill="none" stroke="var(--silk)" stroke-width="1.5"/>
+    <text x="70" y="25" text-anchor="middle" fill="var(--silk)" font-size="12" font-family="'Noto Sans CJK SC', sans-serif">集成判定</text>
+  </g>
+
+  <!-- 图例 -->
+  <g transform="translate(24,590)" font-family="'Noto Sans CJK SC', sans-serif" font-size="11" fill="var(--silk)" opacity=".85">
+    <rect width="12" height="8" y="-7" fill="var(--gold)"/><text x="16">这一层通过</text>
+    <rect x="92" width="12" height="8" y="-7" fill="none" stroke="var(--gold)"/><text x="108">还没检查</text>
+    <rect x="176" width="12" height="8" y="-7" fill="var(--run)"/><text x="192">正在检查</text>
+    <rect x="260" width="12" height="8" y="-7" fill="var(--fail)"/><text x="276">失败</text>
+  </g>
+</svg>
+</section>
+
+<aside class="r">
+  <h2>Agent</h2>
+  <table>
+    <tr><th>名称</th><th>档位</th><th>在做</th><th class="n">调用</th><th class="n">费用</th></tr>
+    <tr><td class="c">planner</td><td>强</td><td class="muted">空闲</td><td class="n">1</td><td class="n">0.12</td></tr>
+    <tr><td class="c">coder-fast</td><td>快</td><td>pdu</td><td class="n">3</td><td class="n">0.05</td></tr>
+    <tr><td class="c">coder-strong</td><td>强</td><td class="muted">空闲</td><td class="n">0</td><td class="n">0.00</td></tr>
+    <tr><td class="c">tester</td><td>强</td><td class="muted">空闲</td><td class="n">2</td><td class="n">0.21</td></tr>
+    <tr><td class="c">diagnoser</td><td>强</td><td class="muted">空闲</td><td class="n">1</td><td class="n">0.08</td></tr>
+  </table>
+  <h2 style="margin-top:20px">为什么交给 coder-fast</h2>
+  <p class="muted" style="font-size:12px">模块 pdu，第 2 次</p>
+  <table>
+    <tr><th>候选</th><th class="n">成功率</th><th class="n">成本</th><th class="n">负载</th><th class="n">探索</th><th class="n">得分</th></tr>
+    <tr><td class="c"><b style="font-weight:600">coder-fast</b></td><td class="n">0.50</td><td class="n">0.28</td><td class="n">0.25</td><td class="n">0.00</td><td class="n"><b>0.37</b></td></tr>
+    <tr><td class="c">coder-strong</td><td class="n">0.50</td><td class="n">1.00</td><td class="n">0.00</td><td class="n">0.00</td><td class="n">0.20</td></tr>
+  </table>
+  <p class="why">得分 = 成功率 − 0.3 × 成本 − 0.2 × 负载 + 0.5 × 探索。还没有实测成本，成本按模型标价算。</p>
+  <h2 style="margin-top:20px">pdu 的尝试</h2>
+  <table>
+    <tr><td>第 1 次</td><td>单元测试没通过</td><td class="muted" style="white-space:normal">诊断：读的数量越界时没回异常 02</td></tr>
+    <tr><td>第 2 次</td><td>进行中</td><td class="muted">已查知识库 1 篇</td></tr>
+  </table>
+</aside>
+</main>
+
+<div class="bottom">
+  <div>
+    <div class="tabs"><span class="on">事件</span><span>交付物</span></div>
+    <div class="log">
+      <div><span class="muted">17:41:13</span><span>开始</span><span>modbus_slave，配置 full</span></div>
+      <div><span class="muted">17:44:16</span><span>规划</span><span>拆成 3 个模块：<b>crc</b>、<b>pdu</b>、<b>rtu</b>（你已确认）</span></div>
+      <div><span class="muted">17:45:30</span><span>通过</span><span><b>crc</b> 第 1 次通过全部 5 层</span></div>
+      <div><span class="muted">17:46:02</span><span>失败</span><span><b>pdu</b> 第 1 次：单元测试层 2 个测试没通过</span></div>
+      <div><span class="muted">17:46:40</span><span>升级</span><span><b>pdu</b> 升到第 1 级：查到知识库《Modbus RTU 要点》</span></div>
+      <div><span class="muted">17:46:41</span><span>分配</span><span><b>pdu</b> 第 2 次交给 <b>coder-fast</b>（得分 0.37）</span></div>
+    </div>
+  </div>
+  <div class="rep">
+    <h2>pdu 第 1 次的检查结果</h2>
+    <div class="header">
+      <div class="pin" style="background:var(--pass)">主机编译<small>通过</small></div>
+      <div class="pin" style="background:var(--pass)">交叉编译<small>通过</small></div>
+      <div class="pin" style="background:var(--pass)">资源<small>612/1400 B</small></div>
+      <div class="pin" style="background:var(--pass)">静态检查<small>通过</small></div>
+      <div class="pin" style="background:var(--fail)">单元测试<small>2 个失败</small></div>
+    </div>
+    <div class="detail">tests/test_pdu.c:88:test_read_count_too_big:FAIL
+  Expected 0x83 Was 0x03
+tests/test_pdu.c:97:test_read_count_zero:FAIL
+  Expected 0x02 Was 0x00</div>
+  </div>
+</div>
+
+<div class="status">
+  <span>运行 <b>20261025-174113-modbus_slave</b></span>
+  <span>用时 <b>05:12</b></span><span>token <b>182,340</b></span><span>费用 <b>0.46 元</b></span>
+  <span class="sp"></span><span><span class="dot" style="background:var(--run)"></span>进行中</span>
+</div>
+</body>
+</html>
