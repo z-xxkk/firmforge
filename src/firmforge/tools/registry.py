@@ -122,9 +122,11 @@ class ToolRegistry:
         return list(self._tools.values())
 
 
-def default_registry() -> ToolRegistry:
+def default_registry(disabled: list[str] | tuple[str, ...] = ()) -> ToolRegistry:
+    """内置工具；disabled 里的工具（设置页关掉的）不登记。"""
     from .builtin import BUILTIN_TOOLS
     reg = ToolRegistry()
     for t in BUILTIN_TOOLS:
-        reg.register(t)
+        if t.name not in disabled:
+            reg.register(t)
     return reg

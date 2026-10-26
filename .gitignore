@@ -8,3 +8,5 @@ __pycache__/
 *.pyc
 build/
 dist/
+.ff_chats/
+.venv/

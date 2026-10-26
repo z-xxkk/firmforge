@@ -192,9 +192,11 @@ class Engine:
         mem = memory or store
         self.exp = ExperienceBase(mem) if (cfg.experience and mem is not None) else None
         self.replans = 0
-        self.toolbox = (tools or default_tools()) if cfg.tools else None
+        self.toolbox = (tools or default_tools(settings.tools.get("disabled", ()))) if cfg.tools else None
         if self.toolbox is not None:
-            self.registry.check_toolsets(set(self.toolbox.toolsets()) | {t.name for t in self.toolbox.all()})
+            from ..tools.builtin import BUILTIN_TOOLS
+            self.registry.check_toolsets(set(self.toolbox.toolsets()) | {t.name for t in self.toolbox.all()}
+                                         | {t.toolset for t in BUILTIN_TOOLS} | {t.name for t in BUILTIN_TOOLS})
         self.approve = approve
         self.tier_override, self.thinking = tier_override, thinking     # 这一次运行的覆盖（对话框下方的选择）
         self.workflow = workflow or load_workflow(cfg.workflow)

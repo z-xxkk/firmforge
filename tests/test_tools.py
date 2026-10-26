@@ -264,3 +264,21 @@ class IntegrationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AgentSaveTest(unittest.TestCase):
+    def test_save_agent_round_trip_and_history(self):
+        import dataclasses
+        from firmforge.agents.registry import save_agent
+        reg = Registry().load_dir()
+        d = reg.get("coder-fast")
+        with tempfile.TemporaryDirectory() as tmp:
+            save_agent(d, Path(tmp))
+            d2 = dataclasses.replace(d, version="9.0.0", thinking="max", toolsets=("knowledge",), skills=("写 \"C\"",))
+            save_agent(d2, Path(tmp))
+            again = Registry().load_dir(tmp).get("coder-fast")
+            self.assertEqual(again, d2)
+            self.assertTrue((Path(tmp) / "history" / f"coder-fast-{d.version}.toml").is_file())
+
+    def test_disabled_builtin_tools(self):
+        self.assertEqual({t.name for t in default_registry(["compile_check"]).all()}, {"kb_search", "list_interface"})

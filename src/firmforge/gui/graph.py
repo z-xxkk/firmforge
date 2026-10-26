@@ -1,0 +1,450 @@
+"""画布：模块图（运行时看各模块进度）和流程图（设计器编辑、运行时高亮当前步骤）。
+
+样式按界面草图第 4 版：淡点阵底、白色圆角卡片、平滑曲线连线；已接通的依赖用强调色实线，没接通的用浅灰点线；
+每个模块卡片下沿 5 段圆头小条 = 5 层检查；进行中的模块外面一圈柔光。
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QMenu
+
+from .layout import LAYERS, LAYER_NAMES, ModuleView, RunView, flow_positions, grid_positions
+from .theme import MONO
+from .widgets import T
+
+CARD_W, CARD_H = 180, 96
+
+
+def _mono(size=10, bold=False) -> QFont:
+    f = QFont()
+    f.setFamilies([x.strip(' "') for x in MONO.split(",")])
+    f.setPointSizeF(size)
+    f.setBold(bold)
+    return f
+
+
+class DotGridView(QGraphicsView):
+    """带淡点阵背景的画布：滚轮缩放、按住空白处拖动。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setFrameShape(QGraphicsView.NoFrame)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+    def drawBackground(self, p: QPainter, rect: QRectF):
+        p.fillRect(rect, QColor(T()["canvas"]))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(T()["dot"]))
+        step = 22
+        x0 = int(rect.left()) - int(rect.left()) % step
+        y0 = int(rect.top()) - int(rect.top()) % step
+        y = y0
+        while y < rect.bottom():
+            x = x0
+            while x < rect.right():
+                p.drawEllipse(QPointF(x, y), 1.0, 1.0)
+                x += step
+            y += step
+
+    def wheelEvent(self, ev):
+        if ev.modifiers() & Qt.ControlModifier or True:
+            f = 1.12 if ev.angleDelta().y() > 0 else 1 / 1.12
+            self.scale(f, f)
+
+    def fit(self):
+        """缩放到刚好装下；最多放大到 1 倍，最少缩到 0.85 倍（再小字就看不清，宁可滚动）。"""
+        r = self.scene().itemsBoundingRect().adjusted(-30, -30, 30, 30)
+        self.setSceneRect(r)
+        self.fitInView(r, Qt.KeepAspectRatio)
+        k = self.transform().m11()
+        if k > 1.0 or k < 0.85:
+            self.resetTransform()
+            if k < 0.85:
+                self.scale(0.85, 0.85)
+            self.centerOn(r.center())
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        if self.scene() and self.scene().items():
+            self.fit()
+
+
+class ModuleCard(QGraphicsObject):
+    clicked = Signal(str)
+
+    def __init__(self, mv: ModuleView):
+        super().__init__()
+        self.mv = mv
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAcceptHoverEvents(True)
+        self.selected = False
+
+    def boundingRect(self):
+        return QRectF(-8, -8, CARD_W + 16, CARD_H + 16)
+
+    def paint(self, p: QPainter, opt, widget=None):
+        c, mv = T(), self.mv
+        p.setRenderHint(QPainter.Antialiasing)
+        waiting = mv.status in ("pending", "skipped")
+        if mv.status == "running":
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(c["run_soft"]))
+            p.drawRoundedRect(QRectF(-5, -5, CARD_W + 10, CARD_H + 10), 18, 18)
+        border = c["run"] if mv.status == "running" else (c["accent"] if self.selected else c["line"])
+        pen = QPen(QColor(border), 1.2)
+        if waiting:
+            pen.setStyle(Qt.DashLine)
+        p.setPen(pen)
+        p.setBrush(QColor(c["surface"]))
+        p.drawRoundedRect(QRectF(0, 0, CARD_W, CARD_H), 14, 14)
+        p.setFont(_mono(10.5, True))
+        p.setPen(QColor(c["ink3"] if waiting else c["ink"]))
+        p.drawText(QRectF(16, 12, 110, 20), Qt.AlignLeft | Qt.AlignVCenter, mv.id)
+        if mv.level:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(c["run_soft"]))
+            p.drawRoundedRect(QRectF(70, 14, 46, 18), 9, 9)
+            p.setPen(QColor(c["run"]))
+            p.setFont(QFont(p.font().family(), 8))
+            p.drawText(QRectF(70, 14, 46, 18), Qt.AlignCenter, f"升级 {mv.level}")
+        color = {"done": c["pass"], "failed": c["fail"], "running": c["run"]}.get(mv.status)
+        if color:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(color))
+        else:
+            p.setPen(QPen(QColor(c["ink3"]), 1))
+            p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QPointF(CARD_W - 18, 22), 4.5, 4.5)
+        f = QFont()
+        f.setPointSizeF(9)
+        p.setFont(f)
+        p.setPen(QColor(c["ink3"] if waiting else c["ink2"]))
+        status = {"pending": "等待", "running": "进行中", "done": "通过", "failed": "失败", "skipped": "跳过"}[mv.status]
+        sub = (f"{mv.agent}，" if mv.agent else "") + (f"第 {mv.attempt} 次" if mv.attempt and mv.status == "running" else status)
+        if waiting and mv.deps:
+            sub = f"等 {'、'.join(mv.deps)} 完成" if mv.status == "pending" else (mv.note or status)
+        p.drawText(QRectF(16, 34, CARD_W - 28, 20), Qt.AlignLeft | Qt.AlignVCenter, sub)
+        for i, layer in enumerate(LAYERS):
+            st = mv.layers.get(layer)
+            col = {"pass": c["accent"], "fail": c["fail"], "running": c["run"]}.get(st, c["line"])
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(col))
+            p.drawRoundedRect(QRectF(16 + i * 30, 70, 26, 6), 3, 3)
+
+    def mousePressEvent(self, ev):
+        self.clicked.emit(self.mv.id)
+
+    def hoverEnterEvent(self, ev):
+        names = "、".join(f"{LAYER_NAMES[l]} {'通过' if self.mv.layers.get(l) == 'pass' else ('失败' if self.mv.layers.get(l) == 'fail' else '未检查')}"
+                         for l in LAYERS)
+        self.setToolTip(f"{self.mv.id}：{self.mv.title}\n{names}")
+
+
+def curve(a: QPointF, b: QPointF) -> QPainterPath:
+    """平滑连线：竖直对齐时画直线；否则用三次贝塞尔曲线，控制点在两端的正下方 / 正上方，不会绕成 S 形的圈。"""
+    path = QPainterPath(a)
+    if abs(b.x() - a.x()) < 1:
+        path.lineTo(b)
+        return path
+    dy = abs(b.y() - a.y()) * 0.5
+    path.cubicTo(QPointF(a.x(), a.y() + dy), QPointF(b.x(), b.y() - dy), b)
+    return path
+
+
+class ModuleGraph(DotGridView):
+    """模块图：由 RunView 画出来，事件来了调用 refresh()。"""
+    module_clicked = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setScene(QGraphicsScene(self))
+        self.cards: dict[str, ModuleCard] = {}
+        self.edges: list[tuple[QGraphicsPathItem, str, str]] = []
+        self._shape: tuple = ()
+        self.selected = ""
+
+    def refresh(self, view: RunView) -> None:
+        ids = [m for m in view.modules]
+        shape = tuple((m, tuple(view.modules[m].deps)) for m in ids)
+        if shape != self._shape:
+            self._rebuild(view, ids)
+            self._shape = shape
+        for mid, card in self.cards.items():
+            card.mv = view.modules[mid]
+            card.selected = mid == self.selected
+            card.update()
+        c = T()
+        for item, src, dst in self.edges:
+            done = view.modules.get(src) and view.modules[src].status == "done"
+            pen = QPen(QColor(c["accent"] if done else "#C5CBD3"), 2 if done else 1.6)
+            pen.setCapStyle(Qt.RoundCap)
+            if not done:
+                pen.setStyle(Qt.CustomDashLine)
+                pen.setDashPattern([0.5, 4])
+            item.setPen(pen)
+
+    def _rebuild(self, view: RunView, ids: list[str]) -> None:
+        sc = self.scene()
+        sc.clear()
+        self.cards.clear()
+        self.edges.clear()
+        deps = {m: list(view.modules[m].deps) for m in ids}
+        pos = grid_positions(ids, deps, w=CARD_W, h=CARD_H)
+        for mid in ids:
+            card = ModuleCard(view.modules[mid])
+            card.setPos(*pos[mid])
+            card.clicked.connect(self._click)
+            sc.addItem(card)
+            self.cards[mid] = card
+        for mid in ids:
+            for d in deps[mid]:
+                if d in pos:
+                    a = QPointF(pos[d][0] + CARD_W / 2, pos[d][1] + CARD_H)
+                    b = QPointF(pos[mid][0] + CARD_W / 2, pos[mid][1])
+                    item = sc.addPath(curve(a, b))
+                    item.setZValue(-1)
+                    self.edges.append((item, d, mid))
+        self.fit()
+
+    def _click(self, mid: str):
+        self.selected = mid
+        for k, card in self.cards.items():
+            card.selected = k == mid
+            card.update()
+        self.module_clicked.emit(mid)
+
+
+# ---------------------------------------------------------------- 流程图
+
+KIND_NAMES = {"agent": "Agent", "verify": "检查", "parallel": "并行", "condition": "条件", "loop": "循环",
+              "subflow": "子流程", "foreach": "每个模块各跑", "human": "等人确认"}
+ROLE_NAMES = {"planner": "规划", "coder": "编码", "tester": "测试", "reviewer": "审查", "diagnoser": "诊断",
+              "analyst": "需求分析"}
+COND_NAMES = {"verify_passed": "检查通过了", "signature_repeated": "同一错误反复出现", "attempts_exhausted": "次数用完",
+              "review_needs_fix": "审查要求修改", "human_review": "开启了人工确认"}
+STEP_W, STEP_H = 160, 42
+
+
+def step_subtitle(s) -> str:
+    if s.kind == "agent":
+        return f"Agent {ROLE_NAMES.get(s.role, s.role)}" + (f"（{s.agent}）" if s.agent else "")
+    if s.kind == "verify":
+        return "检查：全部模块" if s.scope == "all" else "检查：本模块"
+    if s.kind == "loop":
+        return f"循环，最多 {s.max} 次" if isinstance(s.max, int) else "循环，次数上限按设置"
+    if s.kind == "condition":
+        return COND_NAMES.get(s.cond, s.cond or "") + "？"
+    if s.kind in ("subflow", "foreach"):
+        return f"{KIND_NAMES[s.kind]} {s.subflow}"
+    return KIND_NAMES.get(s.kind, s.kind)
+
+
+class StepItem(QGraphicsObject):
+    moved = Signal(str, float, float)
+    clicked = Signal(str)
+    connect_to = Signal(str, str)
+
+    def __init__(self, step, editable: bool):
+        super().__init__()
+        self.step = step
+        self.editable = editable
+        self.state = ""            # "" | running | done | new | selected
+        self.setFlag(QGraphicsItem.ItemIsMovable, editable)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, editable)
+        self.setCursor(Qt.PointingHandCursor)
+        self._drag_line = None
+
+    def boundingRect(self):
+        return QRectF(-6, -6, STEP_W + 12, STEP_H + 18)
+
+    def paint(self, p: QPainter, opt, widget=None):
+        c, s = T(), self.step
+        p.setRenderHint(QPainter.Antialiasing)
+        if self.state in ("running", "selected"):
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(c["run_soft"]))
+            p.drawRoundedRect(QRectF(-5, -5, STEP_W + 10, STEP_H + 10), 16, 16)
+        fill = c["accent_soft"] if self.state == "new" else c["surface"]
+        edge = c["run"] if self.state in ("running", "selected") else (c["accent"] if self.state in ("done", "new") else c["line"])
+        pen = QPen(QColor(edge), 1.3)
+        radius = 12
+        if s.kind == "human":
+            pen.setStyle(Qt.DashLine)
+            radius = STEP_H / 2
+        p.setPen(pen)
+        p.setBrush(QColor(fill))
+        if s.kind == "condition":
+            path = QPainterPath()
+            path.moveTo(STEP_W / 2, 0)
+            path.lineTo(STEP_W, STEP_H / 2)
+            path.lineTo(STEP_W / 2, STEP_H)
+            path.lineTo(0, STEP_H / 2)
+            path.closeSubpath()
+            p.drawPath(path)
+        elif s.kind == "parallel":
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(c["ink2"]))
+            p.drawRoundedRect(QRectF(0, STEP_H / 2 - 3, STEP_W, 6), 3, 3)
+        else:
+            if s.kind == "foreach":
+                p.drawRoundedRect(QRectF(5, 5, STEP_W, STEP_H), radius, radius)
+            p.drawRoundedRect(QRectF(0, 0, STEP_W, STEP_H), radius if s.kind != "loop" else 18,
+                              radius if s.kind != "loop" else 18)
+        p.setPen(QColor(c["ink"]))
+        if s.kind == "parallel":
+            p.setFont(_mono(9, True))
+            p.drawText(QRectF(0, STEP_H / 2 + 4, STEP_W, 16), Qt.AlignCenter, f"{s.id}（并行）")
+            return
+        p.setFont(_mono(9.5, True))
+        p.drawText(QRectF(12, 3, STEP_W - 20, 20), Qt.AlignLeft | Qt.AlignVCenter if s.kind != "condition" else Qt.AlignCenter, s.id)
+        f = QFont()
+        f.setPointSizeF(8.5)
+        p.setFont(f)
+        p.setPen(QColor(c["ink3"]))
+        p.drawText(QRectF(12, 20, STEP_W - 20, 18), Qt.AlignLeft | Qt.AlignVCenter if s.kind != "condition" else Qt.AlignCenter,
+                   step_subtitle(s))
+        if self.editable:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(c["ink3"]))
+            p.drawEllipse(QPointF(STEP_W / 2, STEP_H + 6), 3, 3)     # 连线把手
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionHasChanged and self.editable:
+            self.moved.emit(self.step.id, self.pos().x(), self.pos().y())
+        return super().itemChange(change, value)
+
+    def mousePressEvent(self, ev):
+        self.clicked.emit(self.step.id)
+        if self.editable and ev.pos().y() > STEP_H:
+            self._drag_line = self.scene().addLine(0, 0, 0, 0, QPen(QColor(T()["accent"]), 1.5, Qt.DashLine))
+            self._drag_from = self.mapToScene(QPointF(STEP_W / 2, STEP_H + 6))
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if self._drag_line is not None:
+            to = ev.scenePos()
+            self._drag_line.setLine(self._drag_from.x(), self._drag_from.y(), to.x(), to.y())
+            return
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if self._drag_line is not None:
+            self.scene().removeItem(self._drag_line)
+            self._drag_line = None
+            for it in self.scene().items(ev.scenePos()):
+                if isinstance(it, StepItem) and it is not self:
+                    self.connect_to.emit(self.step.id, it.step.id)
+                    break
+            return
+        super().mouseReleaseEvent(ev)
+
+
+class FlowCanvas(DotGridView):
+    """流程图：设计器里可编辑（拖动、从下沿拉线），对话页里只读并高亮当前步骤。"""
+    step_clicked = Signal(str)
+    step_moved = Signal(str, float, float)
+    connect_steps = Signal(str, str)
+    context_action = Signal(str, str)      # (动作, 步骤 id)
+
+    def __init__(self, editable: bool = False, parent=None):
+        super().__init__(parent)
+        self.editable = editable
+        self.setScene(QGraphicsScene(self))
+        self.items_by_id: dict[str, StepItem] = {}
+        if editable:
+            self.setDragMode(QGraphicsView.RubberBandDrag)
+
+    def show_workflow(self, wf, subflow: str | None = None, states: dict | None = None, fit: bool = True) -> None:
+        """画主流程，右侧再画第一个子流程（或指定的子流程）。"""
+        sc = self.scene()
+        sc.clear()
+        self.items_by_id.clear()
+        c = T()
+        groups = [("main", list(wf.main), 0.0)]
+        sub = subflow or next(iter(wf.subflows), None)
+        if sub:
+            groups.append((sub, list(wf.subflows[sub]), 300.0))
+        for name, steps, x0 in groups:
+            pos = flow_positions(steps, x0=x0, y0=40)
+            if name != "main":
+                ys = [p[1] for p in pos.values()] or [40]
+                xs = [p[0] for p in pos.values()] or [x0]
+                frame = QRectF(x0 - 24, 0, max(xs) - x0 + STEP_W + 48, max(ys) + STEP_H + 40)
+                box = sc.addRect(frame, QPen(QColor(c["line"]), 1), QBrush(QColor(c["surface"])))
+                box.setOpacity(0.6)
+                box.setZValue(-2)
+                t = sc.addText(f"子流程 {name}")
+                t.setDefaultTextColor(QColor(c["ink2"]))
+                t.setPos(x0 - 18, 6)
+            prev = None
+            refd = {r for s in steps for r in (*s.branches, *s.then, *s.otherwise)}
+            for s in steps:
+                it = StepItem(s, self.editable)
+                it.setPos(*pos[s.id])
+                it.state = (states or {}).get(s.id, "")
+                it.clicked.connect(self.step_clicked.emit)
+                it.moved.connect(self._moved)
+                it.connect_to.connect(self.connect_steps.emit)
+                sc.addItem(it)
+                self.items_by_id[s.id] = it
+            for s in steps:
+                if s.id in refd:
+                    continue
+                if prev is not None:
+                    self._edge(prev, s.id)
+                for k in (*s.branches, *s.then, *s.otherwise):
+                    self._edge(s.id, k, label="是" if k in s.then else ("否" if k in s.otherwise else ""))
+                prev = s.id
+        if fit:
+            self.fit()
+
+    def _edge(self, a: str, b: str, label: str = "") -> None:
+        ia, ib = self.items_by_id.get(a), self.items_by_id.get(b)
+        if ia is None or ib is None:
+            return
+        pa = ia.pos() + QPointF(STEP_W / 2, STEP_H)
+        pb = ib.pos() + QPointF(STEP_W / 2, 0)
+        if abs(ib.pos().y() - ia.pos().y()) < STEP_H / 2:     # 同一行（分支）：从右侧连出去
+            pa = ia.pos() + QPointF(STEP_W, STEP_H / 2)
+            pb = ib.pos() + QPointF(0, STEP_H / 2)
+            path = QPainterPath(pa)
+            path.cubicTo(QPointF(pa.x() + 30, pa.y()), QPointF(pb.x() - 30, pb.y()), pb)
+        else:
+            path = curve(pa, pb)
+        pen = QPen(QColor("#B8C0C9"), 1.6)
+        pen.setCapStyle(Qt.RoundCap)
+        item = self.scene().addPath(path, pen)
+        item.setZValue(-1)
+        if label:
+            t = self.scene().addText(label)
+            t.setDefaultTextColor(QColor(T()["ink3"]))
+            t.setPos((pa + pb) / 2 + QPointF(-6, -18))
+
+    def _moved(self, sid, x, y):
+        self.step_moved.emit(sid, x, y)
+
+    def set_states(self, states: dict[str, str]) -> None:
+        for sid, it in self.items_by_id.items():
+            it.state = states.get(sid, "")
+            it.update()
+
+    def contextMenuEvent(self, ev):
+        if not self.editable:
+            return
+        item = self.itemAt(ev.pos())
+        while item is not None and not isinstance(item, StepItem):
+            item = item.parentItem()
+        if item is None:
+            return
+        m = QMenu(self)
+        for act, text in (("up", "上移一步"), ("down", "下移一步"), ("ask_ai", "让 AI 改这一步…"),
+                          ("ref", "引用到对话"), ("delete", "删除")):
+            m.addAction(text, lambda a=act, sid=item.step.id: self.context_action.emit(a, sid))
+        m.exec(ev.globalPos())

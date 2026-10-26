@@ -152,7 +152,7 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
     rejected: list[tuple[str, str]] = []
 
     tool_settings = tool_settings or {}
-    toolbox = (tools or default_tools()) if cfg.toolsets else None
+    toolbox = (tools or default_tools(tool_settings.get("disabled", ()))) if cfg.toolsets else None
     allowed = toolbox.for_agent(cfg.toolsets) if toolbox else []
     params = dict(model=model.name, temperature=cfg.temperature, max_tokens=model.max_tokens or cfg.max_tokens,
                   extra_body=model.extra_body(thinking))

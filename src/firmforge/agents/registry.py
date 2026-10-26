@@ -153,3 +153,38 @@ class Registry:
 
 def default_registry() -> Registry:
     return Registry().load_dir()
+
+
+# ---------------------------------------------------------------- 写回（桌面软件"Agent 团队"页用）
+
+def dump_agent(d: AgentDef) -> str:
+    from ..config_edit import toml_value
+    lines = [f"# Agent {d.name} {d.version}。由 FirmForge 桌面软件保存，也可以手改。",
+             f"name = {toml_value(d.name)}", f"role = {toml_value(d.role)}", f"version = {toml_value(d.version)}",
+             f"model_tier = {toml_value(d.model_tier)}", f"temperature = {toml_value(d.temperature)}",
+             f"prompt = {toml_value(d.prompt)}", f"task_types = {toml_value(list(d.task_types))}",
+             f"description = {toml_value(d.description)}", f"skills = {toml_value(list(d.skills))}",
+             f"toolsets = {toml_value(list(d.toolsets))}",
+             f"memory = {toml_value({'experience': d.memory_experience, 'knowledge': d.memory_knowledge})}"]
+    if d.max_tokens:
+        lines.append(f"max_tokens = {d.max_tokens}")
+    if d.thinking:
+        lines.append(f"thinking = {toml_value(d.thinking)}")
+    return "\n".join(lines) + "\n"
+
+
+def save_agent(d: AgentDef, directory: Path | None = None) -> Path:
+    """保存为当前版本；目录里原来的版本（版本号不同）先存进 history/。"""
+    directory = Path(directory) if directory else config.agents_dir()
+    path = directory / f"{d.name}.toml"
+    text = dump_agent(d)
+    parse_agent(tomllib.loads(text), path.name)          # 写之前确认能读回
+    if path.is_file():
+        with path.open("rb") as fh:
+            old = parse_agent(tomllib.load(fh), path.name)
+        if old.version != d.version:
+            hist = directory / "history"
+            hist.mkdir(parents=True, exist_ok=True)
+            (hist / f"{old.name}-{old.version}.toml").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
+    return path

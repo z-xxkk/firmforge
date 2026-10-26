@@ -568,6 +568,15 @@ def cmd_agents(args) -> int:
     return EXIT_PASS
 
 
+def cmd_gui(args) -> int:
+    """启动桌面软件（需要先 pip install -e .[gui]）。"""
+    try:
+        from .gui.app import main as gui_main
+    except ImportError as exc:
+        raise UsageError(f"没有安装桌面软件依赖（{exc}）。请先运行：pip install -e .[gui]") from exc
+    return gui_main()
+
+
 def cmd_mcp(args) -> int:
     """以 stdio 方式提供 MCP 服务；--selftest 启动自己作为外部服务，按新旧两种协议各走一遍。"""
     from .mcp import McpServer
@@ -778,6 +787,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--estimate", action="store_true", help="只跑 1 个任务 1 次，推算全量 token 和成本")
     s.add_argument("--memory", help="沿用另一个数据库里的经验库（默认每个实验独立）")
     s.set_defaults(func=cmd_eval)
+
+    s = sub.add_parser("gui", help="启动桌面软件（需要先 pip install -e .[gui]）")
+    s.set_defaults(func=cmd_gui)
 
     s = sub.add_parser("bench", help="性能测试：假模型测串行与并行调度的吞吐，真工具链测判定吞吐（不花钱）")
     s.add_argument("--task", help="用哪个任务造模块（默认 tasks/ringbuf）")
