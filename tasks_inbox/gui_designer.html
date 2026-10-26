@@ -11,31 +11,37 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{width:1440px;height:900px;overflow:hidden;background:var(--chrome);color:var(--ink);font:13px/1.5 var(--sans);
-  display:grid;grid-template-columns:72px 190px 1fr 330px;grid-template-rows:48px 1fr 26px}
-.rail{grid-row:1/3;background:var(--ink);display:flex;flex-direction:column;padding-top:10px}
+  display:grid;grid-template-columns:64px 176px 1fr 300px;grid-template-rows:44px 1fr 210px 26px}
+.rail{grid-row:1/4;background:var(--ink);display:flex;flex-direction:column;padding-top:10px}
 .rail .logo{color:var(--gold);font:700 13px var(--code);text-align:center;margin-bottom:18px}
 .rail a{color:#AEB8BF;text-align:center;padding:12px 0;font-size:12px;border-left:3px solid transparent}
 .rail a.on{color:#fff;border-left-color:var(--gold);background:#2A3238}
-.rail .sp{flex:1}
-.top{grid-column:2/5;display:flex;align-items:center;gap:10px;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--rule)}
-.top b{font:600 14px var(--code)}
-select{font:inherit;padding:3px 6px;border:1px solid var(--rule);border-radius:4px;background:#fff}
 .sp{flex:1}.muted{color:var(--ink2)}
-.btn{border:1px solid var(--rule);background:#fff;border-radius:4px;padding:4px 12px;font:inherit;color:var(--ink)}
+.top{grid-column:2/5;display:flex;align-items:center;gap:8px;padding:0 12px;background:var(--panel);border-bottom:1px solid var(--rule)}
+.top b{font:600 14px var(--code)}
+.btn{border:1px solid var(--rule);background:#fff;border-radius:4px;padding:3px 10px;font:inherit;color:var(--ink)}
 .btn.primary{background:var(--mask);color:var(--silk);border-color:var(--mask);font-weight:600}
-.pal{background:var(--panel);border-right:1px solid var(--rule);padding:12px}
-.pal h2,.props h2{font-size:13px;font-weight:600;margin-bottom:8px}
-.pal div.item{display:flex;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid #E3E6E9}
-.pal svg{flex:none}
-.pal p{font-size:12px;color:var(--ink2);margin-top:12px}
-.canvas{position:relative;overflow:hidden;background:var(--paper)}
-.props{background:var(--panel);border-left:1px solid var(--rule);padding:12px 14px;overflow:hidden}
-.f{margin-bottom:12px}.f label{display:block;color:var(--ink2);font-size:12px;margin-bottom:3px}
-.f input,.f select{width:100%;font:inherit;padding:4px 6px;border:1px solid var(--rule);border-radius:4px;background:#fff}
-.f .ro{padding:4px 0}
-.hint{font-size:12px;color:var(--ink2);border-left:2px solid var(--rule);padding-left:8px}
-hr{border:none;border-top:1px solid var(--rule);margin:14px 0}
-.check{font-size:12px}.check div{padding:2px 0}
+.dock{background:var(--panel);overflow:hidden}
+.dock h2{font-size:12px;font-weight:600;padding:6px 10px;background:#E7EBEE;border-bottom:1px solid var(--rule)}
+.pal{grid-column:2;grid-row:2/4;border-right:1px solid var(--rule)}
+.pal .grp{font-size:11px;color:var(--ink2);padding:8px 10px 2px}
+.pal div.item{display:flex;align-items:center;gap:8px;padding:4px 10px}
+.canvas{grid-column:3;grid-row:2;position:relative;overflow:hidden;background:var(--paper)}
+.side{grid-column:4;grid-row:2/4;border-left:1px solid var(--rule);display:grid;grid-template-rows:auto 1fr}
+.tree{font-size:12px;padding:4px 0 8px}
+.tree div{padding:1px 10px;font-family:var(--code)}
+.tree div span{font-family:var(--sans);color:var(--ink2);margin-left:6px}
+.tree div.on{background:#FFE6CF}
+table{border-collapse:collapse;width:100%;font-size:12px}
+td{border-bottom:1px solid #E1E5E8;padding:4px 10px;vertical-align:top}
+td:first-child{color:var(--ink2);width:92px;background:#EEF1F3}
+td input,td select{width:100%;font:inherit;border:1px solid var(--rule);border-radius:3px;padding:1px 4px;background:#fff}
+.code{border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr 360px;min-height:0}
+.code pre{font:11.5px/1.55 var(--code);padding:6px 10px;background:#fff;overflow:hidden;height:180px;margin:0}
+.code .k{color:var(--wire)}.code .s{color:#8A5A00}.code .c{color:#7A8790}
+.code .new{background:#E4F2E8;display:block}
+.chk{border-left:1px solid var(--rule);background:var(--panel)}
+.chk div{padding:2px 10px;font-size:12px}
 .ok:before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#2FA864;margin-right:6px}
 .status{grid-column:1/5;display:flex;gap:22px;align-items:center;padding:0 12px;background:var(--ink);color:#D8DEE2;font-size:12px}
 .status b{font-weight:400;font-family:var(--code)}
@@ -44,144 +50,138 @@ hr{border:none;border-top:1px solid var(--rule);margin:14px 0}
 <body>
 <nav class="rail">
   <div class="logo">FF</div>
-  <a>对话</a><a class="on">工作流</a><a>Agent<br>团队</a><a>历史<br>回放</a><span class="sp"></span><a>设置</a>
+  <a>对话</a><a class="on">工作流</a><a>Agent<br>团队</a><span class="sp"></span><a>设置</a>
 </nav>
 
 <div class="top">
-  <b>module_dev</b>
-  <select><option>1.1.0（草稿）</option><option>1.0.0</option></select>
-  <span class="muted">改自 1.0.0：通过后加一步人工验收</span>
+  <b>module_dev</b><span class="muted">1.1.0 草稿，改自 1.0.0</span>
   <span class="sp"></span>
-  <button class="btn">查看 TOML</button>
-  <button class="btn">保存为新版本</button>
-  <button class="btn primary">用这个版本试运行</button>
+  <button class="btn">撤销</button><button class="btn">检查</button><button class="btn">让 AI 改…</button>
+  <button class="btn">保存为新版本</button><button class="btn primary">用这个版本试运行</button>
 </div>
 
-<aside class="pal">
-  <h2>步骤</h2>
-  <div class="item"><svg width="34" height="22"><rect x="1" y="1" width="32" height="20" fill="#fff" stroke="#1D2328"/><text x="17" y="15" font-size="9" text-anchor="middle" font-family="sans-serif">A</text></svg>Agent 干活</div>
-  <div class="item"><svg width="34" height="22"><rect x="1" y="1" width="32" height="20" fill="#fff" stroke="#1D2328"/><g fill="#D4AF37"><rect x="5" y="14" width="5" height="4"/><rect x="12" y="14" width="5" height="4"/><rect x="19" y="14" width="5" height="4"/><rect x="26" y="14" width="4" height="4"/></g></svg>检查</div>
-  <div class="item"><svg width="34" height="22"><rect x="2" y="3" width="30" height="3" fill="#1D2328"/><rect x="2" y="16" width="30" height="3" fill="#1D2328"/><path d="M10 6V16M24 6V16" stroke="#1D2328"/></svg>并行</div>
-  <div class="item"><svg width="34" height="22"><path d="M17 1 L33 11 L17 21 L1 11Z" fill="#fff" stroke="#1D2328"/></svg>条件</div>
-  <div class="item"><svg width="34" height="22"><rect x="1" y="1" width="32" height="20" rx="7" fill="#fff" stroke="#1D2328"/><path d="M11 11a6 5 0 1 0 6-5" fill="none" stroke="#1D2328"/></svg>循环</div>
-  <div class="item"><svg width="34" height="22"><rect x="1" y="1" width="32" height="20" fill="#fff" stroke="#1D2328"/><rect x="4" y="4" width="26" height="14" fill="none" stroke="#1D2328"/></svg>子流程</div>
-  <div class="item"><svg width="34" height="22"><rect x="5" y="5" width="28" height="16" fill="#fff" stroke="#1D2328"/><rect x="1" y="1" width="28" height="16" fill="#fff" stroke="#1D2328"/></svg>每个模块各跑一遍</div>
-  <div class="item"><svg width="34" height="22"><rect x="1" y="1" width="32" height="20" fill="#fff" stroke="#1D2328" stroke-dasharray="3 2"/><circle cx="17" cy="8" r="3" fill="none" stroke="#1D2328"/><path d="M11 18c1-5 11-5 12 0" fill="none" stroke="#1D2328"/></svg>等人确认</div>
-  <p>拖到图上，再从一个步骤的下端拉线到另一个步骤的上端。</p>
+<aside class="dock pal">
+  <h2>步骤箱</h2>
+  <div class="grp">干活</div>
+  <div class="item"><svg width="30" height="20"><rect x="1" y="1" width="28" height="18" fill="#fff" stroke="#1D2328"/><text x="15" y="14" font-size="9" text-anchor="middle">A</text></svg>Agent 干活</div>
+  <div class="item"><svg width="30" height="20"><rect x="1" y="1" width="28" height="18" fill="#fff" stroke="#1D2328"/><g fill="#D4AF37"><rect x="4" y="13" width="5" height="4"/><rect x="11" y="13" width="5" height="4"/><rect x="18" y="13" width="5" height="4"/></g></svg>检查</div>
+  <div class="item"><svg width="30" height="20"><rect x="1" y="1" width="28" height="18" fill="#fff" stroke="#1D2328" stroke-dasharray="3 2"/><circle cx="15" cy="8" r="3" fill="none" stroke="#1D2328"/><path d="M9 17c1-5 11-5 12 0" fill="none" stroke="#1D2328"/></svg>等人确认</div>
+  <div class="grp">控制</div>
+  <div class="item"><svg width="30" height="20"><rect x="2" y="3" width="26" height="3" fill="#1D2328"/><rect x="2" y="14" width="26" height="3" fill="#1D2328"/><path d="M9 6V14M21 6V14" stroke="#1D2328"/></svg>并行</div>
+  <div class="item"><svg width="30" height="20"><path d="M15 1 L29 10 L15 19 L1 10Z" fill="#fff" stroke="#1D2328"/></svg>条件</div>
+  <div class="item"><svg width="30" height="20"><rect x="1" y="1" width="28" height="18" rx="7" fill="#fff" stroke="#1D2328"/><path d="M10 10a5 4 0 1 0 5-4" fill="none" stroke="#1D2328"/></svg>循环</div>
+  <div class="grp">嵌套</div>
+  <div class="item"><svg width="30" height="20"><rect x="1" y="1" width="28" height="18" fill="#fff" stroke="#1D2328"/><rect x="4" y="4" width="22" height="12" fill="none" stroke="#1D2328"/></svg>子流程</div>
+  <div class="item"><svg width="30" height="20"><rect x="5" y="5" width="24" height="14" fill="#fff" stroke="#1D2328"/><rect x="1" y="1" width="24" height="14" fill="#fff" stroke="#1D2328"/></svg>每个模块各跑</div>
 </aside>
 
 <section class="canvas">
-<svg width="848" height="826" viewBox="0 0 848 826" font-family="'Noto Sans CJK SC',sans-serif" font-size="12">
+<svg width="896" height="646" viewBox="0 0 896 646" font-family="'Noto Sans CJK SC',sans-serif" font-size="12">
   <defs>
     <pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="var(--grid)" stroke-width=".6"/></pattern>
     <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="var(--wire)"/></marker>
   </defs>
-  <rect width="848" height="826" fill="url(#g)"/>
-
-  <!-- 主流程 -->
-  <text x="40" y="34" font-weight="600" fill="var(--ink)">主流程</text>
+  <rect width="896" height="646" fill="url(#g)"/>
   <g stroke="var(--wire)" stroke-width="1.6" fill="none" marker-end="url(#ar)">
-    <path d="M120 96 V118"/><path d="M120 166 V188"/><path d="M120 236 V258"/><path d="M120 316 V338"/><path d="M120 386 V408"/>
+    <path d="M110 66 V84"/><path d="M110 128 V146"/><path d="M110 190 V208"/><path d="M110 256 V274"/><path d="M110 318 V336"/>
   </g>
-  <g>
-    <circle cx="120" cy="80" r="14" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><text x="120" y="84" text-anchor="middle" font-size="11">开始</text>
-    <rect x="40" y="120" width="160" height="46" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-    <text x="52" y="139" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">plan</text><text x="52" y="157" fill="var(--ink2)">Agent：规划</text>
-    <rect x="40" y="190" width="160" height="46" fill="#fff" stroke="var(--ink)" stroke-width="1.4" stroke-dasharray="4 3"/>
-    <text x="52" y="209" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">confirm_plan</text><text x="52" y="227" fill="var(--ink2)">等人确认规划</text>
-    <rect x="46" y="266" width="160" height="50" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-    <rect x="40" y="260" width="160" height="50" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-    <text x="52" y="280" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">modules</text><text x="52" y="298" fill="var(--ink2)">每个模块跑 module_impl</text>
-    <rect x="40" y="340" width="160" height="46" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-    <text x="52" y="359" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">integrate</text><text x="52" y="377" fill="var(--ink2)">检查：全部模块</text>
-    <circle cx="120" cy="424" r="14" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><circle cx="120" cy="424" r="9" fill="var(--ink)"/>
+  <circle cx="110" cy="52" r="13" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><text x="110" y="56" text-anchor="middle" font-size="10">开始</text>
+  <g font-family="'JetBrains Mono','Noto Sans Mono',monospace">
+    <rect x="36" y="86" width="148" height="42" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><text x="46" y="103" font-weight="700">plan</text><text x="46" y="120" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">Agent：规划</text>
+    <rect x="36" y="148" width="148" height="42" fill="#fff" stroke="var(--ink)" stroke-width="1.4" stroke-dasharray="4 3"/><text x="46" y="165" font-weight="700">confirm_plan</text><text x="46" y="182" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">等人确认规划</text>
+    <rect x="42" y="216" width="148" height="44" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><rect x="36" y="210" width="148" height="44" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><text x="46" y="227" font-weight="700">modules</text><text x="46" y="244" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">每个模块跑 module_impl</text>
+    <rect x="36" y="276" width="148" height="42" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><text x="46" y="293" font-weight="700">integrate</text><text x="46" y="310" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">检查：全部模块</text>
   </g>
-  <!-- 层次图引线：modules → 子流程框 -->
-  <path d="M206 290 H262" stroke="var(--wire)" stroke-width="1.2" stroke-dasharray="5 4" fill="none"/>
+  <circle cx="110" cy="350" r="13" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><circle cx="110" cy="350" r="8" fill="var(--ink)"/>
+  <path d="M190 240 H240" stroke="var(--wire)" stroke-width="1.2" stroke-dasharray="5 4" fill="none"/>
 
-  <!-- 子流程 module_impl（层次图框） -->
-  <rect x="262" y="40" width="560" height="640" fill="none" stroke="var(--ink)" stroke-width="1.2"/>
-  <rect x="262" y="40" width="560" height="26" fill="#E7ECF0" stroke="var(--ink)" stroke-width="1.2"/>
-  <text x="274" y="58" font-weight="600">子流程 module_impl</text><text x="810" y="58" text-anchor="end" fill="var(--ink2)">每个模块一份</text>
+  <rect x="240" y="20" width="560" height="560" fill="none" stroke="var(--ink)" stroke-width="1.2"/>
+  <rect x="240" y="20" width="560" height="24" fill="#E7ECF0" stroke="var(--ink)" stroke-width="1.2"/>
+  <text x="252" y="37" font-weight="600">子流程 module_impl</text><text x="788" y="37" text-anchor="end" fill="var(--ink2)">每个模块一份</text>
 
   <g stroke="var(--wire)" stroke-width="1.6" fill="none" marker-end="url(#ar)">
-    <path d="M542 92 V110"/>
-    <path d="M440 116 V136"/><path d="M644 116 V136"/>
-    <path d="M440 182 V204"/><path d="M644 182 V204"/>
-    <path d="M542 212 V236"/>
-    <path d="M542 282 V306"/>
-    <path d="M542 374 V398"/>
-    <path d="M610 442 H680 V470"/>
-    <path d="M680 516 V560"/>
-    <path d="M680 604 V626"/>
-    <path d="M474 442 H400 V636 H528"/>
+    <path d="M520 70 V86"/><path d="M420 92 V108"/><path d="M620 92 V108"/><path d="M420 150 V170"/><path d="M620 150 V170"/>
+    <path d="M520 178 V196"/><path d="M520 238 V256"/><path d="M520 318 V334"/>
+    <path d="M584 372 H660 V398"/><path d="M660 440 V470"/><path d="M660 510 V540 H534"/><path d="M456 372 H380 V540 H506"/>
   </g>
-  <circle cx="542" cy="80" r="12" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-  <!-- 并行 fork/join -->
-  <rect x="380" y="110" width="324" height="5" fill="var(--ink)"/>
-  <rect x="380" y="206" width="324" height="5" fill="var(--ink)"/>
-  <g>
-    <rect x="370" y="138" width="140" height="44" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-    <text x="382" y="156" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">code</text><text x="382" y="174" fill="var(--ink2)">Agent：编码</text>
-    <rect x="574" y="138" width="140" height="44" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-    <text x="586" y="156" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">test</text><text x="586" y="174" fill="var(--ink2)">Agent：写测试</text>
+  <circle cx="520" cy="58" r="11" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
+  <rect x="356" y="86" width="330" height="5" fill="var(--ink)"/><rect x="356" y="172" width="330" height="5" fill="var(--ink)"/>
+  <g font-family="'JetBrains Mono','Noto Sans Mono',monospace">
+    <rect x="350" y="110" width="140" height="40" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><text x="360" y="126" font-weight="700">code</text><text x="360" y="143" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">Agent：编码</text>
+    <rect x="550" y="110" width="140" height="40" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><text x="560" y="126" font-weight="700">test</text><text x="560" y="143" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">Agent：写测试</text>
+    <rect x="458" y="198" width="124" height="40" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><text x="468" y="214" font-weight="700">check</text><text x="468" y="231" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">检查：本模块</text>
+    <rect x="450" y="254" width="140" height="68" rx="15" fill="none" stroke="var(--sel)" stroke-width="2" stroke-dasharray="5 3"/>
+    <rect x="454" y="258" width="132" height="60" rx="12" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><text x="466" y="277" font-weight="700">repair</text><text x="466" y="294" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">循环：修正一轮</text><text x="466" y="310" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">最多 6 次</text>
   </g>
-  <text x="712" y="114" fill="var(--ink2)" font-size="11">同时开始</text><text x="712" y="212" fill="var(--ink2)" font-size="11">都写完</text>
-  <!-- 检查 -->
-  <rect x="480" y="238" width="124" height="44" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-  <text x="492" y="256" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">check</text><text x="492" y="274" fill="var(--ink2)">检查：本模块</text>
-  <g fill="var(--gold)"><rect x="560" y="248" width="8" height="6"/><rect x="570" y="248" width="8" height="6"/><rect x="580" y="248" width="8" height="6"/><rect x="590" y="248" width="8" height="6"/></g>
-  <!-- 循环（选中） -->
-  <rect x="470" y="302" width="144" height="74" rx="15" fill="none" stroke="var(--sel)" stroke-width="2" stroke-dasharray="5 3"/>
-  <rect x="476" y="308" width="132" height="62" rx="12" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-  <text x="490" y="328" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">repair</text>
-  <text x="490" y="345" fill="var(--ink2)">循环：修正一轮</text><text x="490" y="361" fill="var(--ink2)">最多 6 次</text>
-  <!-- 条件 -->
-  <path d="M542 400 L610 442 L542 484 L474 442Z" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-  <text x="542" y="440" text-anchor="middle">检查</text><text x="542" y="455" text-anchor="middle">通过了？</text>
-  <text x="626" y="436" fill="var(--wire)" font-size="11">是</text><text x="440" y="436" fill="var(--wire)" font-size="11">否</text>
-  <rect x="600" y="472" width="170" height="44" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
-  <text x="612" y="490" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">review</text><text x="612" y="508" fill="var(--ink2)">Agent：审查（只提意见）</text>
-  <!-- 新增的人工验收 -->
-  <rect x="610" y="562" width="140" height="42" fill="#fff" stroke="var(--ink)" stroke-width="1.4" stroke-dasharray="4 3"/>
-  <text x="622" y="580" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">accept</text><text x="622" y="597" fill="var(--ink2)">等人验收</text>
-  <circle cx="542" cy="642" r="12" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><circle cx="542" cy="642" r="7" fill="var(--ink)"/>
-  <path d="M680 604 V642 H556" stroke="var(--wire)" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
-  <circle cx="542" cy="636" r="0"/>
-
-  <!-- 图纸标题栏 -->
-  <g transform="translate(522,700)">
-    <rect width="300" height="104" fill="#fff" stroke="var(--ink)" stroke-width="1.2"/>
-    <path d="M0 36H300M0 70H300M110 0V104" stroke="var(--ink)" stroke-width=".8"/>
-    <text x="10" y="23" fill="var(--ink2)">工作流</text><text x="122" y="23" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">module_dev</text>
-    <text x="10" y="57" fill="var(--ink2)">版本</text><text x="122" y="57">1.1.0 草稿，改自 1.0.0</text>
-    <text x="10" y="91" fill="var(--ink2)">最后修改</text><text x="122" y="91">2026-10-26　负责人</text>
+  <path d="M520 336 L584 372 L520 408 L456 372Z" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/>
+  <text x="520" y="369" text-anchor="middle">检查</text><text x="520" y="384" text-anchor="middle">通过了？</text>
+  <text x="598" y="366" fill="var(--wire)" font-size="11">是</text><text x="428" y="366" fill="var(--wire)" font-size="11">否</text>
+  <g font-family="'JetBrains Mono','Noto Sans Mono',monospace">
+    <rect x="580" y="400" width="160" height="40" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><text x="590" y="416" font-weight="700">review</text><text x="590" y="433" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">Agent：审查（只提意见）</text>
+    <rect x="580" y="470" width="160" height="40" fill="#E4F2E8" stroke="var(--ink)" stroke-width="1.4" stroke-dasharray="4 3"/><text x="590" y="486" font-weight="700">accept</text><text x="590" y="503" fill="var(--ink2)" font-family="'Noto Sans CJK SC',sans-serif">等人验收（新加）</text>
+  </g>
+  <circle cx="520" cy="546" r="11" fill="#fff" stroke="var(--ink)" stroke-width="1.4"/><circle cx="520" cy="546" r="6" fill="var(--ink)"/>
+  <g transform="translate(20,560)">
+    <rect width="236" height="48" fill="#fff" stroke="var(--ink)" stroke-width="1.1"/><path d="M0 24H236M76 0V48" stroke="var(--ink)" stroke-width=".7"/>
+    <text x="8" y="17" fill="var(--ink2)" font-size="11">工作流</text><text x="84" y="17" font-size="11" font-family="'JetBrains Mono','Noto Sans Mono',monospace" font-weight="700">module_dev</text>
+    <text x="8" y="41" fill="var(--ink2)" font-size="11">版本</text><text x="84" y="41" font-size="11">1.1.0 草稿　2026-10-26</text>
   </g>
 </svg>
 </section>
 
-<aside class="props">
-  <h2>repair 的设置</h2>
-  <div class="f"><label>类型</label><div class="ro">循环</div></div>
-  <div class="f"><label>每一轮做什么</label><select><option>修正一轮：诊断 → 交给编码或测试 Agent 改 → 再检查</option></select></div>
-  <div class="f"><label>什么时候停</label><select><option>检查通过了</option></select></div>
-  <div class="f"><label>最多几次（含第一次）</label><input value="6"></div>
-  <p class="hint">停止条件只能从列表里选：检查通过、同一个错误反复出现、次数用完、审查要求修改、开启了人工确认。这样任何流程都能被程序检查，不会出现跑不出来的条件。</p>
-  <hr>
-  <h2>保存前检查</h2>
-  <div class="check">
-    <div class="ok">每个步骤都连上了</div>
-    <div class="ok">每个循环都有次数上限</div>
-    <div class="ok">每个 Agent 步骤的角色都有注册的 Agent</div>
-    <div class="ok">引用的子流程都存在</div>
+<aside class="dock side">
+  <div>
+    <h2>步骤树</h2>
+    <div class="tree">
+      <div>main</div>
+      <div>&nbsp;├ plan<span>Agent</span></div>
+      <div>&nbsp;├ confirm_plan<span>等人确认</span></div>
+      <div>&nbsp;├ modules<span>每个模块</span></div>
+      <div>&nbsp;└ integrate<span>检查</span></div>
+      <div>module_impl</div>
+      <div>&nbsp;├ write<span>并行</span></div>
+      <div>&nbsp;├ check<span>检查</span></div>
+      <div class="on">&nbsp;├ repair<span>循环</span></div>
+      <div>&nbsp;├ review_gate<span>条件</span></div>
+      <div>&nbsp;└ accept<span>等人确认</span></div>
+    </div>
   </div>
-  <hr>
-  <h2>这次改了什么</h2>
-  <div class="check muted">
-    <div>新增 accept：审查之后等人验收</div>
+  <div>
+    <h2>属性</h2>
+    <table>
+      <tr><td>id</td><td><input value="repair"></td></tr>
+      <tr><td>类型</td><td>循环 loop</td></tr>
+      <tr><td>每一轮做什么</td><td><select><option>修正一轮</option></select></td></tr>
+      <tr><td>停止条件</td><td><select><option>检查通过了</option></select></td></tr>
+      <tr><td>最多几次</td><td><input value="6"></td></tr>
+      <tr><td>变差时</td><td><select><option>回滚到最好的一次</option></select></td></tr>
+      <tr><td>说明</td><td><input value="诊断 → 交给编码或测试 Agent 改 → 再检查"></td></tr>
+    </table>
   </div>
 </aside>
 
-<div class="status"><span>工作流文件 <b>workflows/module_dev.toml</b></span><span>草稿未保存</span></div>
+<div class="code" style="grid-column:3;grid-row:3">
+<pre><span class="c"># workflows/module_dev.toml  （和画布实时同步，改这里画布也会变）</span>
+[[subflow.module_impl.steps]]
+id = <span class="s">"repair"</span>
+kind = <span class="s">"loop"</span>
+until = <span class="s">"verify_passed"</span>
+body = <span class="s">"repair_round"</span>
+max = 6
+<span class="new">[[subflow.module_impl.steps]]
+id = "accept"
+kind = "human"
+note = "审查之后等人验收"</span></pre>
+  <div class="chk">
+    <h2 style="font-size:12px;font-weight:600;padding:6px 10px;background:#E7EBEE;border-bottom:1px solid var(--rule)">检查</h2>
+    <div class="ok">每个步骤都连上了</div>
+    <div class="ok">每个循环都有次数上限</div>
+    <div class="ok">每个 Agent 步骤都有可用的 Agent</div>
+    <div class="ok">引擎能执行这里的每一种组合</div>
+    <div style="margin-top:6px;color:var(--ink2)">和 1.0.0 相比：新增 accept</div>
+  </div>
+</div>
+
+<div class="status"><span>文件 <b>workflows/module_dev.toml</b></span><span>草稿未保存</span></div>
 </body>
 </html>

@@ -10,33 +10,9 @@
 | MCP 规范最新版 2026-07-28（modelcontextprotocol.io/specification/2026-07-28/basic） | 基于 JSON-RPC 2.0；**这一版改成无状态**：每个请求在 `_meta` 里自带协议版本和客户端能力，服务端不能依赖之前的请求；结果要带 `resultType`。规范要求兼容旧版本客户端 |
 | MCP 2025-11-25 及以前 | 旧版本要先 `initialize` 握手。Claude Code 等现有客户端可能还在用旧版本 |
 
-## 一、工具集成：Function Calling（Agent 自己调用工具）
+## 一、二、工具集成（Function Calling 与 MCP）
 
-| 情况 | 应该怎样 |
-|---|---|
-| 平台提供哪些工具 | ★ 3 个：<br>`kb_search(query)`：查知识库，返回最相关的 3 段；<br>`compile_check(files)`：把 Agent 手上的草稿拿去跑第 1、2 层（主机编译、交叉编译），返回报错；<br>`list_interface()`：返回本模块要实现的函数原型和公共头文件内容 |
-| 哪个 Agent 能用哪些工具 | 由 Agent 定义里的 `tools` 字段决定（见第三节），不写死在代码里。★ 默认：编码 Agent 3 个都有；诊断 Agent 有 `kb_search`；测试 Agent 有 `kb_search`、`list_interface` |
-| 工具能不能碰到隐藏测试 | **不能**。`compile_check` 只跑第 1、2 层，工作目录是一份临时副本，不含 `hidden_tests/`；补一个单元测试防止以后泄露 |
-| 一次生成里最多调几次工具 | ★ 最多 5 轮；用完后再请求一次，这次不带工具，要求直接交卷 |
-| 工具返回的内容太长 | ★ 截到 4000 个字符，结尾注明"已截断" |
-| 工具出错（参数不对、超时） | 把错误信息当作工具结果返回给 Agent，不中断这次运行；★ `compile_check` 超时 60 秒 |
-| 思考模式下的多轮调用 | 按 DeepSeek 文档：每一轮把模型的完整回复（含 `reasoning_content` 和 `tool_calls`）原样放回对话，再追加工具结果 |
-| 怎么记录 | 新事件 `tool_called`（哪个 Agent、哪个工具、参数摘要、成功与否、耗时）；`llm_calls/` 里保存完整往返 |
-| 单 Agent 基线（b1、b2、b5）也能用工具吗 | ★ **能，所有配置都给同样的工具**。这样多 Agent 和单 Agent 的差别仍然只在分工；另加消融配置 `full-no-tools` 看工具本身的作用 |
-| 单元测试怎么测 | FakeLLM 增加"预设工具调用"的回复，覆盖：正常调用、多轮、超过 5 轮、工具出错、参数不是合法 JSON |
-| 已有评测结果 | 加工具以后 Agent 行为变了，**之前的评测数据只能作为"无工具版"的参考**，阶段 5 全部重跑 |
-
-## 二、工具集成：MCP 服务（别的 AI 工具调用我们）
-
-| 情况 | 应该怎样 |
-|---|---|
-| 怎么启动 | `firmforge mcp`，通过标准输入输出通信（stdio），一行一条 JSON-RPC 消息；日志只写到标准错误 |
-| 支持哪个协议版本 | ★ 同时支持 2026-07-28（无握手、每个请求带版本）和 2025-11-25（先 `initialize`）。请求的版本两者都不是时，按规范回"不支持的协议版本"错误，并列出支持的版本 |
-| 提供哪些工具 | `list_tasks()`：列出评测任务；<br>`verify_c_module(task_id, files)`：传入源文件内容，跑判定器第 1–5 层，返回报告文字；<br>`kb_search(query)`：查知识库 |
-| 能不能跑隐藏测试 | **不能**，和 Agent 待遇一样 |
-| 传进来的文件 | ★ 只接受 `src/`、`tests/` 下的 .c/.h，路径不能含 `..`，总大小不超过 512 KB；写到临时目录，用完删除 |
-| 怎么演示 | README 给出在 Claude Code 里配置这个 MCP 服务的写法；录一段"Claude Code 调用 FirmForge 检查代码"的演示 |
-| 怎么测 | 单元测试用子进程启动 `firmforge mcp`，按两个协议版本各走一遍完整对话 |
+已展开成单独的框架文档 [tools_mcp_framework.md](tools_mcp_framework.md)，以那份为准。
 
 ## 三、Agent 定义补"技能、工具集、记忆能力"
 
