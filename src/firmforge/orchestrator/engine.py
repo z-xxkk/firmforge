@@ -40,7 +40,7 @@ from .dag import Module, Plan, PlanError, extract_json, plan_from_text, single_m
 from .events import EventBus
 from .loop import ModuleAttempt, ModuleState, failure_points, repair_round
 from .scheduler import Strategy, make_strategy, prioritize
-from .workflow import Step, Workflow, load_workflow
+from .workflow import Step, Workflow, WorkflowError, engine_problems, load_workflow
 
 PLAN_RETRIES = 2              # 规划不合格时最多重做 2 次（ARCHITECTURE §2.7）
 HUMAN_ROUNDS = 3              # 人工最多否决 2 次，第 3 次仍不确认就结束运行
@@ -167,6 +167,7 @@ class _ParseFailure(Exception):
 
 HumanCallback = Callable[[Plan], tuple[bool, str]]
 HintCallback = Callable[[str, list[str]], str | None]     # (模块 id, 失败要点) -> 提示；None 表示放弃
+CheckpointCallback = Callable[[dict], tuple[bool, str]]   # 设计器里加的"等人确认"步骤：(是否通过, 意见)
 MAX_REPLANS = 1               # 每次运行最多重新规划 1 次
 
 
@@ -177,7 +178,8 @@ class Engine:
                  secrets: tuple[str, ...] = (), human_review: bool = False, human: HumanCallback | None = None,
                  hint: HintCallback | None = None, workflow: Workflow | None = None, memory: Store | None = None,
                  knowledge: KnowledgeBase | None = None, tools: ToolRegistry | None = None,
-                 approve: Approve | None = None, tier_override: str | None = None, thinking: str | None = None):
+                 approve: Approve | None = None, tier_override: str | None = None, thinking: str | None = None,
+                 checkpoint: CheckpointCallback | None = None):
         self.task, self.cfg, self.llm, self.settings = task, cfg, llm, settings
         self.registry = registry or default_registry()
         self.store, self.toolchain = store, toolchain
@@ -193,6 +195,10 @@ class Engine:
         self.tier_override, self.thinking = tier_override, thinking     # 这一次运行的覆盖（对话框下方的选择）
         self.workflow = workflow or load_workflow(cfg.workflow)
         self.wf_label = f"工作流 {self.workflow.name} {self.workflow.version}"     # 任务单的「当前位置」
+        problems = engine_problems(self.workflow, self.registry)
+        if problems:
+            raise WorkflowError(f"工作流 {self.workflow.name} {self.workflow.version} 引擎不能执行：" + "；".join(problems))
+        self.checkpoint = checkpoint
         self.loop_cfg = dict(settings.loop)
         conc = settings.concurrency
         self.llm_limit = int(conc.get("llm", 4))
@@ -288,7 +294,10 @@ class Engine:
         elif step.kind == "human":
             if step.enabled_by and not self._cond(step.enabled_by, None):
                 return
-            await self.confirm_plan()
+            if not self.states:
+                await self.confirm_plan()
+            else:
+                await self.confirm_delivery(step)
         elif step.kind == "foreach":
             await self.run_modules(step.subflow)
         elif step.kind == "verify" and step.scope == "all":
@@ -355,6 +364,38 @@ class Engine:
             if rnd == HUMAN_ROUNDS:
                 raise _Rejected(f"负责人 {HUMAN_ROUNDS} 次都没有确认规划")
             await self.make_plan(feedback=comment or "请重新规划", previous=self.plan)
+
+    async def _ask_checkpoint(self, step: Step, node_id: str, info: dict) -> tuple[bool, str]:
+        self.bus.emit("human_wait", node_id, step=step.id, note=step.note or "", **info)
+        if self.checkpoint is None:
+            ok, comment = True, ""
+        else:
+            ok, comment = await in_thread(self.checkpoint, {"step": step.id, "note": step.note or "",
+                                                            "node": node_id, **info})
+        self.bus.emit("human_done", node_id, step=step.id, approved=ok, comment=comment,
+                      auto=self.checkpoint is None)
+        return ok, comment
+
+    async def confirm_delivery(self, step: Step) -> None:
+        """主流程里"每个模块各跑"之后的等人确认：不通过就结束运行，结论为 rejected。"""
+        done = [m for m, s in self.states.items() if s.status == "done"]
+        ok, comment = await self._ask_checkpoint(step, step.id, {"modules_done": done})
+        if not ok:
+            raise _Rejected(f"负责人在 {step.id} 没有确认：{comment}")
+
+    async def module_checkpoint(self, step: Step, st: ModuleState) -> None:
+        """子流程里的等人确认（比如审查之后人工验收）：不通过且给了意见，就把意见交给编码 Agent 改一次再检查。"""
+        best = st.delivered()
+        ok, comment = await self._ask_checkpoint(step, st.module.id, {
+            "attempt": best.n if best else None, "verdict": best.report.verdict if best else None,
+            "files": sorted(best.code) if best else []})
+        if ok:
+            return
+        st.notes.append(f"负责人在 {step.id} 没有通过：{comment or '（没有意见）'}")
+        if comment and best is not None and st.coder is not None:
+            await self.repair_code(st, best, {"summary": "负责人验收时提出的意见", "instructions": comment},
+                                   len(st.attempts) + 1)
+            await self.check(st, by="human")
 
     # ------------------------------------------------------------ 模块调度（foreach）
 
@@ -432,12 +473,16 @@ class Engine:
             for sid in (step.then if self._cond(step.cond, st) else step.otherwise):
                 await self._run_sub_step(by_id[sid], st, by_id)
         elif step.kind == "agent" and step.role == "coder":
-            await self.write_code(st)
+            await self.write_code(st, step.agent)
         elif step.kind == "agent" and step.role == "tester":
-            await self.write_test(st)
+            await self.write_test(st, step.agent)
         elif step.kind == "agent" and step.role == "reviewer":
             if self.cfg.review:
-                await self.review(st)
+                await self.review(st, step.agent)
+        elif step.kind == "human":
+            if step.enabled_by and not self._cond(step.enabled_by, st):
+                return
+            await self.module_checkpoint(step, st)
         elif step.kind == "verify" and step.scope == "module":
             await self.check(st, by="coder+tester")
         elif step.kind == "loop" and step.body == "repair_round":
@@ -482,7 +527,10 @@ class Engine:
         t = self.settings.models.get(agent.model_tier)
         return (t.price_in_per_mtok + t.price_out_per_mtok) if t else 1.0
 
-    def _assign(self, node_id: str, role: str, task_type: str, exclude: tuple[str, ...] = ()) -> tuple[AgentDef, dict]:
+    def _assign(self, node_id: str, role: str, task_type: str, exclude: tuple[str, ...] = (),
+                fixed: str | None = None) -> tuple[AgentDef, dict]:
+        if fixed and fixed not in exclude:                   # 工作流里指定了 Agent
+            return self.registry.get(fixed), {"strategy": "workflow", "reason": f"工作流指定 {fixed}"}
         candidates = [a for a in self.registry.find(role, task_type) if a.name not in exclude]
         if not candidates:
             raise ValueError(f"没有注册角色为 {role} 的 Agent")
@@ -588,9 +636,9 @@ class Engine:
             return (files, rejected), {"files": sorted(files), "rejected": [p for p, _ in rejected]}
         return parse
 
-    async def write_code(self, st: ModuleState) -> None:
+    async def write_code(self, st: ModuleState, fixed: str | None = None) -> None:
         m = st.module
-        st.coder, scores = self._assign(m.id, "coder", m.task_type)
+        st.coder, scores = self._assign(m.id, "coder", m.task_type, fixed=fixed)
         self.bus.emit("node_assigned", m.id, agent=st.coder.name, role="coder", scores=scores)
         exps = (self._experiences(st, f"{m.task_type} {m.title} {' '.join(m.acceptance)} {self.task.title}", "首次编码")
                 if st.coder.memory_experience else [])
@@ -602,9 +650,9 @@ class Engine:
         st.code.update(files)
         st.rejected = rejected
 
-    async def write_test(self, st: ModuleState) -> None:
+    async def write_test(self, st: ModuleState, fixed: str | None = None) -> None:
         m = st.module
-        st.tester, scores = self._assign(m.id, "tester", m.task_type)
+        st.tester, scores = self._assign(m.id, "tester", m.task_type, fixed=fixed)
         self.bus.emit("node_assigned", m.id, agent=st.tester.name, role="tester", scores=scores)
         msgs = roles.tester_messages(self.task, self.plan, m, st.tester.prompt_name, where=self.wf_label)
         files, _ = await self.ask(st.tester, msgs, m.id, attempt=1, purpose="编写测试",
@@ -831,11 +879,11 @@ class Engine:
         (base.dir / "diagnosis.json").write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
         return d
 
-    async def review(self, st: ModuleState) -> None:
+    async def review(self, st: ModuleState, fixed: str | None = None) -> None:
         """客观层全过之后审查；high 级 needs_fix 最多触发 1 次额外编码轮，修改后没通过就退回。"""
         m = st.module
         passed = st.delivered()
-        agent, _ = self._assign(m.id, "reviewer", m.task_type)
+        agent, _ = self._assign(m.id, "reviewer", m.task_type, fixed=fixed)
         msgs = roles.reviewer_messages(self.task, m, passed.code, passed.report, agent.prompt_name,
                                       where=self.wf_label)
 

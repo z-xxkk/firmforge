@@ -49,13 +49,15 @@ def run_config(task: Task, cfg: RunConfig, *, llm: LLMClient, settings: Settings
                toolchain: Toolchain | None = None, secrets: tuple[str, ...] = (), token_budget: int | None = None,
                registry: Registry | None = None, human_review: bool = False,
                human=None, hint=None, memory: Store | None = None, tools=None, approve=None,
-               tier_override: str | None = None, thinking: str | None = None) -> RunResult | MultiRunResult:
+               tier_override: str | None = None, thinking: str | None = None, workflow=None,
+               checkpoint=None) -> RunResult | MultiRunResult:
     """按配置类型运行一次：单 Agent 基线或多 Agent 引擎。命令行和评测共用。"""
     if cfg.kind == "multi":
         return run_multi(task, cfg, llm=llm, settings=settings, runs_root=runs_root, registry=registry, store=store,
                          subscribers=subscribers, toolchain=toolchain, secrets=secrets,
                          human_review=human_review, human=human, hint=hint, memory=memory, tools=tools,
-                         approve=approve, tier_override=tier_override, thinking=thinking)
+                         approve=approve, tier_override=tier_override, thinking=thinking, workflow=workflow,
+                         checkpoint=checkpoint)
     return run_baseline(task, cfg, llm=llm, model=settings.tier(tier_override or cfg.tier), runs_root=runs_root,
                         store=store, subscribers=subscribers, toolchain=toolchain, secrets=secrets,
                         pricing=settings.pricing, token_budget=token_budget, tools=tools,

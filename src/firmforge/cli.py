@@ -434,6 +434,19 @@ def terminal_hint(module_id: str, points: list[str]) -> str | None:
     return ans or None
 
 
+def terminal_checkpoint(info: dict) -> tuple[bool, str]:
+    """工作流里"等人确认"步骤的终端版：直接回车 = 通过；输入意见 = 不通过并把意见交给 Agent。"""
+    where = f"模块 {info['node']} 的" if info.get("node") and info.get("node") != info.get("step") else ""
+    print(f"\n{where}步骤 {info.get('step')} 等你确认：{info.get('note') or ''}")
+    if info.get("files"):
+        print(f"  当前交付的文件：{', '.join(info['files'])}（第 {info.get('attempt')} 次，{info.get('verdict')}）")
+    try:
+        ans = input("直接回车 = 通过；输入意见后回车 = 不通过：").strip()
+    except EOFError:
+        ans = ""
+    return ans == "", ans
+
+
 def terminal_approve(agent: str, tool: str, arguments: dict) -> bool:
     """外部工具调用前的终端确认（MCP 规范：宿主在调用工具前要取得用户同意）。"""
     shown = json.dumps(arguments, ensure_ascii=False)
@@ -459,6 +472,15 @@ def _external_tools(settings, enabled: bool):
     return box, manager
 
 
+def _load_run_workflow(spec: str | None):
+    """--workflow 名字 或 名字@版本；不给就用配置默认的 module_dev。"""
+    if not spec:
+        return None
+    from .orchestrator.workflow import load_workflow
+    name, _, version = spec.partition("@")
+    return load_workflow(name, version or None)
+
+
 def cmd_run(args) -> int:
     task = _run_task(args)
     cfg = get_config(args.config)
@@ -477,7 +499,8 @@ def cmd_run(args) -> int:
     printer = LivePrinter()
     try:
         res = run_config(task, cfg, llm=llm, settings=settings, runs_root=args.runs_dir, store=store,
-                         tools=box, approve=terminal_approve,
+                         tools=box, approve=terminal_approve, workflow=_load_run_workflow(args.workflow),
+                         checkpoint=terminal_checkpoint if args.human_review else None,
                          subscribers=(printer,), secrets=_secrets(settings), token_budget=args.token_budget,
                          human_review=args.human_review, human=terminal_confirm if args.human_review else None,
                          hint=terminal_hint if args.human_review else None,
@@ -697,6 +720,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--tier", choices=["fast", "strong"], help="这次运行所有 Agent 都用这一档（默认按各 Agent 的设置）")
     s.add_argument("--think", choices=["off", "low", "high", "max"], help="这次运行的思考强度（默认按各 Agent 的设置）")
     s.add_argument("--no-mcp", action="store_true", help="不启动 firmforge.toml 里启用的外部 MCP 服务")
+    s.add_argument("--workflow", help="多 Agent 用的工作流：名字或 名字@版本（默认 module_dev 当前版本）")
     s.set_defaults(func=cmd_run)
 
     s = sub.add_parser("agents", help="列出注册的 Agent：角色、版本、档位、技能、工具、记忆、历史表现")
