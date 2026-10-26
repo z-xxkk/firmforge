@@ -1,0 +1,46 @@
+<style>.snav{width:230px;flex:none;padding:18px 12px}
+.snav h1{margin:0 8px 14px}
+.snav a{display:block;padding:8px 12px;border-radius:12px;color:var(--ink)}
+.snav a.on{background:var(--bg);font-weight:600}
+.snav small{display:block;color:var(--ink3);font-size:11px;font-weight:400}
+.smain{flex:1;padding:24px 36px;overflow:hidden}
+.shead{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.lead{color:var(--ink2);margin-bottom:18px;max-width:760px}
+.blk{border-top:1px solid var(--line);padding:16px 0 18px}
+.blk h3{margin-bottom:10px}
+.row{display:grid;grid-template-columns:140px 1fr;gap:12px;align-items:center;margin-bottom:10px;max-width:920px}
+.row label{color:var(--ink2)}
+.inp{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:10px;padding:5px 12px;min-width:340px;color:var(--ink)}
+.inp.ph{color:var(--ink3)}
+.seg{display:inline-flex;background:var(--bg);border-radius:10px;padding:2px}
+.seg span{padding:3px 12px;border-radius:8px;color:var(--ink2)}.seg span.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(28,32,38,.08)}
+table{border-collapse:collapse;width:100%;max-width:1040px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{color:var(--ink3);font-weight:400;font-size:12px}
+tr:last-child td{border-bottom:none}
+.tog{display:inline-block;width:32px;height:18px;border-radius:9px;background:var(--accent);position:relative;vertical-align:middle}
+.tog:after{content:"";position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+.tog.off{background:#CFD3D8}.tog.off:after{right:auto;left:2px}
+.ok{color:var(--pass);display:inline-flex;align-items:center;gap:6px}
+.snip{font:12px/1.6 var(--code);background:var(--bg);border-radius:12px;padding:12px 16px;max-width:760px;white-space:pre}
+</style>{rail}<div class="panel snav"><h1>设置</h1><a class="">通用<small>语言、主题、默认后端</small></a><a class="">模型<small>密钥、型号、思考强度、价格</small></a><a class="on">工具与 MCP<small>Agent 能用的工具、外部服务</small></a><a class="">记忆与知识库<small>经验库、知识库文档</small></a><a class="">人工与权限<small>什么时候问你</small></a><a class="">预算<small>token 和费用上限</small></a><a class="">高级<small>并发、超时、重试</small></a></div><div class="gut"><i></i></div><div class="panel smain">
+<div class="shead"><h1>工具与 MCP</h1><span class="sp"></span><button class="btn">打开 firmforge.toml</button></div>
+<p class="lead">工具按工具集分组。哪个 Agent 能用哪些工具集，在"团队"里勾选。</p>
+<div class="blk"><h3>内置工具集</h3>
+<table><tr><th>工具集</th><th>工具</th><th>做什么</th><th>默认给谁</th><th>启用</th></tr>
+<tr><td>knowledge</td><td class="mono">kb_search</td><td>查知识库，返回最相关的 3 段</td><td>编码、测试、诊断、规划</td><td><span class="tog"></span></td></tr>
+<tr><td>build</td><td class="mono">compile_check</td><td>草稿拿去主机编译和交叉编译，返回报错</td><td>编码</td><td><span class="tog"></span></td></tr>
+<tr><td>interface</td><td class="mono">list_interface</td><td>本模块要实现的函数和公共头文件</td><td>编码、测试</td><td><span class="tog"></span></td></tr></table></div>
+<div class="blk"><h3>外部 MCP 服务</h3>
+<table><tr><th>名称</th><th>启动方式</th><th>协议</th><th>状态</th><th>工具</th><th>调用前问我</th><th>启用</th></tr>
+<tr><td class="mono">fetch</td><td class="mono">uvx mcp-server-fetch</td><td>2025-11-25</td><td><span class="faint">未启用</span></td><td class="mono">mcp__fetch__fetch</td><td><span class="tog"></span></td><td><span class="tog off"></span></td></tr></table>
+<div style="margin-top:12px;display:flex;gap:10px;align-items:center"><button class="btn">添加 MCP 服务</button><span class="muted" style="font-size:12px">新服务第一次启用要你确认；评测时外部工具一律关闭</span></div></div>
+<div class="blk"><h3>让别的 AI 软件调用 FirmForge</h3>
+<p class="muted" style="margin-bottom:10px">把下面这段加进 Claude Code、Cursor 等软件的 MCP 配置，它们就能用 FirmForge 的判定器检查 C 代码。</p>
+<div class="snip">{
+  "mcpServers": {
+    "firmforge": { "command": "firmforge", "args": ["mcp"] }
+  }
+}</div>
+<div style="margin-top:12px;display:flex;gap:10px"><button class="btn">复制</button><button class="btn">自检</button></div></div>
+</div>

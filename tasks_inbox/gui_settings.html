@@ -1,86 +1,77 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>FirmForge 设置</title>
-<style>
-:root{--mask:#1F4D3A;--silk:#EEF2EC;--gold:#D4AF37;--chrome:#E4E7EA;--panel:#F6F7F8;--ink:#1D2328;--ink2:#5A646C;--rule:#C9CED3;--blue:#1F4F8F;--pass:#2FA864;--run:#FF8A1F;
---code:"JetBrains Mono","Noto Sans Mono",monospace;--sans:"Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+<html lang="zh-CN"><head><meta charset="utf-8"><title>FirmForge 设置</title><style>:root{
+  --bg:#F3F4F6; --surface:#FFFFFF; --ink:#1C2026; --ink2:#6E7580; --ink3:#9AA0A8; --line:#E4E6EA;
+  --accent:#2F6F68; --accent-soft:#E6F0EE; --run:#C98A2B; --run-soft:#F7EEDD; --fail:#C8483D; --fail-soft:#F8E6E4; --pass:#3E8E63;
+  --code:"JetBrains Mono","Noto Sans Mono",monospace; --sans:"Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{width:1440px;height:900px;overflow:hidden;background:var(--chrome);color:var(--ink);font:13px/1.55 var(--sans);display:grid;grid-template-columns:64px 220px 1fr;grid-template-rows:1fr 26px}
-.rail{background:var(--ink);display:flex;flex-direction:column;padding-top:10px}
-.rail .logo{color:var(--gold);font:700 13px var(--code);text-align:center;margin-bottom:18px}
-.rail a{color:#AEB8BF;text-align:center;padding:12px 0;font-size:12px;border-left:3px solid transparent}
-.rail a.on{color:#fff;border-left-color:var(--gold);background:#2A3238}
-.sp{flex:1}.muted{color:var(--ink2)}
-.nav{background:var(--panel);border-right:1px solid var(--rule);padding:16px 10px}
-.nav h1{font-size:16px;font-weight:600;margin:0 8px 14px}
-.nav a{display:block;padding:7px 10px;border-radius:4px;color:var(--ink)}
-.nav a.on{background:#DDE3E7;font-weight:600}
-.nav small{display:block;color:var(--ink2);font-size:11px;font-weight:400}
-main{background:#fff;padding:20px 32px;overflow:hidden}
-.head{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
-.head h2{font-size:18px;font-weight:600}
-.lead{color:var(--ink2);margin-bottom:16px;max-width:760px}
-.btn{border:1px solid var(--rule);background:#fff;border-radius:4px;padding:4px 12px;font:inherit;color:var(--ink)}
-.btn.primary{background:var(--mask);color:var(--silk);border-color:var(--mask);font-weight:600}
-section.blk{border-top:1px solid var(--rule);padding:14px 0 16px}
-section.blk h3{font-size:14px;font-weight:600;margin-bottom:8px}
-.row{display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:center;margin-bottom:8px;max-width:900px}
+body{width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font:13px/1.6 var(--sans);display:flex;padding:8px 8px 8px 0}
+.rail{width:68px;flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;padding-top:6px}
+.rail .logo{width:34px;height:34px;border-radius:11px;background:var(--ink);color:#fff;font:700 12px var(--code);display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.rail a{width:54px;padding:8px 0 6px;border-radius:12px;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--ink2);font-size:11px}
+.rail a.on{background:var(--surface);color:var(--ink)}
+.rail svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.rail .sp{flex:1}
+.panel{background:var(--surface);border-radius:16px;overflow:hidden;min-width:0;position:relative}
+.gut{width:8px;flex:none;display:flex;align-items:center;justify-content:center}
+.gut i{width:3px;height:28px;border-radius:2px;background:#D3D7DC}
+.gut.h{width:auto;height:8px}.gut.h i{width:28px;height:3px}
+.col{display:flex;flex-direction:column;min-width:0}
+.sp{flex:1}.muted{color:var(--ink2)}.faint{color:var(--ink3)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:5px 14px;font:inherit;color:var(--ink);white-space:nowrap}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:500}
+.btn.ghost{border-color:transparent;background:var(--bg)}
+.pill{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;padding:1px 10px;font-size:12px;color:var(--ink2);white-space:nowrap;background:var(--surface)}
+.pill b{color:var(--ink);font-weight:500}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none}
+code,.mono{font-family:var(--code);font-size:12px}
+h1{font-size:20px;font-weight:600;letter-spacing:.01em}
+h2{font-size:15px;font-weight:600}
+h3{font-size:13px;font-weight:600}
+</style></head><body><style>.snav{width:230px;flex:none;padding:18px 12px}
+.snav h1{margin:0 8px 14px}
+.snav a{display:block;padding:8px 12px;border-radius:12px;color:var(--ink)}
+.snav a.on{background:var(--bg);font-weight:600}
+.snav small{display:block;color:var(--ink3);font-size:11px;font-weight:400}
+.smain{flex:1;padding:24px 36px;overflow:hidden}
+.shead{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.lead{color:var(--ink2);margin-bottom:18px;max-width:760px}
+.blk{border-top:1px solid var(--line);padding:16px 0 18px}
+.blk h3{margin-bottom:10px}
+.row{display:grid;grid-template-columns:140px 1fr;gap:12px;align-items:center;margin-bottom:10px;max-width:920px}
 .row label{color:var(--ink2)}
-input,select{font:inherit;padding:4px 8px;border:1px solid var(--rule);border-radius:4px;background:#fff}
-table{border-collapse:collapse;width:100%;max-width:1060px}
-th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #E1E5E8;vertical-align:middle}
-th{color:var(--ink2);font-weight:400;font-size:12px}
-td.c{font-family:var(--code);font-size:12px}
-.ok{color:var(--pass)}.ok:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--pass);margin-right:6px}
-.seg{display:inline-flex;border:1px solid var(--rule);border-radius:4px;overflow:hidden}
-.seg span{padding:2px 10px;border-right:1px solid var(--rule)}.seg span:last-child{border-right:none}.seg span.on{background:var(--ink);color:#fff}
-.tog{display:inline-block;width:30px;height:16px;border-radius:8px;background:var(--mask);position:relative;vertical-align:middle}
-.tog:after{content:"";position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff}
-.tog.off{background:#B9C0C6}.tog.off:after{right:auto;left:2px}
-pre{font:12px/1.5 var(--code);background:var(--panel);border:1px solid var(--rule);border-radius:4px;padding:8px 10px;max-width:760px}
-.status{grid-column:1/4;display:flex;gap:22px;align-items:center;padding:0 12px;background:var(--ink);color:#D8DEE2;font-size:12px}
-.status b{font-weight:400;font-family:var(--code)}
-</style>
-</head>
-<body>
-<nav class="rail"><div class="logo">FF</div><a>对话</a><a>工作流</a><a>Agent<br>团队</a><span class="sp"></span><a class="on">设置</a></nav>
-<aside class="nav"><h1>设置</h1>
-<a class="">通用<small>语言、主题、默认后端</small></a>
-<a class="on">模型<small>密钥、型号、思考强度、价格</small></a>
-<a class="">工具与 MCP<small>Agent 能用的工具、外部服务</small></a>
-<a class="">记忆与知识库<small>经验库、知识库文档</small></a>
-<a class="">人工与权限<small>什么时候问你</small></a>
-<a class="">预算<small>token 和费用上限</small></a>
-<a class="">高级<small>并发、超时、配置文件</small></a>
-</aside>
-<main>
-  <div class="head"><h2>模型</h2><span class="sp"></span><button class="btn">打开配置文件 firmforge.toml</button></div>
-  <p class="lead">这一页改的就是 firmforge.toml 和 .env，手改文件也会反映到这里。密钥只写不读：保存后只显示"已保存"。</p>
-  <section class="blk">
-    <h3>DeepSeek</h3>
-    <div class="row"><label>API 密钥</label><div><input style="width:360px" placeholder="已保存，留空则不修改"> <span class="ok">已保存（.env）</span></div></div>
-    <div class="row"><label>接口地址</label><div><input style="width:360px" value="https://api.deepseek.com"> <button class="btn">测试连接并列出型号</button></div></div>
-  </section>
-  <section class="blk">
-    <h3>档位</h3>
-    <table>
-      <tr><th>档位</th><th>型号</th><th>思考强度</th><th>单次输出上限</th><th>价格（元 / 百万 token，入 / 出）</th></tr>
-      <tr><td>快</td><td><select><option>deepseek-flash</option></select></td><td><span class="seg"><span>关</span><span>低</span><span class="on">高</span><span>最高</span></span></td><td><input style="width:90px" value="65536"></td><td>高峰 2 / 8，空闲 1 / 4</td></tr>
-      <tr><td>强</td><td><select><option>deepseek-v4-pro</option></select></td><td><span class="seg"><span>关</span><span>低</span><span class="on">高</span><span>最高</span></span></td><td><input style="width:90px" value="65536"></td><td>高峰 9 / 27，空闲 4.5 / 13.5</td></tr>
-    </table>
-    <p class="muted" style="margin-top:8px;max-width:900px">思考强度对应 DeepSeek 接口的 thinking 和 reasoning_effort（low / high / max），默认"高"。开着思考时温度不起作用。每个 Agent 用哪一档在"Agent 团队"里设；对话框下方的选择只影响这一次运行。</p>
-  </section>
-  <section class="blk">
-    <h3>计价时段</h3>
-    <div class="row"><label>高峰时段</label><div><input style="width:260px" value="工作日 09:00–12:00、14:00–18:00"> <span class="muted">北京时间；其余时段和周末按空闲价</span></div></div>
-  </section>
-  <section class="blk">
-    <h3>其他提供商</h3>
-    <p class="muted">任何兼容 OpenAI 接口的服务（本地部署的开源模型、公司网关）都可以加成一个档位。</p>
-    <button class="btn" style="margin-top:8px">添加兼容 OpenAI 的接口</button>
-  </section>
-</main>
-<div class="status"><span>配置文件 <b>firmforge.toml</b></span><span>没有未保存的修改</span></div>
-</body></html>
+.inp{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:10px;padding:5px 12px;min-width:340px;color:var(--ink)}
+.inp.ph{color:var(--ink3)}
+.seg{display:inline-flex;background:var(--bg);border-radius:10px;padding:2px}
+.seg span{padding:3px 12px;border-radius:8px;color:var(--ink2)}.seg span.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(28,32,38,.08)}
+table{border-collapse:collapse;width:100%;max-width:1040px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{color:var(--ink3);font-weight:400;font-size:12px}
+tr:last-child td{border-bottom:none}
+.tog{display:inline-block;width:32px;height:18px;border-radius:9px;background:var(--accent);position:relative;vertical-align:middle}
+.tog:after{content:"";position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+.tog.off{background:#CFD3D8}.tog.off:after{right:auto;left:2px}
+.ok{color:var(--pass);display:inline-flex;align-items:center;gap:6px}
+.snip{font:12px/1.6 var(--code);background:var(--bg);border-radius:12px;padding:12px 16px;max-width:760px;white-space:pre}
+</style><nav class="rail">
+  <div class="logo">FF</div>
+  <a class=""><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>对话</a>
+  <a class=""><svg viewBox="0 0 24 24"><rect x="3" y="3.5" width="7" height="5" rx="2"/><rect x="14" y="15.5" width="7" height="5" rx="2"/><path d="M6.5 8.5v3a3 3 0 0 0 3 3h5a3 3 0 0 1 3 1"/></svg>工作流</a>
+  <a class=""><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.2c2.3.2 3.9 1.8 4.5 4.3"/></svg>团队</a>
+  <span class="sp"></span>
+  <a class="on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg>设置</a>
+</nav>
+<div class="panel snav"><h1>设置</h1><a class="">通用<small>语言、主题、默认后端</small></a><a class="on">模型<small>密钥、型号、思考强度、价格</small></a><a class="">工具与 MCP<small>Agent 能用的工具、外部服务</small></a><a class="">记忆与知识库<small>经验库、知识库文档</small></a><a class="">人工与权限<small>什么时候问你</small></a><a class="">预算<small>token 和费用上限</small></a><a class="">高级<small>并发、超时、重试</small></a></div><div class="gut"><i></i></div><div class="panel smain">
+<div class="shead"><h1>模型</h1><span class="sp"></span><button class="btn">打开 firmforge.toml</button></div>
+<p class="lead">这里改的就是 firmforge.toml 和 .env，手改文件这里也会跟着变。密钥只写不读，保存后只显示"已保存"。</p>
+<div class="blk"><h3>DeepSeek</h3>
+<div class="row"><label>API 密钥</label><div><span class="inp ph">留空则不修改</span>　<span class="ok"><span class="dot" style="background:var(--pass)"></span>已保存在 .env</span></div></div>
+<div class="row"><label>接口地址</label><div><span class="inp">https://api.deepseek.com</span>　<button class="btn">测试连接并列出型号</button></div></div></div>
+<div class="blk"><h3>档位</h3>
+<table><tr><th>档位</th><th>型号</th><th>思考强度</th><th>单次输出上限</th><th>价格：元 / 百万 token（入 / 出）</th></tr>
+<tr><td>快</td><td><span class="inp" style="min-width:170px">deepseek-flash</span></td><td><span class="seg"><span>关</span><span>低</span><span class="on">高</span><span>最高</span></span></td><td class="mono">65536</td><td>高峰 2 / 8，空闲 1 / 4</td></tr>
+<tr><td>强</td><td><span class="inp" style="min-width:170px">deepseek-v4-pro</span></td><td><span class="seg"><span>关</span><span>低</span><span class="on">高</span><span>最高</span></span></td><td class="mono">65536</td><td>高峰 9 / 27，空闲 4.5 / 13.5</td></tr></table>
+<p class="muted" style="margin-top:10px;max-width:860px;font-size:12px">思考强度对应 DeepSeek 接口的 thinking 与 reasoning_effort（low、high、max），默认"高"。每个 Agent 用哪一档在"团队"里设；对话框下方的选择只影响这一次运行。</p></div>
+<div class="blk"><h3>计价时段</h3><div class="row"><label>高峰时段</label><div><span class="inp" style="min-width:260px">工作日 09:00–12:00、14:00–18:00</span>　<span class="muted">北京时间，其余按空闲价</span></div></div></div>
+<div class="blk"><h3>其他提供商</h3><p class="muted" style="margin-bottom:10px">兼容 OpenAI 接口的服务（本地部署的开源模型、公司网关）都可以加成一个档位。</p><button class="btn">添加接口</button></div>
+</div></body></html>
