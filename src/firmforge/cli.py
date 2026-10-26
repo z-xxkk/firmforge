@@ -434,6 +434,31 @@ def terminal_hint(module_id: str, points: list[str]) -> str | None:
     return ans or None
 
 
+def terminal_approve(agent: str, tool: str, arguments: dict) -> bool:
+    """外部工具调用前的终端确认（MCP 规范：宿主在调用工具前要取得用户同意）。"""
+    shown = json.dumps(arguments, ensure_ascii=False)
+    print(f"\n{agent} 想调用外部工具 {tool}，参数：{shown[:500]}")
+    try:
+        ans = input("允许吗？输入 y 后回车允许，直接回车拒绝：").strip().lower()
+    except EOFError:
+        ans = ""
+    return ans in ("y", "yes", "是")
+
+
+def _external_tools(settings, enabled: bool):
+    """按配置启动外部 MCP 服务，返回 (工具箱, 管理器)。不启用时返回 (None, None)，用默认的内置工具。"""
+    if not enabled or not any(d.get("enabled") for d in settings.mcp_servers.values()):
+        return None, None
+    from .mcp import McpManager
+    from .tools import default_registry as default_tools
+    box = default_tools()
+    manager = McpManager(settings.mcp_servers)
+    manager.start(box)
+    for name, err in manager.errors.items():
+        print(f"[SKIP] 外部 MCP 服务 {name} 没有连上：{err}", file=sys.stderr)
+    return box, manager
+
+
 def cmd_run(args) -> int:
     task = _run_task(args)
     cfg = get_config(args.config)
@@ -447,10 +472,12 @@ def cmd_run(args) -> int:
     if args.human_review and cfg.kind != "multi":
         raise UsageError("--human-review 只用于多 Agent 配置（b3、b4、full）")
     llm = make_llm(settings)
+    box, manager = _external_tools(settings, not args.no_mcp)
     store = Store(args.db) if args.db else Store()
     printer = LivePrinter()
     try:
         res = run_config(task, cfg, llm=llm, settings=settings, runs_root=args.runs_dir, store=store,
+                         tools=box, approve=terminal_approve,
                          subscribers=(printer,), secrets=_secrets(settings), token_budget=args.token_budget,
                          human_review=args.human_review, human=terminal_confirm if args.human_review else None,
                          hint=terminal_hint if args.human_review else None,
@@ -458,6 +485,8 @@ def cmd_run(args) -> int:
     finally:
         printer.close()
         store.close()
+        if manager is not None:
+            manager.close()
     print(f"\n运行目录：{res.run_dir}")
     if cfg.kind == "multi":
         print(f"规划：{res.run_dir / 'dag.json'}")
@@ -514,6 +543,28 @@ def cmd_agents(args) -> int:
     if not shown:
         print("没有符合条件的 Agent。")
     return EXIT_PASS
+
+
+def cmd_mcp(args) -> int:
+    """以 stdio 方式提供 MCP 服务；--selftest 启动自己作为外部服务，按新旧两种协议各走一遍。"""
+    from .mcp import McpServer
+    if not args.selftest:
+        McpServer().serve()
+        return EXIT_PASS
+    from .mcp.client import McpClient, ServerConfig
+    env = {"PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+    cfg = ServerConfig("firmforge", sys.executable, ["-m", "firmforge", "mcp"], env=env, timeout_s=120)
+    client = McpClient(cfg)
+    try:
+        client.connect()
+        tools = [t["name"] for t in client.list_tools()]
+        text, is_error = client.call_tool("list_tasks", {})
+        print(f"[PASS] 连接成功：协议 {client.version}（{'新版' if client.era == 'modern' else '旧版'}）")
+        print(f"[PASS] 工具：{', '.join(tools)}")
+        print(f"[{'FAIL' if is_error else 'PASS'}] list_tasks 返回 {len(text.splitlines())} 个任务")
+        return EXIT_FAIL if is_error else EXIT_PASS
+    finally:
+        client.close()
 
 
 def _eval_tasks(spec: str) -> list[Task]:
@@ -645,6 +696,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--db", help="SQLite 数据库路径（默认 .ff_data/firmforge.db）")
     s.add_argument("--tier", choices=["fast", "strong"], help="这次运行所有 Agent 都用这一档（默认按各 Agent 的设置）")
     s.add_argument("--think", choices=["off", "low", "high", "max"], help="这次运行的思考强度（默认按各 Agent 的设置）")
+    s.add_argument("--no-mcp", action="store_true", help="不启动 firmforge.toml 里启用的外部 MCP 服务")
     s.set_defaults(func=cmd_run)
 
     s = sub.add_parser("agents", help="列出注册的 Agent：角色、版本、档位、技能、工具、记忆、历史表现")
@@ -660,6 +712,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--estimate", action="store_true", help="只跑 1 个任务 1 次，推算全量 token 和成本")
     s.add_argument("--memory", help="沿用另一个数据库里的经验库（默认每个实验独立）")
     s.set_defaults(func=cmd_eval)
+
+    s = sub.add_parser("mcp", help="以 stdio 方式启动 MCP 服务，让 Claude Code 等调用 FirmForge 的判定器")
+    s.add_argument("--selftest", action="store_true", help="启动自己作为外部服务并调用一次，检查是否可用")
+    s.set_defaults(func=cmd_mcp)
 
     s = sub.add_parser("replay", help="在终端按时间顺序回放一次运行")
     s.add_argument("run_dir")
