@@ -590,6 +590,48 @@ def cmd_mcp(args) -> int:
         client.close()
 
 
+def cmd_bench(args) -> int:
+    """性能测试：假模型测调度吞吐，真工具链测判定吞吐（DECISIONS 第 65 条）。不花钱。"""
+    from .evaluation.bench import bench_scheduling, bench_verify, to_markdown
+    task = load_task(Path(args.task)) if args.task else load_task(_tasks_dir() / "ringbuf")
+    sizes = [int(x) for x in args.sizes.split(",")]
+    limits = [int(x) for x in args.limits.split(",")]
+    print(f"调度吞吐：模块数 {sizes}，LLM 并发上限 {limits}，每次调用延迟 {args.latency} 秒 ……", flush=True)
+    sched = bench_scheduling(task, sizes=sizes, limits=limits, latency_s=args.latency)
+    ver = []
+    if not args.no_verify:
+        print("判定吞吐：真跑编译和测试 ……", flush=True)
+        ver = bench_verify(task, n=max(sizes), limits=[x for x in (1, 2, 4) if x <= max(limits)])
+    text = to_markdown(sched, ver, args.latency)
+    print(text)
+    if args.out:
+        out = Path(args.out)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "bench.md").write_text(text, encoding="utf-8")
+        import csv
+        with (out / "bench_scheduling.csv").open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["strategy", "modules", "llm_limit", "wall_s", "modules_per_min", "peak_agents", "utilization", "verdict"])
+            w.writerows([[r.strategy, r.modules, r.llm_limit, r.wall_s, r.modules_per_min, r.peak_agents,
+                          r.utilization, r.verdict] for r in sched])
+        print(f"结果：{out / 'bench.md'}")
+    return EXIT_PASS
+
+
+def cmd_stats(args) -> int:
+    """从真实运行记录统计响应延迟（DECISIONS 第 65 条）。"""
+    from .evaluation.stats import collect, to_markdown
+    stats = collect(Path(args.path))
+    if not stats["runs"]:
+        raise UsageError(f"{args.path} 下没有运行目录")
+    text = to_markdown(stats)
+    print(text)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text, encoding="utf-8")
+    return EXIT_PASS
+
+
 def _eval_tasks(spec: str) -> list[Task]:
     all_tasks = discover_tasks(_tasks_dir())
     if spec.strip().lower() == "all":
@@ -736,6 +778,20 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--estimate", action="store_true", help="只跑 1 个任务 1 次，推算全量 token 和成本")
     s.add_argument("--memory", help="沿用另一个数据库里的经验库（默认每个实验独立）")
     s.set_defaults(func=cmd_eval)
+
+    s = sub.add_parser("bench", help="性能测试：假模型测串行与并行调度的吞吐，真工具链测判定吞吐（不花钱）")
+    s.add_argument("--task", help="用哪个任务造模块（默认 tasks/ringbuf）")
+    s.add_argument("--sizes", default="1,2,4,8", help="模块数，逗号分隔（默认 1,2,4,8）")
+    s.add_argument("--limits", default="1,2,4,8", help="LLM 并发上限，逗号分隔（默认 1,2,4,8）")
+    s.add_argument("--latency", type=float, default=2.0, help="假模型每次调用的延迟秒数（默认 2）")
+    s.add_argument("--no-verify", action="store_true", help="不测判定吞吐")
+    s.add_argument("--out", help="把结果写到这个目录，如 results/bench")
+    s.set_defaults(func=cmd_bench)
+
+    s = sub.add_parser("stats", help="从运行记录统计各 Agent、模型、工具的响应延迟和判定耗时")
+    s.add_argument("path", help="一个运行目录，或包含很多运行目录的上级目录（如 .ff_runs）")
+    s.add_argument("--out", help="把表格写到这个文件")
+    s.set_defaults(func=cmd_stats)
 
     s = sub.add_parser("mcp", help="以 stdio 方式启动 MCP 服务，让 Claude Code 等调用 FirmForge 的判定器")
     s.add_argument("--selftest", action="store_true", help="启动自己作为外部服务并调用一次，检查是否可用")
