@@ -204,7 +204,9 @@ class DockerBackend(Backend):
             args += ["--env-file", str(project / ".env")]
         if sys.platform != "win32" and hasattr(os, "getuid"):
             args += ["--user", f"{os.getuid()}:{os.getgid()}"]
-        args += ["-v", f"{project}:/work", "-w", "/work", "firmforge", "run", "--config", cfg_name,
+        # PYTHONPATH 指向挂载进去的源码：容器里跑的是当前目录的代码，不用每次改完都重建镜像
+        args += ["-v", f"{project}:/work", "-w", "/work", "-e", "PYTHONPATH=/work/src", "firmforge", "run",
+                 "--config", cfg_name,
                  "--runs-dir", rel_runs, "--no-mcp"]
         if task.category == "adhoc":
             args += ["--spec", Path(task.spec_path).resolve().relative_to(project).as_posix(),

@@ -70,6 +70,13 @@ firmforge run --task tasks/<id> --config b2    # 单 Agent 跑一个任务，生
 firmforge run --task tasks/<id> --config full --human-review   # 多 Agent；规划后停下等确认
 firmforge eval --configs b1,b2,b3,b4,full,b5 --tasks all --runs 1 --out results/<实验名>   # b5 要排在 full 后面
 firmforge replay .ff_runs/<run_id> --speed 4   # 终端回放
+firmforge agents                               # 列出 Agent：角色、版本、档位、思考强度、技能、工具、记忆、历史表现
+firmforge run --task tasks/<id> --config full --tier strong --think max --workflow module_dev@1.0.0
+firmforge mcp                                  # MCP 服务端（stdio）；--selftest 自检
+firmforge bench --out results/bench            # 性能测试（假模型，不花钱）
+firmforge stats .ff_runs                       # 从运行记录统计延迟
+firmforge gui                                  # 桌面软件（先 pip install -e .[gui]）
+docker build -t firmforge-gui -f docker/Dockerfile.gui .   # 界面测试与截图用的镜像（offscreen）
 docker build -t firmforge -f docker/Dockerfile .
 docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge <子命令>
 ```

@@ -107,15 +107,65 @@ Docker 中的验收结果：`doctor` 所有工具可用；`check-task --all` 3 �
 - 评测配置 b1、b2、b3、b4、full、b5；b5 的 token 预算自动取同一实验里 full 的平均值；`summary.md` 新增"每通过一题的平均 token 和成本"。
 - 单元测试 161 个，Docker 中全部通过、无跳过。其中包括：测试 Agent 的消息里没有实现代码（修正轮也一样）、模块并行与依赖顺序（看事件时间戳）、诊断分派、回滚、四种调度策略与 smart 的公式、审查只修 1 次、人工节点、b5 预算、所有角色都看不到隐藏测试；以及把 Modbus 拆成 crc → frame → slave 三个模块跑完整流程，交付物通过隐藏测试。以上全部用假 LLM，真实模型的表现要等验收。
 
-**阶段 4（升级、经验库、知识库、桌面软件）：进行中。**
+**阶段 4（升级、经验库、知识库、工具与 MCP、桌面软件）：功能已全部实现（2026-10-26），用假模型测试通过；真实模型的表现等负责人验收。**
 
-- 新增 10 道难度 3 新题的清单与第四批规则已审核（DECISIONS 第 55、56 条）。第四批 3 道题（xmodem_rx、mavlink_parser、onewire_ds18b20）已写完，Docker 中自检通过：参考实现 PASS，12 个变异体全部被隐藏测试抓到；隐藏测试清单已审核（DECISIONS 第 57 条）。第五批 3 道题（isotp、sd_spi_init、at_parser）已写完，Docker 中自检通过：12 个变异体全部被隐藏测试抓到；隐藏测试清单已审核（DECISIONS 第 59 条）。第六批 4 道题（pid_ctrl、stepper_ramp、mem_pool、flash_kv）已写完，Docker 中自检通过：16 个变异体全部被隐藏测试抓到；隐藏测试清单待审核（`tasks_inbox/batch6_hidden_tests.md`）。**评测集达到 20 道**（数据结构 4、协议 6、状态机 6、驱动 4；难度 3 的 14 道），`check-task --all` 全部通过。
+评测集与记忆
+- 评测集 20 道（数据结构 4、协议 6、状态机 6、驱动 4；难度 3 的 14 道），`check-task --all` 全部通过；第四到六批规则与隐藏测试清单均已审核（DECISIONS 第 55–61 条）。
 - 升级阶梯：同一个错误签名连续出现或本级修了 3 轮还没过就升一级——检索知识库 → 换 Agent 从头重写 → 重新规划 → 转人工；每升一级发 `escalated` 事件。
-- 经验库（`memory/experience.py`）：修正让失败层前进时由诊断 Agent 总结一条经验，相似的合并；编码时按需求关键词或失败的 key 检索 top-3 放进上下文。
-- 知识库（`kb/` 下 7 篇自写摘要，`memory/knowledge.py`），用标准库实现的 BM25 检索（`memory/bm25.py`），中文按单字和双字切分。
-- 消融配置 `full-no-exp`、`full-no-esc`、`full-no-review`；`results.csv` 的 escalations、experiences_used 两列有了真实数值；`eval --memory` 可沿用另一个实验的经验库。
-- 单元测试 176 个，Docker 中全部通过。新增的包括：同一个错误连续出现时逐级升级到第 4 级、重新规划不能改动已完成的模块、转人工时负责人的提示交给编码 Agent、第一次运行记下的经验在第二次运行里被用上。以上全部用假 LLM，真实模型的表现要等验收。
-- 还没做：桌面软件（先出界面草图）。
+- 经验库（`memory/experience.py`）与知识库（`kb/` 下 7 篇，`memory/knowledge.py`，标准库 BM25）。
+
+工具与 MCP（DECISIONS 第 63 条，框架见 `tasks_inbox/tools_mcp_framework.md`，逐点注明借鉴了 DeepSeek Harness、Claude Code、OpenAI Agents SDK、Hermes）
+- Function Calling：工具箱按工具集分组（knowledge、build、interface、mcp-<服务名>）；每次调用走"记录 → 检查 → 守卫 → 执行 → 整理 → 记录结果"六步流水线；一次生成最多 5 轮，按 DeepSeek 要求回传思考内容；结果超过 8000 字截断并另存。
+- 3 个内置工具：`kb_search` 查知识库、`compile_check` 草稿试编译（只跑主机编译和交叉编译，碰不到隐藏测试）、`list_interface` 看接口。单 Agent 基线也有同样的工具；消融配置 `full-no-tools` 量出工具本身的作用。
+- MCP 服务端 `firmforge mcp`：同时支持 2026-07-28（无握手）和 2025-11-25（initialize），提供 `list_tasks`、`verify_c_module`（不跑隐藏测试）、`kb_search`；`firmforge mcp --selftest` 自检。
+- MCP 客户端：按 `firmforge.toml` 的 `[mcp.servers.*]` 启动本机外部服务，先 `server/discover` 试探再退回旧版握手；清掉名字像密钥的环境变量；断线重连最多 5 次；默认每次调用前问人；评测时一律不用。
+
+Agent、工作流与提示词
+- Agent 定义加了技能、工具集、记忆、思考强度（关 / 低 / 高 / 最高，对应 DeepSeek 的 thinking 与 reasoning_effort），都实际生效；`firmforge agents` 列出全部 Agent、版本和历史表现。
+- 发给所有 Agent 的用户消息统一为"任务单"五节：意图、当前位置、引用、约束、附件（`agents/brief.py`）。
+- 工作流可以保存成新版本（旧版本进 `workflows/history/`）；保存前检查引擎能不能执行；引擎放宽为任意位置可以"等人确认"、步骤可以指定 Agent。`run --workflow 名字@版本`。
+- 对话核心（`chat.py`）：需求分析 Agent 追问并整理出需求文档和头文件（先做语法检查）；运行后追问会附上运行摘要；`@模块`、`@步骤`、`@src/文件` 变成任务单里的引用；让 AI 改工作流。
+- 每次运行可以设 token 和费用上限，超过就停。
+
+性能测试（DECISIONS 第 65 条）
+- `firmforge bench`：假模型（固定延迟）测串行与智能并行在不同并发上限下的吞吐、并发数、名额利用率，真工具链测判定并发。例：4 个模块、每次调用 0.5 秒时，串行 6.2 秒，智能并行（并发 4）2.4 秒。
+- `firmforge stats <运行目录>`：按 Agent、模型、工具统计延迟中位数、90% 分位和 token，以及判定耗时。
+
+桌面软件（DECISIONS 第 62 条，界面草图第 4 版；截图见 `docs/screenshots/`）
+- 四个工作区：对话（会话列表、和 Agent 团队的对话、模块图 / 流程图、检查结果、代码、调度得分、"发给 AI 的内容"）、工作流设计器（照 Qt Designer 的步骤箱 / 画布 / 步骤树 / 属性 / 代码，图和 TOML 双向同步，可以让 AI 改）、Agent 团队、设置（模型、工具与 MCP、记忆与知识库、人工与权限、预算、高级，写回 `firmforge.toml` 和 `.env`，密钥只写不读）。
+- 输入框下选模型档位、思考强度、配置、评测题；支持 `/task`、`/model`、`/think`、`/config`、`/workflow` 和 `@` 引用。
+- 两种后端：docker（默认，容器里跑命令行，人工回复经标准输入传回）和本机（后台线程直接调核心库）；历史运行按倍速回放。
+- 浅色简约、圆角分档、松石绿强调色，跟随系统深浅色；所有面板之间可以拖动调整大小，双击分隔条恢复，关闭时记住布局。
+
+单元测试 249 个：判定器镜像里 246 个通过、3 个界面测试跳过（没装 PySide6）；这 3 个在 `firmforge-gui` 镜像里以 offscreen 方式通过。全部用假模型，不联网。
+
+已知局限
+- 桌面软件需要 PySide6：`pip install -e .[gui]`（依赖是 PySide6-Essentials，约 100 MB）。开发机没有 pip 时可以用 `docker/Dockerfile.gui` 跑界面测试和截图，但看不到窗口。
+- 等宽字体 JetBrains Mono 没有随软件打包，没装时退回系统等宽字体。
+- 本机后端点"停止"不能打断正在进行的模型调用，只能等这次调用返回；docker 后端会直接结束容器。
+- docker 后端不启动外部 MCP 服务（容器里通常没有对应的命令）。
+- 外部 MCP 只支持本机 stdio，不支持远程 HTTP；首批只配了 `fetch` 一个示例，默认关闭。
+- 自己写的需求（对话生成的）没有隐藏测试，结论只代表通过了 Agent 自己写的测试；界面上会注明。
+- 加了工具、改成任务单格式以后，Agent 看到的内容变了，阶段 3 的评测数据只能当"无工具版"参考，阶段 5 要重跑。
+
+### 阶段 4 验收命令
+
+```bash
+docker build -t firmforge -f docker/Dockerfile .
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work --entrypoint python3 firmforge -m unittest discover -s tests
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge agents
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge mcp --selftest
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge bench --out results/bench
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge stats .ff_runs
+pip install -e .[gui]
+firmforge gui
+```
+
+用真实模型试一题（会产生费用）：
+
+```bash
+docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge run --task tasks/flash_kv --config full
+```
 
 ### 阶段 3 验收命令（需要 `.env` 里的 key，会产生费用）
 

@@ -364,6 +364,7 @@ role = "reviewer"
 - Agent 调用：`agent_started`、`agent_finished`（含 token、耗时）
 - 判定与循环：`verify_started`、`verify_finished`、`diagnosis`、`escalated`（含升级级别）、`rollback`
 - 经验库：`experience_saved`、`experience_used`
+- 工具（DECISIONS 第 63 条）：`tool_called`（调用前先记录）、`tool_result`（是否成功、耗时、摘要、是否截断）
 
 界面只读事件，不直接访问引擎内部状态。所以回放（`firmforge replay`）和实时显示走的是同一条路径。
 
@@ -631,24 +632,30 @@ firmforge mcp                            以 stdio 方式启动 MCP 服务（可
 
 ## 12. 桌面软件（PySide6）
 
-- **主窗口**分为以下几块：
-  - 左侧：需求输入和任务选择；
-  - 中间：DAG 图（`QGraphicsView`，节点按状态着色，边表示依赖）；
-  - 右侧：Agent 状态和调度得分明细；
-  - 下方：事件日志和判定报告（每层一个状态块）；
-  - 人工节点：弹出确认对话框。
+按界面草图第 4 版实现（DECISIONS 第 62 条，`tasks_inbox/gui_sketch.md`），代码在 `src/firmforge/gui/`：
+
+- **四个工作区**（左侧竖栏）：
+  - 对话：会话列表、和 Agent 团队的对话、模块图 / 流程图、详情（检查结果、代码、调度得分、发给 AI 的内容）；
+  - 工作流设计器：照 Qt Designer 的停靠面板（步骤箱、画布、步骤树、属性、代码与检查），画布和 `workflows/*.toml` 双向同步；
+  - Agent 团队：改 `agents/*.toml`（档位、思考强度、工具集、记忆、技能），保存成新版本；
+  - 设置：写回 `firmforge.toml` 和 `.env`（`config_edit.py`，按行修改、保留注释，密钥只写不读）。
+- **对话**：需求分析 Agent（`chat.py`）追问并整理需求；规划确认、工作流里的"等人确认"、转人工、外部工具调用确认都以消息和按钮出现在对话里，不再弹窗。
+- **任务单**：发给任何 Agent 的用户消息都是"意图、当前位置、引用、约束、附件"五节（`agents/brief.py`）；画布上的步骤以 TOML 出现在"引用"里。
 - **后端模式**：
-  - `docker`（默认）：用 `docker run` 在容器里执行 `firmforge run`，运行目录挂载到本机。界面读取并跟随 `events.jsonl` 刷新，所以本机不需要装工具链。Windows 上依赖 Docker Desktop。
-  - `local`：在本机的 `QThread` 里直接调用核心库（需要本机有工具链）。
-- **回放模式**：打开任意运行目录，按时间顺序重放事件，倍速可调。演示视频用这个模式录，不怕现场 LLM 输出不稳定。
+  - `docker`（默认）：`docker run -i … firmforge run …`，`PYTHONPATH` 指向挂载的源码，运行目录挂载到本机；界面每 0.2 秒读取新增的 `events.jsonl` 行；人工回复当作终端输入写进容器的标准输入。Windows 上依赖 Docker Desktop。
+  - `local`：在本机后台线程里直接调用核心库（需要本机有工具链），人工回复通过线程事件传回。
+- **回放模式**：打开任意运行目录，按时间顺序重放事件，倍速可调；单个间隔最多等 3 秒。实时显示和回放共用一套代码。
+- **样式**：浅色简约、圆角分档、松石绿唯一强调色，跟随系统深浅色；相邻面板之间是可拖动的分隔条，关闭时用 `QSettings` 记住布局。
 
-## 13. MCP 服务（可选，阶段 4 以后）
+## 13. 工具与 MCP（DECISIONS 第 63 条）
 
-- 用标准库实现基于 stdio 的 JSON-RPC 2.0，支持 `initialize`、`tools/list`、`tools/call` 三个方法。
-- 暴露的工具：
-  - `verify_c_module(task_id, files)`：返回给 Agent 看的报告；
-  - `list_tasks()`。
-- 作用：让 Claude Code、Cursor 这类支持 MCP 的工具，把 FirmForge 当作"嵌入式代码质量闸门"来调用，作为落地推广的演示。
+框架和每个设计点的出处见 `tasks_inbox/tools_mcp_framework.md`，代码在 `src/firmforge/tools/` 和 `src/firmforge/mcp/`：
+
+- **工具箱**（`tools/registry.py`）：内置工具和外部 MCP 工具登记在一起，按工具集分组；发给模型的只有名字、说明、参数格式。Agent 定义里的 `toolsets` 决定它能用哪些。
+- **执行流水线**（`tools/pipeline.py`）：记录调用 → 检查（能不能用、参数、要不要问人）→ 守卫（只拒不放，不许碰隐藏测试）→ 执行（超时）→ 整理（截断、失败如实返回）→ 记录结果。
+- **调用循环**（`tools/loop.py`）：一次生成最多 5 轮工具往返；带了工具的请求之后，按 DeepSeek 要求回传 `reasoning_content`。
+- **MCP 服务端**（`firmforge mcp`，stdio，JSON-RPC 2.0）：同时支持 2026-07-28（每个请求自带版本，`server/discover`）和 2025-11-25（`initialize`）；工具 `list_tasks`、`verify_c_module`（不跑隐藏测试）、`kb_search`。
+- **MCP 客户端**：启动本机外部服务，先 `server/discover` 试探、不行退回 `initialize`；外部工具名为 `mcp__<服务名>__<工具名>`；清掉名字像密钥的环境变量；断线重连最多 5 次；默认每次调用前问人；评测时不用。
 
 ## 14. 部署
 
