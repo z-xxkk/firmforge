@@ -122,6 +122,10 @@ class _Rejected(Exception):
     """负责人没有确认规划。"""
 
 
+class _OverBudget(Exception):
+    """这次运行花的 token 或费用超过了设置里的上限。"""
+
+
 async def in_thread(fn: Callable, *args, **kwargs):
     """在守护线程里执行阻塞调用。用守护线程而不是线程池：按 Ctrl+C 时不必等正在进行的 LLM 请求返回。"""
     loop = asyncio.get_running_loop()
@@ -282,6 +286,8 @@ class Engine:
             self.result.verdict, self.result.error = "error", str(exc)
         except _Rejected as exc:
             self.result.verdict, self.result.error = "rejected", str(exc)
+        except _OverBudget as exc:
+            self.result.verdict, self.result.error = "incomplete", str(exc)
         return False
 
     # ------------------------------------------------------------ 主流程节点
@@ -572,6 +578,11 @@ class Engine:
         u["tokens"] += resp.prompt_tokens + resp.completion_tokens
         u["latency_s"] += resp.latency_s
         u["cost"] += cost
+        b = self.settings.budget
+        if b.get("max_tokens") and r.tokens > int(b["max_tokens"]):
+            raise _OverBudget(f"已用 {r.tokens} token，超过设置的上限 {b['max_tokens']}，运行停止")
+        if b.get("max_cost") and r.cost > float(b["max_cost"]):
+            raise _OverBudget(f"已花 {r.cost:.2f} 元，超过设置的上限 {b['max_cost']} 元，运行停止")
         return resp
 
     def _finished(self, agent: AgentDef, node_id: str, attempt: int, resp: LLMResponse, **data) -> None:
@@ -940,7 +951,7 @@ class Engine:
             if d.exists():
                 shutil.rmtree(d)
         if not r.has_code:
-            if r.verdict not in ("error", "interrupted", "rejected"):
+            if r.verdict not in ("error", "interrupted", "rejected", "incomplete"):
                 r.verdict = "fail"
             return
         if self.integration_dir.is_dir():
@@ -962,7 +973,7 @@ class Engine:
             (final / "report.md").write_text(f"# {self.task.title}（{self.task.id}）验证报告\n\n"
                                              "没有做集成判定（有模块没有完成，或运行被中断）。\n"
                                              + self._modules_markdown(), encoding="utf-8")
-        if r.verdict in ("error", "interrupted", "rejected"):
+        if r.verdict in ("error", "interrupted", "rejected", "incomplete"):
             return
         all_done = all(s.status == "done" for s in self.states.values())
         r.verdict = report.for_agent().verdict if (report is not None and all_done) else "fail"

@@ -57,3 +57,8 @@ args = ["mcp-server-fetch"]
 enabled = false
 ask = true
 timeout_s = 60
+
+# 每次运行的上限（0 表示不限）。超过就停，结论记为 incomplete。
+[budget]
+max_tokens = 0
+max_cost = 0.0                    # 元

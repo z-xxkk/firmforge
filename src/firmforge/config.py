@@ -237,6 +237,7 @@ class Settings:
     loop: dict = field(default_factory=dict)
     scheduler: dict = field(default_factory=dict)
     tools: dict = field(default_factory=dict)
+    budget: dict = field(default_factory=dict)            # max_tokens、max_cost：每次运行的上限，超过就停
     mcp_servers: dict = field(default_factory=dict)       # 名字 -> {command, args, env, timeout, enabled, ask}
     pricing: PeakSchedule | None = None
     source: Path | None = None
@@ -298,6 +299,7 @@ def load_settings(path: Path | str | None = None) -> Settings:
         loop=dict(data.get("loop", {})),
         scheduler=dict(data.get("scheduler", {})),
         tools=dict(data.get("tools", {})),
+        budget=dict(data.get("budget", {})),
         mcp_servers=dict(data.get("mcp", {}).get("servers", {})),
         pricing=pricing,
         source=path,
