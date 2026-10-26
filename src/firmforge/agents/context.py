@@ -52,15 +52,18 @@ def public_headers(task: Task) -> list[Path]:
 
 
 def coder_messages(task: Task) -> list[dict]:
-    """单 Agent（写实现 + 测试）的初始消息：system + user。"""
+    """单 Agent（写实现 + 测试）的初始消息：system + 任务单。"""
+    from .brief import Brief
+    from .roles import constraints
     system = load_prompt("coder.md").safe_substitute(
         forbidden="、".join(task.forbidden_symbols), budget=_budget_text(task))
     headers = "\n\n".join(f"`include/{h.name}`：\n\n```c\n{h.read_text(encoding='utf-8').rstrip()}\n```"
                           for h in public_headers(task)) or "（无）"
-    user = load_prompt("coder_task.md").safe_substitute(
-        title=task.title, module=task.id, spec=task.spec_path.read_text(encoding="utf-8").strip(),
-        headers=headers)
-    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    brief = Brief(f"实现「{task.title}」（模块名 `{task.id}`）：输出实现文件和单元测试文件 `tests/test_{task.id}.c`。",
+                  f"单 Agent › 模块 {task.id}（第 1 次）", constraints=constraints(task))
+    brief.attach("需求文档 spec.md", task.spec_path.read_text(encoding="utf-8").strip())
+    brief.attach("公共接口头文件（只读，位于 include/）", headers)
+    return [{"role": "system", "content": system}, {"role": "user", "content": brief.render()}]
 
 
 def report_details(report: Report, workdir: Path | None = None) -> str:
@@ -91,14 +94,16 @@ def report_details(report: Report, workdir: Path | None = None) -> str:
 
 def repair_message(report: Report, round_no: int, max_rounds: int,
                    rejected: list[tuple[str, str]] | None = None, workdir: Path | None = None) -> str:
+    from .brief import Brief
     agent_report = report.for_agent()
     layer = agent_report.failed_layer or "无"
-    text = load_prompt("coder_repair.md").safe_substitute(
-        round=round_no, max_rounds=max_rounds, failed_layer=layer,
-        failed_title=TITLES.get(layer, "—"), details=report_details(agent_report, workdir))
+    brief = Brief("判定器检查没有通过。请根据报错修正代码或测试：错误可能在实现里，也可能在你写的测试里，先判断再改。"
+                  "按同样的格式输出需要修改的完整文件。",
+                  f"修正第 {round_no} 轮（最多 {max_rounds} 轮）；首个失败层：{layer}（{TITLES.get(layer, '—')}）")
     if rejected:
-        text += "\n\n上一轮这些文件被拒绝写入：\n" + "\n".join(f"- {p}：{why}" for p, why in rejected)
-    return text
+        brief.ref("rejected 上一轮被拒绝写入的文件", "\n".join(f"- {p}：{why}" for p, why in rejected))
+    brief.attach("判定报告", report_details(agent_report, workdir))
+    return brief.render()
 
 
 FORMAT_REMINDER = ("没有在你的回复里找到符合格式的文件块。请严格按下面的格式输出每个完整文件：\n\n"

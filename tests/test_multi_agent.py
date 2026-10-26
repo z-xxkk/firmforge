@@ -54,7 +54,7 @@ def role_of(messages):
 
 
 def module_of(messages):
-    m = re.search(r"## (?:你负责的模块|你要测试的模块|出问题的模块)：(\w+)", messages[1]["content"])
+    m = re.search(r"\[module (\w+)", messages[1]["content"])
     if m:
         return m.group(1)
     m = re.search(r'## 模块\n\n```json\n\{\n  "id": "(\w+)"', messages[1]["content"])

@@ -192,6 +192,7 @@ class Engine:
         self.approve = approve
         self.tier_override, self.thinking = tier_override, thinking     # 这一次运行的覆盖（对话框下方的选择）
         self.workflow = workflow or load_workflow(cfg.workflow)
+        self.wf_label = f"工作流 {self.workflow.name} {self.workflow.version}"     # 任务单的「当前位置」
         self.loop_cfg = dict(settings.loop)
         conc = settings.concurrency
         self.llm_limit = int(conc.get("llm", 4))
@@ -315,7 +316,7 @@ class Engine:
         agent, scores = self._assign("plan", "planner", "*")
         self.bus.emit("node_assigned", "plan", agent=agent.name, role="planner", scores=scores)
         kb = self.kb.search(self._spec_text()[:2000], k=3) if (self.kb and agent.memory_knowledge) else []
-        msgs = roles.planner_messages(self.task, self.max_modules, agent.prompt_name, knowledge=kb)
+        msgs = roles.planner_messages(self.task, self.max_modules, agent.prompt_name, knowledge=kb, where=self.wf_label)
         if feedback and previous is not None:
             msgs = msgs + [{"role": "assistant", "content": f"```json\n{previous.to_json()}\n```"},
                            {"role": "user", "content": roles.planner_feedback_message(feedback)}]
@@ -594,7 +595,8 @@ class Engine:
         exps = (self._experiences(st, f"{m.task_type} {m.title} {' '.join(m.acceptance)} {self.task.title}", "首次编码")
                 if st.coder.memory_experience else [])
         msgs = roles.coder_messages(self.task, self.plan, m, self._dep_files(m), st.coder.prompt_name,
-                                    knowledge=st.knowledge if st.coder.memory_knowledge else (), experiences=exps)
+                                    knowledge=st.knowledge if st.coder.memory_knowledge else (), experiences=exps,
+                                    where=self.wf_label)
         files, rejected = await self.ask(st.coder, msgs, m.id, attempt=1, purpose="编写实现",
                                          parse=self._code_parser(m), fallback=lambda: ({}, []))
         st.code.update(files)
@@ -604,7 +606,7 @@ class Engine:
         m = st.module
         st.tester, scores = self._assign(m.id, "tester", m.task_type)
         self.bus.emit("node_assigned", m.id, agent=st.tester.name, role="tester", scores=scores)
-        msgs = roles.tester_messages(self.task, self.plan, m, st.tester.prompt_name)
+        msgs = roles.tester_messages(self.task, self.plan, m, st.tester.prompt_name, where=self.wf_label)
         files, _ = await self.ask(st.tester, msgs, m.id, attempt=1, purpose="编写测试",
                                   parse=self._test_parser(m), fallback=lambda: ({}, []))
         st.tests.update(files)
@@ -616,7 +618,8 @@ class Engine:
         exps = (self._experiences(st, f"{base.report.failed_layer or ''} {keys}", "修正")
                 if keys and st.coder.memory_experience else [])
         msgs = roles.coder_messages(self.task, self.plan, m, self._dep_files(m), st.coder.prompt_name,
-                                    knowledge=st.knowledge if st.coder.memory_knowledge else ())
+                                    knowledge=st.knowledge if st.coder.memory_knowledge else (),
+                                    where=self.wf_label, attempt=n)
         msgs.append({"role": "user", "content": roles.coder_repair_message(
             base.report, base.n, limit, diagnosis, base.code, st.rejected, base.dir, experiences=exps)})
         files, rejected = await self.ask(st.coder, msgs, m.id, attempt=n, purpose="按诊断修改实现",
@@ -628,7 +631,7 @@ class Engine:
         m = st.module
         limit = int(self.loop_cfg.get("max_attempts_per_module", 6))
         src_texts = {**self._dep_files(m), **base.code}
-        msgs = roles.tester_messages(self.task, self.plan, m, st.tester.prompt_name)
+        msgs = roles.tester_messages(self.task, self.plan, m, st.tester.prompt_name, where=self.wf_label)
         msgs.append({"role": "user", "content": roles.tester_repair_message(
             base.report, base.n, limit, diagnosis, base.tests, src_texts, base.dir, self._public_header_text())})
         files, _ = await self.ask(st.tester, msgs, m.id, attempt=n, purpose="按诊断修改测试",
@@ -722,7 +725,7 @@ class Engine:
         frozen = [mid for mid, s in self.states.items() if mid != failing and s.status in ("done", "running")]
         agent, scores = self._assign("plan", "planner", "*")
         self.bus.emit("node_assigned", "plan", agent=agent.name, role="planner", scores=scores)
-        msgs = roles.planner_messages(self.task, self.max_modules, agent.prompt_name)
+        msgs = roles.planner_messages(self.task, self.max_modules, agent.prompt_name, where=self.wf_label)
         msgs += [{"role": "assistant", "content": f"```json\n{self.plan.to_json()}\n```"},
                  {"role": "user", "content": roles.planner_replan_message(failing, failure_points(st), frozen)}]
         for k in range(PLAN_RETRIES + 1):
@@ -812,7 +815,7 @@ class Engine:
         m = st.module
         agent, _ = self._assign(m.id, "diagnoser", m.task_type)
         msgs = roles.diagnoser_messages(self.task, self.plan, m, base.code, base.tests, base.report,
-                                        st.signatures(), base.dir, agent.prompt_name)
+                                        st.signatures(), base.dir, agent.prompt_name, where=self.wf_label)
 
         def parse(text: str):
             try:
@@ -833,7 +836,8 @@ class Engine:
         m = st.module
         passed = st.delivered()
         agent, _ = self._assign(m.id, "reviewer", m.task_type)
-        msgs = roles.reviewer_messages(self.task, m, passed.code, passed.report, agent.prompt_name)
+        msgs = roles.reviewer_messages(self.task, m, passed.code, passed.report, agent.prompt_name,
+                                      where=self.wf_label)
 
         def parse(text: str):
             try:

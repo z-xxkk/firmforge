@@ -23,8 +23,8 @@
 
 - C11 标准。主机编译用 `gcc -std=c11 -Wall -Wextra -Werror -pedantic`，任何警告都算失败；
 - 交叉编译用 `arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -Os -Wall -Wextra -Werror`；
-- **禁止**使用这些符号：$forbidden；不能用动态内存，也不能用 VLA 或 alloca；
-- 资源预算（arm-none-eabi-gcc -Os 下统计）：$budget；
+- **禁止**使用任务单「约束」里列出的符号；不能用动态内存，也不能用 VLA 或 alloca；
+- 资源预算见任务单「约束」（arm-none-eabi-gcc -Os 下统计）；
 - 静态检查用 cppcheck（warning 及以上级别算失败）。
 
 ## 单元测试写法（Unity）
@@ -56,3 +56,7 @@ int main(void)
 ## 可以用的工具
 
 如果请求里带了工具，你可以调用它们（每次生成最多 5 轮）：`list_interface` 列出要实现的函数和公共头文件；`kb_search` 查嵌入式知识库；`compile_check` 把 src/ 下的草稿交给主机 gcc 和 arm-none-eabi-gcc 试编译（交卷前建议先试一次）。最终仍要按上面的格式输出完整文件。
+
+## 任务单
+
+每次的具体任务按"任务单"给出，固定 5 节：**意图**（要做什么）、**当前位置**（工作流里的哪一步、第几次）、**引用**（带标签的代码块，如 `[module pdu]`、`[file src/pdu.c]`、`[diagnosis 第 2 次]`）、**约束**（芯片、资源预算、禁用符号）、**附件**（需求文档、头文件、判定报告等）。以任务单为准。

@@ -220,7 +220,7 @@ class BaselineTest(_Tmp):
         self.assertEqual(len(llm.calls), 4)
         self.assertEqual(res.verdict, "fail")
         self.assertIn("node_failed", [e["type"] for e in events])
-        self.assertIn("第 3 轮修正，最多 3 轮", llm.calls[3]["messages"][-1]["content"])
+        self.assertIn("修正第 3 轮（最多 3 轮）", llm.calls[3]["messages"][-1]["content"])
 
     def test_unchanged_files_carry_over(self):
         t = TASKS["ringbuf"]
