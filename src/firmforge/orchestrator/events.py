@@ -22,6 +22,8 @@ EVENT_TYPES = {
     "verify_started", "verify_finished", "diagnosis", "escalated", "rollback",
     # 经验库
     "experience_saved", "experience_used",
+    # 工具（DECISIONS 第 63 条）
+    "tool_called", "tool_result",
 }
 
 Subscriber = Callable[[dict], None]

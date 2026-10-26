@@ -193,6 +193,10 @@ class PeakSchedule:
         return any(start <= minute < end for start, end in self.windows)
 
 
+REASONING_EFFORTS = ("low", "high", "max")     # DeepSeek 思考强度（思考模式文档）
+THINKING_LEVELS = ("off", *REASONING_EFFORTS)  # 界面上的"关、低、高、最高"
+
+
 @dataclass(frozen=True)
 class ModelTier:
     name: str = ""
@@ -202,6 +206,7 @@ class ModelTier:
     price_out_offpeak_per_mtok: float | None = None
     thinking: bool | None = None            # None 表示不传，沿用服务端默认
     max_tokens: int | None = None
+    reasoning_effort: str | None = None     # low | high | max；None 表示不传（服务端默认 high）
 
     def cost(self, prompt_tokens: int, completion_tokens: int, *, ts: float | None = None,
              schedule: PeakSchedule | None = None) -> float:
@@ -211,9 +216,17 @@ class ModelTier:
             p_in, p_out = self.price_in_offpeak_per_mtok, self.price_out_offpeak_per_mtok
         return (prompt_tokens * p_in + completion_tokens * p_out) / 1e6
 
-    def extra_body(self) -> dict:
-        """随请求发送的模型专属参数。"""
-        return {} if self.thinking is None else {"thinking": {"type": "enabled" if self.thinking else "disabled"}}
+    def extra_body(self, effort: str | None = None) -> dict:
+        """随请求发送的模型专属参数。effort 是思考强度覆盖值：off | low | high | max（DECISIONS 第 64 条）。"""
+        thinking, level = self.thinking, self.reasoning_effort
+        if effort == "off":
+            thinking, level = False, None
+        elif effort in REASONING_EFFORTS:
+            thinking, level = True, effort
+        body = {} if thinking is None else {"thinking": {"type": "enabled" if thinking else "disabled"}}
+        if thinking and level:
+            body["reasoning_effort"] = level
+        return body
 
 
 @dataclass(frozen=True)
@@ -223,6 +236,8 @@ class Settings:
     concurrency: dict = field(default_factory=dict)
     loop: dict = field(default_factory=dict)
     scheduler: dict = field(default_factory=dict)
+    tools: dict = field(default_factory=dict)
+    mcp_servers: dict = field(default_factory=dict)       # 名字 -> {command, args, env, timeout, enabled, ask}
     pricing: PeakSchedule | None = None
     source: Path | None = None
 
@@ -263,12 +278,16 @@ def load_settings(path: Path | str | None = None) -> Settings:
         thinking = m.get("thinking")
         if thinking is not None and not isinstance(thinking, bool):
             raise SettingsError(f"[models.{name}] thinking 必须是 true 或 false")
+        effort = m.get("reasoning_effort")
+        if effort is not None and effort not in REASONING_EFFORTS:
+            raise SettingsError(f"[models.{name}] reasoning_effort 只能是 {', '.join(REASONING_EFFORTS)}")
         models[name] = ModelTier(
             name=str(m.get("name", "")), price_in_per_mtok=float(m.get("price_in_per_mtok", 0.0)),
             price_out_per_mtok=float(m.get("price_out_per_mtok", 0.0)),
             price_in_offpeak_per_mtok=opt_float(m, "price_in_offpeak_per_mtok"),
             price_out_offpeak_per_mtok=opt_float(m, "price_out_offpeak_per_mtok"),
-            thinking=thinking, max_tokens=int(m["max_tokens"]) if m.get("max_tokens") else None)
+            thinking=thinking, max_tokens=int(m["max_tokens"]) if m.get("max_tokens") else None,
+            reasoning_effort=effort)
     pr = data.get("pricing")
     pricing = PeakSchedule.parse(pr.get("utc_offset_hours", 8), pr.get("peak_hours", [])) if pr else None
     return Settings(
@@ -278,6 +297,8 @@ def load_settings(path: Path | str | None = None) -> Settings:
         concurrency=dict(data.get("concurrency", {})),
         loop=dict(data.get("loop", {})),
         scheduler=dict(data.get("scheduler", {})),
+        tools=dict(data.get("tools", {})),
+        mcp_servers=dict(data.get("mcp", {}).get("servers", {})),
         pricing=pricing,
         source=path,
     )

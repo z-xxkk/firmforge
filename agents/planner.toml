@@ -1,8 +1,11 @@
 name = "planner"
 role = "planner"
-version = "1.0.0"
+version = "1.1.0"            # 1.1.0：加技能、工具集、记忆字段（DECISIONS 第 64 条）
 model_tier = "strong"             # 拆错了后面全白做（DECISIONS 第 37 条）
 temperature = 0.2
 prompt = "prompts/planner.md"
 task_types = ["*"]
 description = "规划 Agent：把需求拆成模块，写明职责、接口和依赖"
+skills = ["把需求拆成模块", "写明模块职责、接口和依赖"]
+toolsets = ["knowledge"]
+memory = { experience = true, knowledge = true }

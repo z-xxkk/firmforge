@@ -30,6 +30,9 @@ from ..memory.knowledge import KnowledgeBase
 from ..runs import RunDir
 from ..store import Store
 from ..tasks import Task
+from ..tools import ToolContext, ToolPipeline, ToolRegistry, default_registry as default_tools
+from ..tools.loop import call_with_tools, followup
+from ..tools.pipeline import Approve
 from ..verifier import verify
 from ..verifier.report import PASS, Report, attempt_score
 from .baseline import RunInterrupted
@@ -54,6 +57,7 @@ class MultiConfig:
     experience: bool = False            # 经验库（检索与写入）
     knowledge: bool = False             # 知识库（规划时参考；升级第 1 级检索）
     workflow: str = "module_dev"
+    tools: bool = True                  # 内置工具（DECISIONS 第 63 条）；full-no-tools 关闭
     kind: str = "multi"
 
 
@@ -63,7 +67,9 @@ FULL = MultiConfig("full", "smart", review=True, escalation=True, experience=Tru
 FULL_NO_EXP = MultiConfig("full-no-exp", "smart", review=True, escalation=True, experience=False, knowledge=True)
 FULL_NO_ESC = MultiConfig("full-no-esc", "smart", review=True, escalation=False, experience=True, knowledge=True)
 FULL_NO_REVIEW = MultiConfig("full-no-review", "smart", review=False, escalation=True, experience=True, knowledge=True)
-MULTI = {c.name: c for c in (B3, B4, FULL, FULL_NO_EXP, FULL_NO_ESC, FULL_NO_REVIEW)}
+FULL_NO_TOOLS = MultiConfig("full-no-tools", "smart", review=True, escalation=True, experience=True, knowledge=True,
+                            tools=False)
+MULTI = {c.name: c for c in (B3, B4, FULL, FULL_NO_EXP, FULL_NO_ESC, FULL_NO_REVIEW, FULL_NO_TOOLS)}
 
 
 @dataclass
@@ -170,7 +176,8 @@ class Engine:
                  subscribers: tuple[Callable[[dict], None], ...] = (), toolchain: Toolchain | None = None,
                  secrets: tuple[str, ...] = (), human_review: bool = False, human: HumanCallback | None = None,
                  hint: HintCallback | None = None, workflow: Workflow | None = None, memory: Store | None = None,
-                 knowledge: KnowledgeBase | None = None):
+                 knowledge: KnowledgeBase | None = None, tools: ToolRegistry | None = None,
+                 approve: Approve | None = None, tier_override: str | None = None, thinking: str | None = None):
         self.task, self.cfg, self.llm, self.settings = task, cfg, llm, settings
         self.registry = registry or default_registry()
         self.store, self.toolchain = store, toolchain
@@ -179,6 +186,11 @@ class Engine:
         mem = memory or store
         self.exp = ExperienceBase(mem) if (cfg.experience and mem is not None) else None
         self.replans = 0
+        self.toolbox = (tools or default_tools()) if cfg.tools else None
+        if self.toolbox is not None:
+            self.registry.check_toolsets(set(self.toolbox.toolsets()) | {t.name for t in self.toolbox.all()})
+        self.approve = approve
+        self.tier_override, self.thinking = tier_override, thinking     # 这一次运行的覆盖（对话框下方的选择）
         self.workflow = workflow or load_workflow(cfg.workflow)
         self.loop_cfg = dict(settings.loop)
         conc = settings.concurrency
@@ -208,6 +220,8 @@ class Engine:
                 "spec": str(self.task.spec_path), "config": self.cfg.name, "strategy": self.cfg.strategy,
                 "review": self.cfg.review, "escalation": self.cfg.escalation, "experience": self.exp is not None,
                 "knowledge": self.kb is not None, "workflow": f"{self.workflow.name} {self.workflow.version}",
+                "tools": sorted(t.name for t in self.toolbox.all()) if self.toolbox else [],
+                "tier_override": self.tier_override, "thinking": self.thinking,
                 "human_review": self.human_review,
                 "agents": {n: {"version": self.registry.get(n).version, "model_tier": self.registry.get(n).model_tier,
                                "model": self._tier(self.registry.get(n)).name} for n in self.registry.names()},
@@ -300,7 +314,7 @@ class Engine:
     async def make_plan(self, feedback: str | None = None, previous: Plan | None = None) -> Plan:
         agent, scores = self._assign("plan", "planner", "*")
         self.bus.emit("node_assigned", "plan", agent=agent.name, role="planner", scores=scores)
-        kb = self.kb.search(self._spec_text()[:2000], k=3) if self.kb else []
+        kb = self.kb.search(self._spec_text()[:2000], k=3) if (self.kb and agent.memory_knowledge) else []
         msgs = roles.planner_messages(self.task, self.max_modules, agent.prompt_name, knowledge=kb)
         if feedback and previous is not None:
             msgs = msgs + [{"role": "assistant", "content": f"```json\n{previous.to_json()}\n```"},
@@ -314,8 +328,7 @@ class Engine:
             except PlanError as exc:
                 problems = exc.problems
                 self._finished(agent, "plan", k + 1, resp, ok=True, valid=False, problems=problems)
-                msgs = msgs + [{"role": "assistant", "content": resp.text},
-                               {"role": "user", "content": roles.planner_retry_message(problems)}]
+                msgs = followup(msgs, resp) + [{"role": "user", "content": roles.planner_retry_message(problems)}]
                 continue
             self._finished(agent, "plan", k + 1, resp, ok=True, valid=True, modules=[m.id for m in plan.modules])
             break
@@ -441,7 +454,28 @@ class Engine:
     # ------------------------------------------------------------ Agent 调用
 
     def _tier(self, agent: AgentDef) -> ModelTier:
-        return self.settings.tier(agent.model_tier)
+        return self.settings.tier(self.tier_override or agent.model_tier)
+
+    def _effort(self, agent: AgentDef) -> str | None:
+        """思考强度：这次运行的覆盖 > Agent 自己的设置 > 档位默认。"""
+        return self.thinking or agent.thinking
+
+    def _tool_pipeline(self, agent: AgentDef, node_id: str) -> tuple[list, ToolPipeline] | None:
+        if self.toolbox is None or not agent.toolsets:
+            return None
+        allowed = self.toolbox.for_agent(agent.toolsets)
+        if not allowed:
+            return None
+        st = self.states.get(node_id)
+        module = st.module if st else None
+        ctx = ToolContext(task=self.task, module=module, plan=self.plan,
+                          dep_files=self._dep_files(module) if (module and self.plan) else {},
+                          toolchain=self.toolchain, kb=self.kb, agent=agent.name,
+                          scratch_dir=self.rd.path / "tool_scratch" / node_id)
+        pipe = ToolPipeline(self.toolbox, allowed=allowed, ctx=ctx, emit=self.bus.emit, node_id=node_id,
+                            max_chars=int(self.settings.tools.get("max_chars", 8000)), approve=self.approve,
+                            output_dir=self.rd.path / "tool_outputs")
+        return allowed, pipe
 
     def _list_price(self, agent: AgentDef) -> float:
         t = self.settings.models.get(agent.model_tier)
@@ -460,11 +494,19 @@ class Engine:
         client = LoggedLLM(self.llm, self.logger, agent.name)
         self.bus.emit("agent_started", node_id, agent=agent.name, role=agent.role, attempt=attempt, purpose=purpose)
         self.load[agent.name] = self.load.get(agent.name, 0) + 1
+        params = dict(model=tier.name, temperature=agent.temperature,
+                      max_tokens=agent.max_tokens or tier.max_tokens or DEFAULT_MAX_TOKENS,
+                      extra_body=tier.extra_body(self._effort(agent)))
+        tooling = self._tool_pipeline(agent, node_id)
         try:
             async with self.sem_llm:
-                resp = await in_thread(client.complete, messages, model=tier.name, temperature=agent.temperature,
-                                       max_tokens=agent.max_tokens or tier.max_tokens or DEFAULT_MAX_TOKENS,
-                                       extra_body=tier.extra_body())
+                if tooling is None:
+                    resp = await in_thread(client.complete, messages, **params)
+                else:
+                    allowed, pipe = tooling
+                    resp = await in_thread(call_with_tools, lambda m, tools: client.complete(m, tools=tools, **params),
+                                           messages, allowed, pipe,
+                                           max_rounds=int(self.settings.tools.get("max_rounds", 5)))
         except LLMError as exc:
             self.bus.emit("agent_finished", node_id, agent=agent.name, role=agent.role, attempt=attempt,
                           ok=False, error=str(exc))
@@ -498,7 +540,7 @@ class Engine:
             except _ParseFailure as pf:
                 self._finished(agent, node_id, attempt, resp, ok=True, parse_error=pf.detail)
                 if k == 0:
-                    msgs = msgs + [{"role": "assistant", "content": resp.text}, {"role": "user", "content": pf.retry}]
+                    msgs = followup(msgs, resp) + [{"role": "user", "content": pf.retry}]
                     continue
                 if fallback is None:
                     raise
@@ -549,9 +591,10 @@ class Engine:
         m = st.module
         st.coder, scores = self._assign(m.id, "coder", m.task_type)
         self.bus.emit("node_assigned", m.id, agent=st.coder.name, role="coder", scores=scores)
-        exps = self._experiences(st, f"{m.task_type} {m.title} {' '.join(m.acceptance)} {self.task.title}", "首次编码")
+        exps = (self._experiences(st, f"{m.task_type} {m.title} {' '.join(m.acceptance)} {self.task.title}", "首次编码")
+                if st.coder.memory_experience else [])
         msgs = roles.coder_messages(self.task, self.plan, m, self._dep_files(m), st.coder.prompt_name,
-                                    knowledge=st.knowledge, experiences=exps)
+                                    knowledge=st.knowledge if st.coder.memory_knowledge else (), experiences=exps)
         files, rejected = await self.ask(st.coder, msgs, m.id, attempt=1, purpose="编写实现",
                                          parse=self._code_parser(m), fallback=lambda: ({}, []))
         st.code.update(files)
@@ -570,9 +613,10 @@ class Engine:
         m = st.module
         limit = int(self.loop_cfg.get("max_attempts_per_module", 6))
         keys = " ".join(base.report.layer(base.report.failed_layer).failing_keys()) if base.report.failed_layer else ""
-        exps = self._experiences(st, f"{base.report.failed_layer or ''} {keys}", "修正") if keys else []
+        exps = (self._experiences(st, f"{base.report.failed_layer or ''} {keys}", "修正")
+                if keys and st.coder.memory_experience else [])
         msgs = roles.coder_messages(self.task, self.plan, m, self._dep_files(m), st.coder.prompt_name,
-                                    knowledge=st.knowledge)
+                                    knowledge=st.knowledge if st.coder.memory_knowledge else ())
         msgs.append({"role": "user", "content": roles.coder_repair_message(
             base.report, base.n, limit, diagnosis, base.code, st.rejected, base.dir, experiences=exps)})
         files, rejected = await self.ask(st.coder, msgs, m.id, attempt=n, purpose="按诊断修改实现",
@@ -691,7 +735,7 @@ class Engine:
                     raise PlanError(problems)
             except PlanError as exc:
                 self._finished(agent, "plan", k + 1, resp, ok=True, valid=False, problems=exc.problems)
-                msgs = msgs + [{"role": "assistant", "content": resp.text},
+                msgs = followup(msgs, resp) + [
                                {"role": "user", "content": roles.planner_retry_message(exc.problems)}]
                 continue
             self._finished(agent, "plan", k + 1, resp, ok=True, valid=True, modules=[m.id for m in plan.modules])

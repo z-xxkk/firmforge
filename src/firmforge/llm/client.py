@@ -26,7 +26,7 @@ class LLMResponse:
     latency_s: float
     tool_calls: list | None = None
     raw: dict = field(default_factory=dict)
-    reasoning: str = ""          # 思考模式下的思维链（reasoning_content），只记日志，不回传给模型
+    reasoning: str = ""          # 思考模式下的思维链（reasoning_content）；只在工具往返时按 DeepSeek 要求回传
     reasoning_tokens: int = 0
 
 

@@ -1,8 +1,11 @@
 name = "coder-strong"
 role = "coder"
-version = "1.0.0"
+version = "1.1.0"            # 1.1.0：加技能、工具集、记忆字段（DECISIONS 第 64 条）
 model_tier = "strong"
 temperature = 0.2
 prompt = "prompts/coder_module.md"
 task_types = ["*"]
 description = "能力强档编码 Agent，用于状态机、驱动等较难任务"
+skills = ["状态机、驱动、协议等较难模块", "按诊断修改代码"]
+toolsets = ["knowledge", "build", "interface"]
+memory = { experience = true, knowledge = true }

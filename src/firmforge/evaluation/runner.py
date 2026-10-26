@@ -48,15 +48,18 @@ def run_config(task: Task, cfg: RunConfig, *, llm: LLMClient, settings: Settings
                store: Store | None = None, subscribers: tuple[Callable[[dict], None], ...] = (),
                toolchain: Toolchain | None = None, secrets: tuple[str, ...] = (), token_budget: int | None = None,
                registry: Registry | None = None, human_review: bool = False,
-               human=None, hint=None, memory: Store | None = None) -> RunResult | MultiRunResult:
+               human=None, hint=None, memory: Store | None = None, tools=None, approve=None,
+               tier_override: str | None = None, thinking: str | None = None) -> RunResult | MultiRunResult:
     """按配置类型运行一次：单 Agent 基线或多 Agent 引擎。命令行和评测共用。"""
     if cfg.kind == "multi":
         return run_multi(task, cfg, llm=llm, settings=settings, runs_root=runs_root, registry=registry, store=store,
                          subscribers=subscribers, toolchain=toolchain, secrets=secrets,
-                         human_review=human_review, human=human, hint=hint, memory=memory)
-    return run_baseline(task, cfg, llm=llm, model=settings.tier(cfg.tier), runs_root=runs_root, store=store,
-                        subscribers=subscribers, toolchain=toolchain, secrets=secrets, pricing=settings.pricing,
-                        token_budget=token_budget)
+                         human_review=human_review, human=human, hint=hint, memory=memory, tools=tools,
+                         approve=approve, tier_override=tier_override, thinking=thinking)
+    return run_baseline(task, cfg, llm=llm, model=settings.tier(tier_override or cfg.tier), runs_root=runs_root,
+                        store=store, subscribers=subscribers, toolchain=toolchain, secrets=secrets,
+                        pricing=settings.pricing, token_budget=token_budget, tools=tools,
+                        tool_settings=settings.tools, thinking=thinking)
 
 
 def make_row(task: Task, cfg: RunConfig, run_no: int, res: RunResult | MultiRunResult,

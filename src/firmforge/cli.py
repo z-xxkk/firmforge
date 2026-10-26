@@ -296,6 +296,11 @@ def format_event(e: dict, t0: float) -> str:
                f" Agent（把握 {d.get('confidence')}）：{d.get('summary')}")
     elif typ == "rollback":
         msg = f"[{node}] 回滚：第 {d.get('from_attempt')} 次 → 第 {d.get('to_attempt')} 次（{d.get('reason')}）"
+    elif typ == "tool_called":
+        msg = f"{who}{d.get('agent')} 调用工具 {d.get('tool')}"
+    elif typ == "tool_result":
+        msg = (f"{who}{d.get('agent')} 的工具 {d.get('tool')}：" + ("完成" if d.get("ok") else "失败")
+               + (f"，{d['summary']}" if d.get("summary") else "") + f"（{d.get('latency_s')}s）")
     elif typ == "node_done":
         msg = f"模块 {node} 完成，交付第 {d.get('attempt')} 次尝试（{d.get('verdict')}）"
     elif typ == "node_failed" and d.get("verdict") == "interrupted":
@@ -448,7 +453,8 @@ def cmd_run(args) -> int:
         res = run_config(task, cfg, llm=llm, settings=settings, runs_root=args.runs_dir, store=store,
                          subscribers=(printer,), secrets=_secrets(settings), token_budget=args.token_budget,
                          human_review=args.human_review, human=terminal_confirm if args.human_review else None,
-                         hint=terminal_hint if args.human_review else None)
+                         hint=terminal_hint if args.human_review else None,
+                         tier_override=args.tier, thinking=args.think)
     finally:
         printer.close()
         store.close()
@@ -462,6 +468,52 @@ def cmd_run(args) -> int:
         print(f"错误：{res.error}", file=sys.stderr)
         return EXIT_FAIL
     return VERDICT_EXIT.get(res.verdict, EXIT_FAIL)
+
+
+def cmd_agents(args) -> int:
+    """列出注册的 Agent（DECISIONS 第 64 条）：名称、角色、全部版本、档位、思考强度、技能、工具、记忆、历史表现。"""
+    from .agents.registry import default_registry
+    from .tools import default_registry as default_tools
+    reg = default_registry()
+    tools = default_tools()
+    reg.check_toolsets(set(tools.toolsets()) | {t.name for t in tools.all()})
+    settings = config.load_settings()
+    stats: dict[str, dict] = {}
+    db = Path(args.db) if args.db else None
+    if db is None or db.is_file():
+        store = Store(args.db) if args.db else Store()
+        try:
+            for r in store.query("SELECT agent, SUM(attempts) AS attempts, SUM(successes) AS successes, "
+                                 "SUM(total_cost) AS cost FROM agent_stats GROUP BY agent"):
+                stats[r["agent"]] = r
+        finally:
+            store.close()
+    shown = 0
+    for name in reg.names():
+        d = reg.get(name)
+        if args.role and d.role != args.role:
+            continue
+        shown += 1
+        tier = settings.models.get(d.model_tier)
+        names = {"off": "关", "low": "低", "high": "高", "max": "最高"}
+        if d.thinking:
+            think = names[d.thinking]
+        elif tier is None or tier.thinking is None:
+            think = "服务端默认"
+        else:
+            think = names[(tier.reasoning_effort or "high") if tier.thinking else "off"] + "（跟随档位）"
+        memory = "、".join(x for x, on in (("经验库", d.memory_experience), ("知识库", d.memory_knowledge)) if on) or "不用"
+        st = stats.get(name)
+        record = (f"{st['attempts']} 次尝试，通过 {st['successes']} 次，累计 {st['cost'] or 0:.2f} 元"
+                  if st and st["attempts"] else "还没有记录")
+        print(f"{name}（{d.role}）版本 {'、'.join(reg.versions(name))}")
+        print(f"  档位 {d.model_tier}（{tier.name if tier else '未配置'}），思考强度 {think}")
+        print(f"  技能：{'；'.join(d.skills) or '（未写）'}")
+        print(f"  工具：{'、'.join(d.toolsets) or '无'}；记忆：{memory}")
+        print(f"  历史表现：{record}")
+    if not shown:
+        print("没有符合条件的 Agent。")
+    return EXIT_PASS
 
 
 def _eval_tasks(spec: str) -> list[Task]:
@@ -585,13 +637,20 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--task", help="任务目录")
     s.add_argument("--spec", help="需求文档（与 --include 一起使用）")
     s.add_argument("--include", help="公共头文件目录")
-    s.add_argument("--config", default="b2", help="配置：b1、b2、b3、b4、full、b5（默认 b2）")
+    s.add_argument("--config", default="b2", help="配置：b1、b2、b3、b4、full、b5 及消融配置（默认 b2）")
     s.add_argument("--human-review", action="store_true",
                    help="规划完成后停下来等你确认；升级到转人工时也在终端询问（多 Agent 配置）")
     s.add_argument("--token-budget", type=int, help="b5 的 token 预算（与 full 同等花费）")
     s.add_argument("--runs-dir", default=DEFAULT_RUNS_DIR, help="运行目录的上级目录（默认 .ff_runs）")
     s.add_argument("--db", help="SQLite 数据库路径（默认 .ff_data/firmforge.db）")
+    s.add_argument("--tier", choices=["fast", "strong"], help="这次运行所有 Agent 都用这一档（默认按各 Agent 的设置）")
+    s.add_argument("--think", choices=["off", "low", "high", "max"], help="这次运行的思考强度（默认按各 Agent 的设置）")
     s.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("agents", help="列出注册的 Agent：角色、版本、档位、技能、工具、记忆、历史表现")
+    s.add_argument("--role", help="只看某个角色，如 coder")
+    s.add_argument("--db", help="读历史表现的数据库（默认 .ff_data/firmforge.db）")
+    s.set_defaults(func=cmd_agents)
 
     s = sub.add_parser("eval", help="批量评测：任务 × 配置 × 重复次数")
     s.add_argument("--configs", required=True, help="配置列表，逗号分隔，如 b1,b2,b3,b4,full,b5（b5 要排在 full 后面）")

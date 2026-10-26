@@ -42,3 +42,5 @@ int main(void)
 >>>FILE
 
 文件块以外可以写一两句说明，不要写别的代码块。
+
+如果请求里带了工具：`list_interface` 可以核对要测试的函数原型，`kb_search` 可以查知识库（例如 Unity 的断言写法、协议要点）。

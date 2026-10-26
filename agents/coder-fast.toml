@@ -1,8 +1,11 @@
 name = "coder-fast"
 role = "coder"
-version = "1.0.0"
+version = "1.1.0"            # 1.1.0：加技能、工具集、记忆字段（DECISIONS 第 64 条）
 model_tier = "fast"
 temperature = 0.2
 prompt = "prompts/coder_module.md"
 task_types = ["*"]
 description = "快速档编码 Agent：便宜，适合简单模块"
+skills = ["按需求写嵌入式 C 模块", "按诊断修改代码"]
+toolsets = ["knowledge", "build", "interface"]
+memory = { experience = true, knowledge = true }

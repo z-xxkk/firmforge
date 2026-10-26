@@ -23,6 +23,8 @@ from ..llm import CallLogger, LLMClient, LLMError, LoggedLLM
 from ..runs import RunDir, copy_snapshot
 from ..store import Store
 from ..tasks import Task
+from ..tools import ToolContext, ToolPipeline, ToolRegistry, default_registry as default_tools
+from ..tools.loop import call_with_tools, followup
 from ..verifier import verify
 from ..verifier.report import Report, attempt_score
 from .events import EventBus
@@ -40,6 +42,7 @@ class BaselineConfig:
     max_tokens: int = 8192          # 档位没配置 max_tokens 时使用
     fresh_restarts: bool = False    # True：每次从头生成，不带报错（b5）
     max_attempts: int = 30          # fresh_restarts 时的次数上限，防止预算填错时停不下来
+    toolsets: tuple[str, ...] = ("knowledge", "build", "interface")   # 和多 Agent 拿同样的内置工具（DECISIONS 第 63 条）
     kind: str = "baseline"
 
 
@@ -114,7 +117,9 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
                  runs_root: Path | str, store: Store | None = None,
                  subscribers: tuple[Callable[[dict], None], ...] = (),
                  toolchain: Toolchain | None = None, secrets: tuple[str, ...] = (),
-                 pricing: PeakSchedule | None = None, token_budget: int | None = None) -> RunResult:
+                 pricing: PeakSchedule | None = None, token_budget: int | None = None,
+                 tools: ToolRegistry | None = None, tool_settings: dict | None = None,
+                 thinking: str | None = None) -> RunResult:
     if cfg.fresh_restarts and token_budget is None:
         raise ValueError(f"配置 {cfg.name} 需要 token 预算（与 full 同等花费）")
     t0 = time.perf_counter()
@@ -130,7 +135,8 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
         "config": cfg.name, "agent": cfg.agent, "model_tier": cfg.tier, "model": model.name,
         "max_repairs": cfg.max_repairs, "temperature": cfg.temperature, "thinking": model.thinking,
         "max_tokens": model.max_tokens or cfg.max_tokens, "token_budget": token_budget,
-        "fresh_restarts": cfg.fresh_restarts, "started_at": time.time(),
+        "fresh_restarts": cfg.fresh_restarts, "tools": list(cfg.toolsets), "thinking_override": thinking,
+        "started_at": time.time(),
     }
     rd.write_json("run.json", run_info)
     if store:
@@ -145,10 +151,24 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
     prev_dir: Path | None = None
     rejected: list[tuple[str, str]] = []
 
+    tool_settings = tool_settings or {}
+    toolbox = (tools or default_tools()) if cfg.toolsets else None
+    allowed = toolbox.for_agent(cfg.toolsets) if toolbox else []
+    params = dict(model=model.name, temperature=cfg.temperature, max_tokens=model.max_tokens or cfg.max_tokens,
+                  extra_body=model.extra_body(thinking))
+
     def call(msgs: list[dict], attempt: int):
         bus.emit("agent_started", module, agent=cfg.agent, attempt=attempt)
-        resp = agent_llm.complete(msgs, model=model.name, temperature=cfg.temperature,
-                                  max_tokens=model.max_tokens or cfg.max_tokens, extra_body=model.extra_body())
+        if allowed:
+            ctx = ToolContext(task=task, toolchain=toolchain, agent=cfg.agent,
+                              scratch_dir=rd.path / "tool_scratch" / module)
+            pipe = ToolPipeline(toolbox, allowed=allowed, ctx=ctx, emit=bus.emit, node_id=module,
+                                max_chars=int(tool_settings.get("max_chars", 8000)),
+                                output_dir=rd.path / "tool_outputs")
+            resp = call_with_tools(lambda m, tools: agent_llm.complete(m, tools=tools, **params), msgs, allowed, pipe,
+                                   max_rounds=int(tool_settings.get("max_rounds", 5)))
+        else:
+            resp = agent_llm.complete(msgs, **params)
         result.prompt_tokens += resp.prompt_tokens
         result.completion_tokens += resp.completion_tokens
         result.reasoning_tokens += resp.reasoning_tokens
@@ -174,8 +194,7 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
                 latency = resp.latency_s
                 if not parsed.files and prev_dir is None:
                     # 第一次就没有可用的文件块：带着格式提醒重试 1 次
-                    messages = messages + [{"role": "assistant", "content": resp.text},
-                                           {"role": "user", "content": FORMAT_REMINDER}]
+                    messages = followup(messages, resp) + [{"role": "user", "content": FORMAT_REMINDER}]
                     resp = call(messages, n)
                     parsed = parse_files(resp.text, CODER_DIRS)
                     tokens += resp.prompt_tokens + resp.completion_tokens
@@ -212,8 +231,8 @@ def run_baseline(task: Task, cfg: BaselineConfig, *, llm: LLMClient, model: Mode
             prev_dir = adir
             if n > cfg.max_repairs:
                 break
-            messages = messages + [{"role": "assistant", "content": resp.text},
-                                   {"role": "user", "content": repair_message(report, n, cfg.max_repairs, rejected, adir)}]
+            messages = followup(messages, resp) + [
+                {"role": "user", "content": repair_message(report, n, cfg.max_repairs, rejected, adir)}]
     except KeyboardInterrupt:
         # 按 Ctrl+C：照常整理已有的尝试、写完记录，再把中断往外抛
         interrupted = True

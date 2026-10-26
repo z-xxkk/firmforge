@@ -1,0 +1,11 @@
+name = "analyst"
+role = "analyst"
+version = "1.0.0"
+model_tier = "strong"
+temperature = 0.2
+prompt = "prompts/analyst.md"
+task_types = ["*"]
+description = "需求分析 Agent：在对话里追问不清楚的地方，整理出需求文档和公共头文件；运行结束后回答追问（DECISIONS 第 62 条）"
+skills = ["追问并澄清嵌入式模块需求", "写需求文档和公共接口头文件", "解释运行结果"]
+toolsets = ["knowledge"]
+memory = { experience = false, knowledge = true }

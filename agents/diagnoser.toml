@@ -1,8 +1,11 @@
 name = "diagnoser"
 role = "diagnoser"
-version = "1.0.0"
+version = "1.1.0"            # 1.1.0：加技能、工具集、记忆字段（DECISIONS 第 64 条）
 model_tier = "strong"             # 固定 strong（DECISIONS 第 31 条）
 temperature = 0.2
 prompt = "prompts/diagnoser.md"
 task_types = ["*"]
 description = "诊断 Agent：判断错在代码还是测试，给出修改指令"
+skills = ["判断错在实现、测试还是接口", "写出可执行的修改指令"]
+toolsets = ["knowledge"]
+memory = { experience = true, knowledge = true }

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from .. import config
 
-ROLES = ("planner", "coder", "tester", "reviewer", "diagnoser")
+ROLES = ("planner", "coder", "tester", "reviewer", "diagnoser", "analyst")
 
 
 class RegistryError(ValueError):
@@ -42,6 +42,11 @@ class AgentDef:
     max_tokens: int | None = None    # 不填时用模型档位的 max_tokens
     task_types: tuple[str, ...] = ("*",)
     description: str = ""
+    skills: tuple[str, ...] = ()               # 擅长什么（给人看，也给规划和调度参考）
+    toolsets: tuple[str, ...] = ()             # 能用的工具集或单个工具（DECISIONS 第 63、64 条）
+    memory_experience: bool = True             # 上下文里放不放经验库条目
+    memory_knowledge: bool = True              # 上下文里放不放知识库条目
+    thinking: str | None = None                # 思考强度覆盖：off | low | high | max；None 跟随档位
 
     def handles(self, task_type: str) -> bool:
         return "*" in self.task_types or task_type in self.task_types
@@ -62,11 +67,24 @@ def parse_agent(data: dict, source: str = "") -> AgentDef:
     if not isinstance(types, list) or not types:
         raise RegistryError(f"task_types 必须是非空列表{where}")
     mt = data.get("max_tokens")
+    for key in ("skills", "toolsets"):
+        v = data.get(key, [])
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            raise RegistryError(f"{key} 必须是字符串列表{where}")
+    memory = data.get("memory", {})
+    if not isinstance(memory, dict) or any(k not in ("experience", "knowledge") for k in memory):
+        raise RegistryError(f"memory 只能写 experience、knowledge 两项{where}")
+    thinking = data.get("thinking")
+    if thinking is not None and thinking not in ("off", "low", "high", "max"):
+        raise RegistryError(f"thinking 只能是 off、low、high、max{where}")
     return AgentDef(name=data["name"], role=data["role"], version=data["version"],
                     model_tier=data["model_tier"], prompt=data["prompt"],
                     temperature=float(data.get("temperature", 0.2)),
                     max_tokens=int(mt) if mt else None, task_types=tuple(types),
-                    description=data.get("description", ""))
+                    description=data.get("description", ""), skills=tuple(data.get("skills", [])),
+                    toolsets=tuple(data.get("toolsets", [])),
+                    memory_experience=bool(memory.get("experience", True)),
+                    memory_knowledge=bool(memory.get("knowledge", True)), thinking=thinking)
 
 
 class Registry:
@@ -120,6 +138,17 @@ class Registry:
 
     def names(self) -> list[str]:
         return list(self._order)
+
+    def versions(self, name: str) -> list[str]:
+        return sorted(self._defs.get(name, {}), key=_version_key)
+
+    def check_toolsets(self, known: set[str]) -> None:
+        """Agent 写了不存在的工具集或工具名时报错，指出是哪个 Agent。"""
+        for name in self._order:
+            for d in self._defs[name].values():
+                bad = [t for t in d.toolsets if t not in known and not t.startswith("mcp-")]
+                if bad:
+                    raise RegistryError(f"Agent {d.name} {d.version} 的 toolsets 里有不存在的工具：{', '.join(bad)}")
 
 
 def default_registry() -> Registry:

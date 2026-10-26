@@ -43,3 +43,17 @@ alpha = 0.3                       # 成本权重
 beta = 0.2                        # 负载权重
 gamma = 0.5                       # 探索权重
 seed = 42
+
+# 工具（DECISIONS 第 63 条，tasks_inbox/tools_mcp_framework.md）
+[tools]
+max_rounds = 5                    # 一次生成最多几轮工具往返
+max_chars = 8000                  # 每次工具结果最多几个字符，超出截断、完整内容存到运行目录 tool_outputs/
+
+# 外部 MCP 服务（只支持本机 stdio）。默认关闭；评测时一律不用。
+# 新服务第一次启用要在桌面软件里确认；ask = true 表示每次调用前都问你。
+[mcp.servers.fetch]
+command = "uvx"
+args = ["mcp-server-fetch"]
+enabled = false
+ask = true
+timeout_s = 60

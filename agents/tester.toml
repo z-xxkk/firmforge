@@ -1,8 +1,11 @@
 name = "tester"
 role = "tester"
-version = "1.0.0"
+version = "1.1.0"            # 1.1.0：加技能、工具集、记忆字段（DECISIONS 第 64 条）
 model_tier = "strong"             # 测试写错会把对的代码判错（DECISIONS 第 37 条）
 temperature = 0.2
 prompt = "prompts/tester.md"
 task_types = ["*"]
 description = "测试 Agent：只看需求和接口写单元测试，看不到实现"
+skills = ["只根据需求和接口写 Unity 单元测试", "为硬件接口写替身"]
+toolsets = ["knowledge", "interface"]             # 测试 Agent 不给 build：看不到实现就编译不了测试（DECISIONS 第 63 条）
+memory = { experience = true, knowledge = true }
