@@ -277,7 +277,8 @@ class ChatPage(QWidget):
         send.clicked.connect(self.send)
         cl.addLayout(hbox(self.task_combo, self.tier_combo, self.think_combo, self.cfg_combo, "stretch", send, spacing=6))
         mid.lay.addWidget(comp)
-        mid.setMinimumWidth(380)
+        # 固定最小宽度会盖过布局算出的最小值，窄了下拉框就压到发送按钮上；取两者较大的
+        mid.setMinimumWidth(max(380, mid.lay.minimumSize().width()))
 
         # 右：模块图 + 详情
         right = GripSplitter(Qt.Vertical)

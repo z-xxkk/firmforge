@@ -138,9 +138,10 @@ Agent、工作流与提示词
 - 浅色简约、圆角分档、松石绿强调色，跟随系统深浅色；所有面板之间可以拖动调整大小，双击分隔条恢复，关闭时记住布局。
 
 单元测试 249 个：判定器镜像里 246 个通过、3 个界面测试跳过（没装 PySide6）；这 3 个在 `firmforge-gui` 镜像里以 offscreen 方式通过。全部用假模型，不联网。
+已在 Ubuntu 24.04 开发机上装好（`python3 -m venv .venv` 后 `.venv/bin/pip install -e .[gui]`，PySide6 6.12），真实窗口能打开，界面测试在本机也通过。
 
 已知局限
-- 桌面软件需要 PySide6：`pip install -e .[gui]`（依赖是 PySide6-Essentials，约 100 MB）。开发机没有 pip 时可以用 `docker/Dockerfile.gui` 跑界面测试和截图，但看不到窗口。
+- 桌面软件需要 PySide6：`pip install -e .[gui]`（依赖是 PySide6-Essentials，约 100 MB）。Ubuntu 系统 Python 没带 venv 时先装 `python3.12-venv`（要管理员密码）；也可以用 `docker/Dockerfile.gui` 跑界面测试和截图，但看不到窗口。
 - 等宽字体 JetBrains Mono 没有随软件打包，没装时退回系统等宽字体。
 - 本机后端点"停止"不能打断正在进行的模型调用，只能等这次调用返回；docker 后端会直接结束容器。
 - docker 后端不启动外部 MCP 服务（容器里通常没有对应的命令）。

@@ -101,7 +101,9 @@ class GuiSmokeTest(unittest.TestCase):
             page.replay.seek(len(page.replay.events))
             self.app.processEvents()
             self.assertEqual(set(page.graph.cards), {"a", "b", "c"})
-            self.assertEqual(page.view.verdict, "pass")
+            # 缺交叉工具链或 cppcheck 时对应层是 skipped，结论只能是 incomplete（规则 4）
+            expected = "pass" if helpers.HAS_CROSS and helpers.HAS_CPPCHECK else "incomplete"
+            self.assertEqual(page.view.verdict, expected)
             self.assertGreater(page.msgs.count(), 5)
             page.select_module("a")
             self.assertIn("ringbuf", page.code_view.toPlainText())

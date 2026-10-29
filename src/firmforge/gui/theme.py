@@ -22,7 +22,9 @@ DARK = {
 STATUS = {"pass": "pass", "done": "pass", "fail": "fail", "failed": "fail", "error": "fail", "rejected": "fail",
           "running": "run", "ready": "run", "incomplete": "run", "interrupted": "run"}
 
-SANS = '"Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", sans-serif'
+# 有的 Linux 把通用 sans-serif 映射成衬线体（FreeSerif），所以列出常见无衬线字体，不依赖系统默认
+SANS = ('"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", '
+        '"Noto Sans", "DejaVu Sans", "Liberation Sans", "Noto Sans CJK JP", "WenQuanYi Micro Hei", sans-serif')
 MONO = '"JetBrains Mono", "Cascadia Mono", "Noto Sans Mono", "DejaVu Sans Mono", Consolas, monospace'
 
 
@@ -119,7 +121,7 @@ QTreeWidget::item {{ padding: 3px 4px; border-radius: 8px; }}
 QTreeWidget::item:selected, QTableWidget::item:selected {{ background: {c['run_soft']}; color: {c['ink']}; }}
 QHeaderView::section {{ background: transparent; border: none; border-bottom: 1px solid {c['line']}; color: {c['ink3']};
     font-size: 12px; padding: 6px 8px; }}
-QTabBar::tab {{ background: transparent; border: none; padding: 8px 2px 8px 2px; margin-right: 18px; color: {c['ink2']}; }}
+QTabBar::tab {{ background: transparent; border: none; padding: 8px 2px 8px 2px; margin-right: 14px; color: {c['ink2']}; }}
 QTabBar::tab:selected {{ color: {c['ink']}; border-bottom: 2px solid {c['ink']}; }}
 QTabWidget::pane {{ border: none; }}
 QScrollArea {{ border: none; background: transparent; }}
