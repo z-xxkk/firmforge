@@ -65,3 +65,35 @@
 - 测试仪做法：[Tweede Golf HAL 测试套件](https://tweedegolf.nl/en/blog/240/PoC-for-universal-hardware-in-the-loop-HAL-test-suite/)、[FreeHIL](https://forum.openhardware.science/t/introducing-freehil-portable-open-source-hardware-in-the-loop-hil-testing-infrastructure/7904)、[RIOT UART HIL 论文](https://inet.haw-hamburg.de/thesis/completed/yegor-yefremov)
 - Agent 接硬件：[Embedded Arena（arXiv 2606.16190）](https://arxiv.org/html/2606.16190)、[Agentic HIL](https://mcpservers.org/fr/servers/agentic-hil/agentic-hil)
 - DeepSeek 输入缓存：[KV cache 指南](https://api-docs.deepseek.com/guides/kv_cache)、[价格](https://api-docs.deepseek.com/quick_start/pricing)（缓存命中的输入价约为未命中的 1/50）
+
+---
+
+# 第 2 次调研：业界一般怎么测、为什么只靠软件很难测（2026-10-31）
+
+负责人否决了上面第一版方案：T2 每种板子要用不同的仿真软件，太麻烦。
+
+## 一、业界的一般做法
+
+- **按真实程度分层（V 模型，汽车、航天最典型）**：
+  - MIL：只测算法模型；
+  - SIL：代码在电脑上跑；
+  - PIL：代码在目标处理器上跑，外部环境用电脑模拟；
+  - HIL：真实控制器接一个实时模拟的外部环境。
+  - 越往后越真实，也越贵。SIL 查不出时序问题，HIL 最贵，只用在依赖时序和硬件的部分。（MathWorks V 模型说明及多篇综述）
+- **小团队的常见做法（Grenning《Test-Driven Development for Embedded C》）**："双目标"：同一份代码既能在电脑上编译测试，也能在板子上跑。大部分测试在电脑上用替身跑，因为板子是瓶颈。但驱动这类和硬件强相关的代码，这个办法用不上。（Grenning 一书；Meeting C++ 2024 Penning 的报告）
+- **一个命令跑电脑和板子**：
+  - PlatformIO：`pio test` 可以在电脑上跑，也可以自动编译、烧录到板子、通过串口收结果；STM32 和 ESP32 都支持。
+  - Zephyr 的 Twister：同一份测试声明，可以跑在 native_sim、QEMU 或真实板上（`--device-testing` 加硬件清单）。
+  - 乐鑫的 pytest-embedded：同一套测试可以跑在真实板、QEMU、Wokwi 上。
+- **Memfault 的 Interrupt 博客讨论**：应用逻辑做单元测试；裸机驱动和硬件相关代码难做单元测试，更适合在设备上验证。
+
+## 二、为什么只靠软件（仿真 / 在线）很难测
+
+1. **外设要一个个建模，芯片和外设的组合太多**：固件直接读写外设寄存器，每种外设的行为都要有人写模型。固件重托管综述（Wright 等，ACM Computing Surveys 2020）总结了 28 个难题；"外设行为"和"保真度量化"至今仍是公开难题。实例：Renode 的 STM32F103 没有 SPI、ADC、看门狗。
+2. **时序不准**：QEMU 开发者原话的意思是"模拟行为而不是逐周期仿真，不追求准确的时钟周期；可能有真实硬件上的 bug 在 QEMU 里不出现，反过来也一样"。依赖时序的串口、I2C 也因此只能有限支持，而且在不同电脑上跑，时序结果还不一样（OpenTitan 文档）。中断时序、竞态正好依赖这些。
+3. **没有电气和模拟量**：电压、上拉、噪声、ADC 读数、PWM 反馈都没有（BMC 测试文章举例：没有真实 PWM 和转速反馈，风扇 PID 无从谈起）。
+4. **外部器件也要建模**：传感器、屏幕各有各的协议细节，每个都要写模型。
+5. **仿真器照着手册写，复现不了芯片本身的 bug**：勘误手册里的硬件缺陷，仿真器一般不会有。
+6. **不知道仿得有多准**：没法给仿真打"可信度"，所以仿真通过不能说明板子上一定对。
+
+结论：仿真适合快速、粗略地查功能，不能代替真实硬件；业界普遍是"电脑上大量单元测试 + 板子上验证硬件相关部分"，仿真只是可选的补充。
