@@ -133,3 +133,8 @@ BUILTIN_TOOLS = (
         parameters={"type": "object", "properties": {}, "additionalProperties": False},
         execute=_list_interface, timeout_s=10, summarize=lambda a, r: "已列出接口"),
 )
+
+# 查资料工具（DECISIONS 第 66 条第 ② 步），定义在 grounding.research
+from ..grounding.research import SOURCE_TOOLS  # noqa: E402
+
+BUILTIN_TOOLS = BUILTIN_TOOLS + SOURCE_TOOLS

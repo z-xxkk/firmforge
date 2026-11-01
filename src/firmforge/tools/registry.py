@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-BUILTIN_TOOLSETS = ("knowledge", "build", "interface")
+BUILTIN_TOOLSETS = ("knowledge", "build", "interface", "sources")
 _NAME_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 SERVER_NAME = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
@@ -37,6 +37,8 @@ class ToolContext:
     scratch_dir: Path | None = None      # 工具的临时工作目录（运行目录下）
     agent: str = ""
     allowed_src_dirs: tuple[str, ...] = ("src",)
+    library: Any = None                  # grounding.sources.SourceLibrary（查资料用）
+    page_index: Any = None               # grounding.research.PageIndex，第一次查资料时建立
 
 
 @dataclass(frozen=True)

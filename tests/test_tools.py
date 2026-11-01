@@ -44,7 +44,7 @@ class RegistryTest(unittest.TestCase):
         reg = default_registry()
         self.assertEqual({t.name for t in reg.for_agent(["knowledge", "list_interface"])},
                          {"kb_search", "list_interface"})
-        self.assertEqual(set(reg.toolsets()), {"knowledge", "build", "interface"})
+        self.assertEqual(set(reg.toolsets()), {"knowledge", "build", "interface", "sources"})
 
     def test_mcp_names(self):
         self.assertEqual(mcp_tool_name("fetch", "fetch"), "mcp__fetch__fetch")
@@ -281,4 +281,5 @@ class AgentSaveTest(unittest.TestCase):
             self.assertTrue((Path(tmp) / "history" / f"coder-fast-{d.version}.toml").is_file())
 
     def test_disabled_builtin_tools(self):
-        self.assertEqual({t.name for t in default_registry(["compile_check"]).all()}, {"kb_search", "list_interface"})
+        self.assertEqual({t.name for t in default_registry(["compile_check"]).all()},
+                         {"kb_search", "list_interface", "doc_search", "doc_page"})
