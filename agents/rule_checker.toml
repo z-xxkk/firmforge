@@ -1,0 +1,11 @@
+name = "rule_checker"
+role = "rule_checker"
+version = "1.0.0"
+model_tier = "strong"
+temperature = 0.0
+prompt = "prompts/rule_checker.md"
+task_types = ["*"]
+description = "规则核对 Agent：只看规则和原文那一页，判断规则是否忠实于原文（规则判定器第 4 步）"
+skills = ["对照原文判断规则有没有多说、说反或漏掉前提"]
+toolsets = []
+memory = { experience = false, knowledge = false }

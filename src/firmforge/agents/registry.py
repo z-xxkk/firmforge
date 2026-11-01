@@ -17,7 +17,7 @@ from pathlib import Path
 
 from .. import config
 
-ROLES = ("planner", "coder", "tester", "reviewer", "diagnoser", "analyst")
+ROLES = ("planner", "coder", "tester", "reviewer", "diagnoser", "analyst", "researcher", "rule_checker")
 
 
 class RegistryError(ValueError):

@@ -774,6 +774,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--workflow", help="多 Agent 用的工作流：名字或 名字@版本（默认 module_dev 当前版本）")
     s.set_defaults(func=cmd_run)
 
+    s = sub.add_parser("rules", help="硬件规则：build 查资料提炼并核对（调用模型、需人工确认）；list 列出；verify 重新核对")
+    s.add_argument("action", choices=["build", "list", "verify"])
+    s.add_argument("--hw", default="hardware/esp32s3_supermini", help="硬件目录（含 profile.json、sources.toml）")
+    s.add_argument("--scopes", help="外设和器件，逗号分隔，如 i2c,mpu6050")
+    s.add_argument("--rounds", type=int, default=4, help="查资料 Agent 最多几轮（默认 4）")
+    s.add_argument("--no-human", action="store_true", help="不做人工确认（规则停在已核对，不入库）")
+    s.set_defaults(func=cmd_rules)
     s = sub.add_parser("agents", help="列出注册的 Agent：角色、版本、档位、技能、工具、记忆、历史表现")
     s.add_argument("--role", help="只看某个角色，如 coder")
     s.add_argument("--db", help="读历史表现的数据库（默认 .ff_data/firmforge.db）")
@@ -814,6 +821,113 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--speed", type=float, default=4.0, help="倍速（默认 4；0 表示不等待）")
     s.set_defaults(func=cmd_replay)
     return p
+
+
+# ---------------------------------------------------------------- 资料与规则（DECISIONS 第 66、67 条）
+
+def _hw_context(hw: str, *, need_sources: bool = True):
+    """读硬件目录：profile.json、sources.toml、rules.json；原件在 .ff_sources/raw，取出的文字缓存在 .ff_sources/library。"""
+    from .grounding.idf import IdfTree
+    from .grounding.profile import HardwareProfile
+    from .grounding.rules import RuleSet
+    from .grounding.sources import SourceLibrary, load_manifest
+    from .grounding.svd import SvdDevice
+    from .target.esp_idf import idf_path
+    hwdir = Path(hw)
+    if not (hwdir / "profile.json").is_file():
+        raise UsageError(f"{hwdir} 下没有 profile.json（硬件档案）")
+    profile = HardwareProfile.load(hwdir / "profile.json")
+    raw, cache = Path(".ff_sources") / "raw", Path(".ff_sources") / "library"
+    library = load_manifest(hwdir / "sources.toml", raw, cache) if need_sources else SourceLibrary.load(cache)
+    store = RuleSet.load(hwdir / "rules.json")
+    try:
+        idf = IdfTree(idf_path())
+    except FileNotFoundError:
+        idf = None
+        print(f"[SKIP] 没找到 ESP-IDF（{idf_path()}），接口类规则无法核对", file=sys.stderr)
+    svd = None
+    for d in library.docs.values():
+        if d.kind == "svd" and d.pages:
+            svd = SvdDevice.parse(d.pages[0])
+    return hwdir, profile, library, store, idf, svd
+
+
+def terminal_rules_human(pending, escalated):
+    """在终端逐条确认规则：回车通过，输入意见驳回（DECISIONS 第 66 条第 ⑥ 步，必经）。"""
+    for res in escalated:
+        print(f"\n[多次退回，需要你处理] {res.rule.id}「{res.rule.text}」：" + "；".join(res.reasons()))
+    decisions = {}
+    print(f"\n共 {len(pending)} 条新规则等你确认。")
+    for r in pending:
+        where = r.cite.doc + (f" 第 {r.cite.page} 页" if r.cite.page else "")
+        print(f"\n{r.id}（{r.kind}，{r.tier}）{r.text}\n  出处：{where}\n  原文：{r.cite.quote}")
+        try:
+            ans = input("直接回车 = 通过；输入意见后回车 = 驳回：").strip()
+        except EOFError:
+            ans = None
+        if ans is None:
+            break
+        decisions[r.id] = ("approve", "") if ans == "" else ("reject", ans)
+    return decisions
+
+
+def _print_rule_event(e: dict) -> None:
+    d, t = e.get("data", {}), e.get("type")
+    if t == "rules_started":
+        print(f"规则流程开始：要查 {', '.join(d['todo']) or '无'}；规则库已覆盖 {', '.join(d['reused']) or '无'}")
+    elif t == "tool_called":
+        print(f"  查资料 Agent 调用 {d.get('tool')}：{d.get('args', '')[:80]}")
+    elif t == "rules_proposed":
+        print(f"第 {d['round']} 轮：提出 {d['count']} 条规则" + (f"，{len(d['parse_errors'])} 条格式错" if d["parse_errors"] else ""))
+    elif t == "rule_rejected":
+        print(f"  退回 {d['rule']}（第 {d['times']} 次）：" + "；".join(d["reasons"]))
+    elif t == "rules_round_done":
+        extra = "".join(f"\n  缺项：{m}" for m in d["missing"]) + "".join(f"\n  冲突：{c}" for c in d["conflicts"])
+        print(f"第 {d['round']} 轮结束：已核对 {d['checked']} 条，退回 {d['rejected']} 条{extra}")
+
+
+def cmd_rules(args) -> int:
+    from .grounding.verifier import RuleVerifier
+    hwdir, profile, library, store, idf, svd = _hw_context(args.hw, need_sources=args.action != "list")
+    if args.action == "list":
+        rules = store.select(set(args.scopes.split(",")) if args.scopes else None)
+        for r in rules:
+            print(f"[{r.status}] {r.line()}")
+        print(f"共 {len(rules)} 条")
+        return EXIT_PASS
+    if args.action == "verify":
+        rep = RuleVerifier(library, profile, idf=idf, svd=svd).run(store)
+        print(rep.summary())
+        return EXIT_PASS if not rep.rejected else EXIT_FAIL
+    # build：调用真实模型
+    from .agents.registry import default_registry
+    from .grounding.pipeline import RuleBuilder
+    from .grounding.research import llm_semantic_checker
+    from .orchestrator.events import EventBus
+    if not args.scopes:
+        raise UsageError("rules build 需要 --scopes，例如 --scopes i2c,mpu6050")
+    settings = config.load_settings()
+    llm = make_llm(settings)
+    reg = default_registry()
+    res_agent, chk_agent = reg.get("researcher"), reg.get("rule_checker")
+    res_tier, chk_tier = settings.tier(res_agent.model_tier), settings.tier(chk_agent.model_tier)
+    complete = lambda m, tools: llm.complete(m, model=res_tier.name, tools=tools,          # noqa: E731
+                                             temperature=res_agent.temperature,
+                                             extra_body=res_tier.extra_body(res_agent.thinking) or None)
+    semantic = llm_semantic_checker(llm, chk_tier.name, extra_body=chk_tier.extra_body(chk_agent.thinking) or None)
+    bus = EventBus(f"rules-{int(time.time())}")
+    bus.subscribe(_print_rule_event)
+    verifier = RuleVerifier(library, profile, idf=idf, svd=svd, semantic=semantic)
+    builder = RuleBuilder(complete, profile, library, verifier, store, emit=bus.emit,
+                          human=None if args.no_human else terminal_rules_human, max_rounds=args.rounds)
+    out = builder.run([s.strip() for s in args.scopes.split(",") if s.strip()])
+    store.save(hwdir / "rules.json")
+    print(f"\n新入库 {len(out.trusted)} 条，复用 {len(out.reused)} 条，待确认 {len(out.pending)} 条，"
+          f"仍被退回 {len(out.rejected)} 条；token {out.prompt_tokens}+{out.completion_tokens}")
+    for m in out.missing:
+        print(f"缺项：{m}")
+    print(f"规则库：{hwdir / 'rules.json'}")
+    return EXIT_PASS if out.ok else EXIT_FAIL
 
 
 def main(argv: list[str] | None = None) -> int:

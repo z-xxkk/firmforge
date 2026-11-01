@@ -1,0 +1,11 @@
+name = "researcher"
+role = "researcher"
+version = "1.0.0"
+model_tier = "strong"             # 规则错了后面全白做（DECISIONS 第 66 条）
+temperature = 0.2
+prompt = "prompts/researcher.md"
+task_types = ["*"]
+description = "查资料 Agent：从芯片手册、器件手册、ESP-IDF 头文件里提炼带出处的结构化规则"
+skills = ["在手册里找到相关章节", "逐字摘抄原文作为出处", "把事实写成可照做、可机器核对的规则"]
+toolsets = ["sources"]
+memory = { experience = false, knowledge = false }

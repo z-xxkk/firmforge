@@ -24,6 +24,9 @@ EVENT_TYPES = {
     "experience_saved", "experience_used",
     # 工具（DECISIONS 第 63 条）
     "tool_called", "tool_result",
+    # 规则流程（DECISIONS 第 66 条第 ②③⑧ 步）
+    "rules_started", "rules_proposed", "rule_rejected", "rules_round_done", "rules_need_human", "rule_trusted",
+    "rules_finished",
 }
 
 Subscriber = Callable[[dict], None]
