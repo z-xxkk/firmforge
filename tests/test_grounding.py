@@ -39,6 +39,9 @@ class ProfileTest(unittest.TestCase):
         text = "\n".join(q.summary_lines())
         self.assertIn("i2c0.scl=GPIO9", text)
         self.assertIn("GPIO19（USB D-）", text)
+        many = HardwareProfile.from_dict({**p.to_dict(), "reserved_pins": {"26": "Flash", "27": "Flash", "28": "Flash",
+                                                                          "30": "Flash", "43": "串口"}})
+        self.assertIn("不能用的引脚：GPIO26–28、GPIO30（Flash）；GPIO43（串口）", many.summary_lines())
         self.assertIn("MPU6050，总线 i2c0，地址 0x68", text)
 
     def test_problems(self):

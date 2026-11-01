@@ -75,7 +75,10 @@ class HardwareProfile:
         if self.pins:
             lines.append("引脚：" + "，".join(f"{s}=GPIO{f.value}" for s, f in sorted(self.pins.items())))
         if self.reserved_pins:
-            lines.append("不能用的引脚：" + "，".join(f"GPIO{g}（{why}）" for g, why in sorted(self.reserved_pins.items())))
+            by_reason: dict[str, list[int]] = {}
+            for g, why in sorted(self.reserved_pins.items()):
+                by_reason.setdefault(why, []).append(g)
+            lines.append("不能用的引脚：" + "；".join(f"{_gpio_ranges(gs)}（{why}）" for why, gs in by_reason.items()))
         for d in self.devices:
             addr = f"，地址 0x{d.address:02X}" if d.address is not None else ""
             lines.append(f"外接器件 {d.name}：{d.part}，总线 {d.bus}{addr}")
@@ -105,3 +108,15 @@ class HardwareProfile:
     @classmethod
     def load(cls, path: Path) -> "HardwareProfile":
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def _gpio_ranges(gpios: list[int]) -> str:
+    """[26, 27, 28, 43] → GPIO26–28、GPIO43（连续的合并成一段，省 token）。"""
+    out, start = [], None
+    for i, g in enumerate(gpios):
+        if start is None:
+            start = g
+        if i + 1 == len(gpios) or gpios[i + 1] != g + 1:
+            out.append(f"GPIO{start}" if start == g else f"GPIO{start}–{g}")
+            start = None
+    return "、".join(out)

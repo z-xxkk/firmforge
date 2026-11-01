@@ -1,0 +1,111 @@
+{
+  "chip": {
+    "value": "esp32s3",
+    "origin": "document",
+    "note": "官方数据手册；待 esptool 实测确认"
+  },
+  "chip_variant": {
+    "value": "ESP32-S3FH4R2",
+    "origin": "document",
+    "note": "第三方网站 espboards.dev（可信度低）；待 esptool 读 Flash/PSRAM 实测确认"
+  },
+  "board": {
+    "value": "esp32s3_supermini",
+    "origin": "user",
+    "note": ""
+  },
+  "framework": {
+    "value": "esp-idf",
+    "origin": "user",
+    "note": "DECISIONS 第 76 条"
+  },
+  "framework_version": {
+    "value": "v6.1",
+    "origin": "user",
+    "note": "DECISIONS 第 77 条"
+  },
+  "pins": {
+    "i2c0.sda": {
+      "value": 4,
+      "origin": "default",
+      "note": "两个传感器共用一条 I2C 总线"
+    },
+    "i2c0.scl": {
+      "value": 5,
+      "origin": "default",
+      "note": ""
+    },
+    "imu.int": {
+      "value": 7,
+      "origin": "default",
+      "note": "MPU6050 INT"
+    },
+    "ppg.int": {
+      "value": 6,
+      "origin": "default",
+      "note": "MAX30102 INT，低电平有效"
+    },
+    "uart1.tx": {
+      "value": 10,
+      "origin": "default",
+      "note": "回环测试：接到 uart1.rx"
+    },
+    "uart1.rx": {
+      "value": 11,
+      "origin": "default",
+      "note": ""
+    },
+    "pwm.out": {
+      "value": 12,
+      "origin": "default",
+      "note": "回环测试：接到 pwm.in"
+    },
+    "pwm.in": {
+      "value": 13,
+      "origin": "default",
+      "note": ""
+    },
+    "led": {
+      "value": 48,
+      "origin": "document",
+      "note": "第三方资料说是 WS2812 彩灯；待实测"
+    }
+  },
+  "reserved_pins": {
+    "0": "启动配置引脚（BOOT 键），esp32s3-ds p.32",
+    "3": "启动配置引脚（JTAG 信号来源），esp32s3-ds p.32",
+    "19": "USB D-，板子靠它烧录和通信，esp32s3-ds p.24",
+    "20": "USB D+，esp32s3-ds p.24",
+    "26": "合封 Flash/PSRAM 的 SPI0/1，esp32s3-ds p.26",
+    "27": "合封 Flash/PSRAM 的 SPI0/1，esp32s3-ds p.26",
+    "28": "合封 Flash/PSRAM 的 SPI0/1，esp32s3-ds p.26",
+    "29": "合封 Flash/PSRAM 的 SPI0/1，esp32s3-ds p.26",
+    "30": "合封 Flash/PSRAM 的 SPI0/1，esp32s3-ds p.26",
+    "31": "合封 Flash/PSRAM 的 SPI0/1，esp32s3-ds p.26",
+    "32": "合封 Flash/PSRAM 的 SPI0/1，esp32s3-ds p.26",
+    "43": "UART0 TX（默认串口）",
+    "44": "UART0 RX（默认串口）",
+    "45": "启动配置引脚（VDD_SPI 电压），esp32s3-ds p.32",
+    "46": "启动配置引脚（启动模式），esp32s3-ds p.32"
+  },
+  "devices": [
+    {
+      "name": "imu",
+      "part": "MPU6050",
+      "bus": "i2c0",
+      "address": 104,
+      "pins": {
+        "int": 7
+      }
+    },
+    {
+      "name": "ppg",
+      "part": "MAX30102",
+      "bus": "i2c0",
+      "address": 87,
+      "pins": {
+        "int": 6
+      }
+    }
+  ]
+}
