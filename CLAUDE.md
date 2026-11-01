@@ -32,6 +32,7 @@ FirmForge 是一个**面向嵌入式固件开发的多 Agent 编排与验证平�
    - 配置文件用 TOML，读取用 `tomllib`。
    - 存储用 `sqlite3`。
    - PySide6 只允许出现在 `src/firmforge/gui/`。
+   - 例外：读取 PDF 资料（芯片手册等）允许使用 `pypdf`，只能出现在读取资料的那个子包里；没装时该功能明确报"不可用"，不能假装读到了（DECISIONS 第 73 条）。
 2. **核心与界面分离。**
    - `cli.py` 和 `gui/` 只调用核心库的公开接口。
    - 核心库不 import `cli` 或 `gui`。

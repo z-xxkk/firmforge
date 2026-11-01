@@ -97,3 +97,33 @@
 6. **不知道仿得有多准**：没法给仿真打"可信度"，所以仿真通过不能说明板子上一定对。
 
 结论：仿真适合快速、粗略地查功能，不能代替真实硬件；业界普遍是"电脑上大量单元测试 + 板子上验证硬件相关部分"，仿真只是可选的补充。
+
+---
+
+# 第 3 次调研：测试工具 PlatformIO 与 Zephyr Twister（2026-11-01）
+
+需求：STM32F103C8T6 + ST-Link，寄存器级裸机代码（DECISIONS 第 74 条）；一条命令完成"编译 → 烧录 → 复位 → 收串口结果 → 汇总"；结果要能被我们的程序解析（寄存器读数等自定义格式）；以后还要支持 ESP32-C3/S3。
+
+| 比较项 | PlatformIO | Zephyr Twister |
+|---|---|---|
+| Blue Pill 支持 | `bluepill_f103c8`，框架可选 CMSIS、LibOpenCM3、STM32Cube、Arduino、Zephyr | 板名 `stm32_min_dev`，官方标注**"不再积极维护"**，自称"只是起点，不是完整移植" |
+| 寄存器级裸机 | 有 CMSIS 框架和官方 `cmsis-blink` 例程（"只用 CMSIS 头文件"文档没明说，要实测确认） | 程序必须是 Zephyr 应用（带实时操作系统），官方文档没找到"直接写寄存器"的说明，和第 74 条不太相符 |
+| 烧录 | 默认就是 `stlink` | 通过 openocd 或 jlink 驱动 ST-Link |
+| 测试流程 | `pio test`：编译测试固件 → 烧录 → 从串口收集输出 → 在电脑上解析 | `west twister --device-testing`：编译、烧录、监视串口、汇总 |
+| 自定义结果格式 | **可以**：写一个 Python 的自定义测试执行器，从串口读我们自己的格式，逐条登记通过 / 失败 | console 类型可以用正则表达式匹配输出 |
+| 机器可读结果 | `--json-output-path`、`--junit-output-path` | twister.json、多种 JUnit XML |
+| 超时 | 测试选项里**没找到超时设置**，要自己在执行器里处理 | 每个测试可设超时，默认 60 秒 |
+| ESP32-C3/S3 | 支持，框架用 ESP-IDF | C3 支持且在维护；S3 未核实 |
+| 安装 | `pip install platformio` 或官方安装脚本；Python 3.9+；Windows 支持 | 要装 west、CMake、Zephyr 源码树和 SDK，依赖多；Windows 建议用 WSL 并做 USB 转发 |
+| 许可证 / 维护 | Apache 2.0；最新版 6.2.0，文档已到 6.2.1 测试版，仍在活跃开发 | 活跃 |
+
+**结论：推荐 PlatformIO。**
+- Twister 要求代码跑在 Zephyr 系统上，而 Blue Pill 在 Zephyr 里已不再维护，和"寄存器级裸机"的方向冲突，安装也重得多。
+- PlatformIO 用 CMSIS 框架写裸机代码，默认 ST-Link 烧录，还能用 Python 写自定义执行器解析我们的串口格式。
+
+**待实测确认**（第一次接上板子时做）：
+1. CMSIS 框架下只用寄存器定义头文件能否正常编译运行；
+2. 超时和卡死怎么处理：在自定义执行器里自己计时，到时用 ST-Link 复位；
+3. Docker 里能否访问 ST-Link 和串口：Linux 上可以把设备透传进容器；Windows 的 Docker 透传 USB 很麻烦，上板测试可能要在本机直接跑，不进 Docker。
+
+来源：[PlatformIO 测试执行器](https://docs.platformio.org/en/latest/advanced/unit-testing/runner.html)、[自定义执行器](https://docs.platformio.org/en/latest/advanced/unit-testing/frameworks/custom/runner.html)、[pio test 命令](https://docs.platformio.org/en/latest/core/userguide/cmd_test.html)、[bluepill_f103c8](https://docs.platformio.org/en/latest/boards/ststm32/bluepill_f103c8.html)、[ST STM32 平台](https://docs.platformio.org/en/latest/platforms/ststm32.html)、[Espressif32 平台](https://docs.platformio.org/en/latest/platforms/espressif32.html)、[安装](https://docs.platformio.org/en/latest/core/installation/index.html)、[版本发布](https://github.com/platformio/platformio-core/releases)；[Zephyr Twister](https://docs.zephyrproject.org/latest/develop/twister/index.html)、[stm32_min_dev](https://docs.zephyrproject.org/latest/boards/others/stm32_min_dev/doc/index.html)、[Zephyr 入门](https://docs.zephyrproject.org/latest/develop/getting_started/index.html)、[esp32c3_devkitc](https://docs.zephyrproject.org/latest/boards/espressif/esp32c3_devkitc/doc/index.html)
