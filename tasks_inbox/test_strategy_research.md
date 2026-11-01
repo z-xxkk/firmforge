@@ -127,3 +127,60 @@
 3. Docker 里能否访问 ST-Link 和串口：Linux 上可以把设备透传进容器；Windows 的 Docker 透传 USB 很麻烦，上板测试可能要在本机直接跑，不进 Docker。
 
 来源：[PlatformIO 测试执行器](https://docs.platformio.org/en/latest/advanced/unit-testing/runner.html)、[自定义执行器](https://docs.platformio.org/en/latest/advanced/unit-testing/frameworks/custom/runner.html)、[pio test 命令](https://docs.platformio.org/en/latest/core/userguide/cmd_test.html)、[bluepill_f103c8](https://docs.platformio.org/en/latest/boards/ststm32/bluepill_f103c8.html)、[ST STM32 平台](https://docs.platformio.org/en/latest/platforms/ststm32.html)、[Espressif32 平台](https://docs.platformio.org/en/latest/platforms/espressif32.html)、[安装](https://docs.platformio.org/en/latest/core/installation/index.html)、[版本发布](https://github.com/platformio/platformio-core/releases)；[Zephyr Twister](https://docs.zephyrproject.org/latest/develop/twister/index.html)、[stm32_min_dev](https://docs.zephyrproject.org/latest/boards/others/stm32_min_dev/doc/index.html)、[Zephyr 入门](https://docs.zephyrproject.org/latest/develop/getting_started/index.html)、[esp32c3_devkitc](https://docs.zephyrproject.org/latest/boards/espressif/esp32c3_devkitc/doc/index.html)
+
+---
+
+# 第 4 次调研：改用 ESP32-S3 SuperMini 之后（2026-11-01）
+
+## 一、ESP32-S3 SuperMini 板子
+
+**这是第三方仿制的小板，没有乐鑫官方资料。** 以下信息主要来自 espboards.dev（第三方网站，部分内容疑似 AI 生成），可信度低，**必须在板子上实测确认**。这正好可以演示规则机制里的"来源等级"：仿制板的网页资料等级最低。
+
+| 项目 | 网上说法 | 可信度 / 怎么确认 |
+|---|---|---|
+| 芯片 | 多数是 ESP32-S3FH4R2：4 MB Flash（合封）+ 2 MB 四线 PSRAM，PSRAM 默认关闭 | 中；用 esptool 读芯片信息、看芯片丝印确认 |
+| USB | USB-C 直连芯片自带的 USB（USB 串口 + JTAG），没有转换芯片 | 较高 |
+| 引出的引脚 | GPIO1–18、21、33–48；**没有引出** GPIO0、19、20（USB 的 D−/D+）、22–32 | 较高 |
+| 板载 LED | GPIO48 接一个可编程的 RGB 彩灯（WS2812） | 中；网页里还有一处自相矛盾，要实测 |
+| 按键 | BOOT 和 RST；BOOT 应该接 GPIO0（S3 的通用做法） | 未核实 |
+| 要小心的引脚 | GPIO3、45、46 是上电时决定启动方式的引脚；GPIO43/44 是默认串口；GPIO39–42 是 JTAG | 要对照乐鑫官方数据手册核实（这次 PDF 没读出文字） |
+| 默认 I2C 引脚 | 网页没写 | 我们自己定，写进硬件档案 |
+| 已知问题 | 程序崩溃或进入深度睡眠时，USB 口会消失，要按住 BOOT 再插线才能重新烧录；部分批次天线焊反 | 对自动化有影响，见下 |
+
+**对自动化的风险**：如果 Agent 写的程序让芯片卡死、进入深度睡眠或占用了 USB 引脚，USB 口会消失，就没法自动烧录了，需要人按 BOOT 键。应对办法：
+- 测试固件里禁止进入深度睡眠、禁止改动 GPIO19/20（写成规则，由合规检查拦截）；
+- 程序崩溃时 ESP-IDF 默认会自动重启，USB 一般能恢复；
+- 实在恢复不了，就提示用户按 BOOT 键，并把这次测试记为"需要人工恢复"。
+
+## 二、ESP-IDF 版本
+
+- 最新稳定版是 **v6.1**（GitHub 上标为 Latest），还有 v6.0.3、v5.5.6；**v5.2 已在 2026 年 8 月停止维护**。
+- 官方支持政策：每个版本支持 30 个月，前 12 个月是"服务期"，**新项目推荐用服务期内的版本**。
+- 推荐锁定 **v6.1**。
+- 对我们有利的一点：大模型的训练数据里，旧版本（v4、v5）的代码多得多，写 v6 时更容易混入旧写法。这正是规则机制要解决的问题，评测里差别会更明显。
+
+## 三、测试工具：PlatformIO 与乐鑫官方工具
+
+| 比较项 | 乐鑫官方：idf.py + pytest-embedded | PlatformIO |
+|---|---|---|
+| ESP-IDF 版本 | 官方本身，想用哪个版本都行 | 每个平台版本绑定一个 ESP-IDF 版本；最新的 8.0.0 绑定 v6.1，跟进只慢了约 4 天 |
+| 在真板上测试 | 自动烧录；`dut.expect(...)` 等待串口输出，超时就判失败；能直接跑 Unity 测试用例 | `pio test`，需要自己写执行器，**没有超时设置** |
+| 仿真复现 | **支持**：给测试打上 qemu 标记，就在乐鑫 QEMU 里跑，评审没板子也能复现一部分 | 没查到对乐鑫 QEMU 的集成 |
+| 结果文件 | JUnit XML | JSON、JUnit XML |
+| 安装 | 乐鑫安装器 EIM（下载版不用管理员权限），再用 pip 装 pytest-embedded | pip 装 PlatformIO，它自己下载 ESP-IDF |
+| 以后加 STM32 | 不支持，要另用工具 | 同一个工具就能支持 |
+
+**推荐乐鑫官方工具**：
+- 版本最权威，规则核对用的头文件就是官方那一份；
+- 自带超时；
+- 能用 QEMU 给评审复现，这对评分里的"可复现性"很重要。
+
+代价是：以后做 STM32 移植模板时要另配工具。这个可以到决赛阶段再处理。
+
+## 来源
+
+- 板子：[espboards.dev ESP32-S3 Super Mini](https://www.espboards.dev/esp32/esp32-s3-super-mini/)（第三方）
+- ESP-IDF：[支持政策](https://github.com/espressif/esp-idf/blob/master/SUPPORT_POLICY.md)、[版本说明](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/versions.html)、[发布列表](https://github.com/espressif/esp-idf/releases)、[Linux 安装](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/linux-setup.html)
+- 测试：[ESP-IDF pytest 测试](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/contribute/esp-idf-tests-with-pytest.html)、[ESP-IDF 单元测试](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-guides/unit-tests.html)、[pytest-embedded](https://docs.espressif.com/projects/pytest-embedded/en/latest/)
+- PlatformIO：[platform-espressif32 发布列表](https://github.com/platformio/platform-espressif32/releases)、[ESP-IDF 框架说明](https://docs.platformio.org/en/latest/frameworks/espidf.html)
+- I2C 驱动变化：[ESP-IDF 5.2 迁移指南](https://docs.espressif.com/projects/esp-idf/en/stable/migration-guides/release-5.x/5.2/peripherals.html)；SVD：[espressif/svd](https://github.com/espressif/svd)
