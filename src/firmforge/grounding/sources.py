@@ -25,7 +25,8 @@ TIER_RANK = {t: i for i, t in enumerate(TIERS)}     # 越小越可信
 
 # 官方域名白名单：只按域名判定（DECISIONS 第 66 条第 0 步）
 OFFICIAL_DOMAINS = {
-    "espressif": ("espressif.com", "documentation.espressif.com", "docs.espressif.com", "github.com/espressif"),
+    "espressif": ("espressif.com", "documentation.espressif.com", "docs.espressif.com", "github.com/espressif",
+                  "raw.githubusercontent.com/espressif"),
     "invensense": ("invensense.tdk.com", "tdk.com"),
     "analog": ("analog.com",),            # MAX30102 现属 ADI
     "st": ("st.com",),
@@ -94,6 +95,8 @@ def extract_pdf_pages(path: Path) -> tuple[str, ...]:
         from pypdf import PdfReader
     except ImportError as exc:
         raise SourceError("读 PDF 需要 pypdf（pip install pypdf），当前不可用") from exc
+    import logging
+    logging.getLogger("pypdf").setLevel(logging.ERROR)       # 字体编码提示太多，不影响取文字
     reader = PdfReader(str(path))
     return tuple((p.extract_text() or "") for p in reader.pages)
 
@@ -184,3 +187,31 @@ class SourceLibrary:
                 pages = tuple(json.loads(cache.read_text(encoding="utf-8"))) if cache.is_file() else ()
                 lib.add(Document(**m, pages=pages))
         return lib
+
+
+# ---------------------------------------------------------------- 资料清单
+
+def load_manifest(manifest: Path, raw_dir: Path, cache_root: Path) -> SourceLibrary:
+    """按资料清单（sources.toml，进仓库）登记资料：原件在 raw_dir（不进仓库），先核对 sha256 再取文字；
+    取过的文字缓存在 cache_root，指纹没变就直接用缓存（1500 页的手册取一次要几十秒）。"""
+    import tomllib
+    data = tomllib.loads(Path(manifest).read_text(encoding="utf-8"))
+    cached = SourceLibrary.load(cache_root)
+    lib = SourceLibrary(cache_root)
+    for d in data.get("doc", []):
+        meta = {k: d.get(k, "") for k in ("id", "title", "kind", "tier", "url", "version")}
+        want = d.get("sha256", "")
+        old = cached.docs.get(meta["id"])
+        if old is not None and old.sha256 == want and old.pages:
+            lib.add(old)
+            continue
+        path = Path(raw_dir) / d["file"]
+        if not path.is_file():
+            raise SourceError(f"{meta['id']}：缺原件 {path}，请按清单里的网址下载")
+        got = file_sha256(path)
+        if want and got != want:
+            raise SourceError(f"{meta['id']}：{path.name} 的指纹和清单不符，可能不是同一份文件")
+        lib.add(load_document(path, **meta))
+    lib.save()
+    return lib
+

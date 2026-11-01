@@ -36,6 +36,8 @@ class PageIndex:
         self.keys: list[tuple[str, int | None]] = []
         texts = []
         for doc in library.docs.values():
+            if doc.kind == "svd":              # SVD 给程序核对寄存器用，不给 Agent 逐页读
+                continue
             if len(doc.pages) == 1:
                 self.keys.append((doc.id, None))
                 texts.append(doc.pages[0])

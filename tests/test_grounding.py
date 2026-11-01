@@ -8,7 +8,7 @@ import helpers  # noqa: F401
 from firmforge.grounding.profile import Device, Fact, HardwareProfile, ProfileError
 from firmforge.grounding.rules import Citation, Rule, RuleError, RuleSet
 from firmforge.grounding.sources import (Document, SourceError, SourceLibrary, is_official, load_document,
-                                         normalize, quote_found)
+                                         load_manifest, normalize, quote_found)
 
 
 def profile(**pins):
@@ -99,6 +99,36 @@ class SourcesTest(unittest.TestCase):
                 lib.add(Document("idf-i2c-master-h", "x", "header", "official_code", sha256="other"))
             with self.assertRaises(SourceError):
                 load_document(Path(d) / "nope.pdf", id="n", title="n", kind="pdf", tier="community")
+
+
+class ManifestTest(unittest.TestCase):
+    def test_manifest_checks_fingerprint_and_caches(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as d:
+            raw = Path(d) / "raw"
+            raw.mkdir()
+            body = "#define I2C_NUM_0 0\n"
+            (raw / "a.h").write_text(body, encoding="utf-8")
+            sha = hashlib.sha256(body.encode()).hexdigest()
+            man = Path(d) / "sources.toml"
+            man.write_text(f'''[[doc]]
+id = "a"
+title = "A"
+kind = "header"
+tier = "official_code"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/a.h"
+version = "v6.1"
+file = "a.h"
+sha256 = "{sha}"
+''', encoding="utf-8")
+            lib = load_manifest(man, raw, Path(d) / "cache")
+            self.assertTrue(quote_found(lib.get("a"), None, "I2C_NUM_0"))
+            (raw / "a.h").unlink()                                     # 原件删了也能用缓存
+            self.assertEqual(load_manifest(man, raw, Path(d) / "cache").get("a"), lib.get("a"))
+            man.write_text(man.read_text(encoding="utf-8").replace(sha, "0" * 64), encoding="utf-8")
+            (raw / "a.h").write_text(body, encoding="utf-8")
+            with self.assertRaises(SourceError):                       # 指纹不符
+                load_manifest(man, raw, Path(d) / "cache")
 
 
 class RulesTest(unittest.TestCase):
