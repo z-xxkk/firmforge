@@ -65,6 +65,8 @@ class SourcesTest(unittest.TestCase):
         with self.assertRaises(SourceError):          # 标成官方，网址却不在白名单里
             Document("x", "x", "html", "official_manual", url="https://www.espboards.dev/x")
         Document("x", "x", "html", "community", url="https://www.espboards.dev/x")
+        Document("mpu", "PS-MPU-6000A rev 3.1", "pdf", "official_mirror",       # 停产器件：官方文档的非官方镜像
+                 url="https://cdn.sparkfun.com/datasheets/Components/General%20IC/PS-MPU-6000A.pdf")
 
     def test_quote_found(self):
         doc = Document("trm", "TRM", "pdf", "official_manual",

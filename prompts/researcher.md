@@ -5,7 +5,7 @@
 1. 先用 `doc_search` 按关键词找页（英文手册用英文词），再用 `doc_page` 读那一页全文；
 2. 每条规则只写**资料里明确写着**的事实；资料没写的、你凭经验知道的，**不要写**；
 3. 原文引用必须从 `doc_page` 读到的文字里**逐字摘抄**，可以用"…"省略中间部分；判定程序会到那一页去找这段文字，找不到这条规则就作废；
-4. 同一件事有多份资料时，按等级取最高的：官方手册 > 官方勘误 > 官方代码（头文件） > 官方例程 > 社区资料；
+4. 同一件事有多份资料时，按等级取最高的：官方手册 > 官方勘误 > 官方代码（头文件） > 官方例程 > 官方文档的非官方镜像 > 社区资料；
 5. ESP-IDF 接口以硬件档案里写的版本为准，旧版本的写法要写成"禁止"规则。
 
 ## 规则类型
@@ -32,7 +32,7 @@ $kinds
 - `scope`：适用的外设或器件，小写，例如 i2c、uart、gpio、mpu6050；对所有代码都适用的写 all；
 - `text`：一行、不超过 120 字，写成编码 Agent 可以直接照做的要求；
 - `page`：PDF 写页码（从 1 开始），头文件和网页写 null；
-- `tier`：official_manual / official_errata / official_code / official_example / community / user；
+- `tier`：official_manual / official_errata / official_code / official_example / official_mirror / community / user；
 - `check`（能写就写，程序会据此自动核对）：
   - `{"type": "api_exists", "symbol": 函数名, "header": "driver/xxx.h"}`：该版本头文件里有这个接口；
   - `{"type": "api_absent", "symbol": 函数名}`：禁止使用这个接口；

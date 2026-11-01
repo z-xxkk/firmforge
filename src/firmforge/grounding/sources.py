@@ -18,7 +18,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 KINDS = ("pdf", "html", "text", "header", "svd")
-TIERS = ("official_manual", "official_errata", "official_code", "official_example", "community", "user")
+# official_mirror：官方原版文档放在非官方网站上（例如停产器件 MPU6050 的手册，DECISIONS 第 79 条）
+TIERS = ("official_manual", "official_errata", "official_code", "official_example", "official_mirror", "community",
+         "user")
 TIER_RANK = {t: i for i, t in enumerate(TIERS)}     # 越小越可信
 
 # 官方域名白名单：只按域名判定（DECISIONS 第 66 条第 0 步）
@@ -67,7 +69,7 @@ class Document:
             raise SourceError(f"{self.id}：未知的资料类型 {self.kind!r}")
         if self.tier not in TIERS:
             raise SourceError(f"{self.id}：未知的来源等级 {self.tier!r}")
-        if self.tier.startswith("official") and self.url and not is_official(self.url):
+        if self.tier.startswith("official") and self.tier != "official_mirror" and self.url and not is_official(self.url):
             raise SourceError(f"{self.id}：标成官方资料，但网址 {self.url} 不在官方域名白名单里")
 
     def page(self, n: int | None) -> str:
