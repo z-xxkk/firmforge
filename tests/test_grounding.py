@@ -44,6 +44,10 @@ class ProfileTest(unittest.TestCase):
         self.assertIn("不能用的引脚：GPIO26–28、GPIO30（Flash）；GPIO43（串口）", many.summary_lines())
         self.assertIn("MPU6050，总线 i2c0，地址 0x68", text)
 
+    def test_scopes(self):
+        p = profile(**{"i2c0.sda": 8, "uart1.tx": 10, "pwm.out": 12, "imu.int": 7, "led": 48})
+        self.assertEqual(p.scopes(), {"i2c", "uart", "ledc", "gpio", "mpu6050"})
+
     def test_problems(self):
         p = profile(**{"i2c0.sda": 8, "i2c0.scl": 8, "led": 19})
         probs = p.problems()

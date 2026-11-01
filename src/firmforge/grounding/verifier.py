@@ -189,14 +189,7 @@ class RuleVerifier:
 
     def profile_scopes(self) -> set[str]:
         """硬件档案里用到的外设和器件，作为完整性检查的范围。"""
-        scopes = set()
-        for sig in self.profile.pins:
-            bus = sig.split(".")[0]
-            scopes.add("".join(ch for ch in bus if not ch.isdigit()))
-        for d in self.profile.devices:
-            scopes.add(d.part.lower())
-            scopes.add("".join(ch for ch in d.bus if not ch.isdigit()))
-        return scopes
+        return self.profile.scopes()
 
 
 def _kind_names(kinds: list[str]) -> list[str]:

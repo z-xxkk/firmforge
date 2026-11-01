@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -67,6 +68,17 @@ class HardwareProfile:
             out.append(f"外接器件重名：{n}")
         return out
 
+    def scopes(self) -> set[str]:
+        """用到的外设和器件：i2c0.sda → i2c；pwm.out → ledc；imu.int、led 这类普通引脚 → gpio；MPU6050 → mpu6050。
+        规则的适用范围（scope）用这些名字。"""
+        out = set()
+        for sig in self.pins:
+            out.add(_peripheral(sig.split(".")[0]))
+        for d in self.devices:
+            out.add(d.part.lower())
+            out.add(_peripheral(d.bus))
+        return out
+
     def summary_lines(self) -> list[str]:
         """拼进 system prompt 的硬件档案（程序生成，不经模型改写，DECISIONS 第 67 条）。"""
         lines = [f"芯片：{self.chip.value}（{self.chip_variant.value}）",
@@ -120,3 +132,15 @@ def _gpio_ranges(gpios: list[int]) -> str:
             out.append(f"GPIO{start}" if start == g else f"GPIO{start}–{g}")
             start = None
     return "、".join(out)
+
+
+# ESP32 的外设名；pwm 在 ESP32 上由 LEDC 外设产生；其余名字（器件的中断脚、led 等）都是普通 GPIO
+_PERIPHERALS = {"i2c", "uart", "spi", "ledc", "adc", "dac", "i2s", "twai", "rmt", "pcnt", "usb", "gpio"}
+_ALIASES = {"pwm": "ledc", "can": "twai"}
+
+
+def _peripheral(name: str) -> str:
+    base = re.sub(r"\d+$", "", name.lower())
+    base = _ALIASES.get(base, base)
+    return base if base in _PERIPHERALS else "gpio"
+
