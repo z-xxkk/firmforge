@@ -261,11 +261,11 @@ class DagTest(unittest.TestCase):
 class RegistryTest(unittest.TestCase):
     def test_default_agents(self):
         r = default_registry()
-        self.assertEqual(sorted(r.names()), ["analyst", "coder-fast", "coder-strong", "diagnoser", "planner", "researcher",
+        self.assertEqual(sorted(r.names()), ["analyst", "coder-fast", "coder-strong", "designer", "diagnoser", "planner", "researcher",
                                             "reviewer", "rule_checker", "tester"])
         self.assertEqual([a.name for a in r.find("coder", "driver")], ["coder-fast", "coder-strong"])
         tiers = {n: r.get(n).model_tier for n in r.names()}        # DECISIONS 第 31、37 条
-        self.assertEqual(tiers, {"analyst": "strong", "coder-fast": "fast", "coder-strong": "strong", "diagnoser": "strong",
+        self.assertEqual(tiers, {"analyst": "strong", "coder-fast": "fast", "coder-strong": "strong", "designer": "strong", "diagnoser": "strong",
                                  "planner": "strong", "researcher": "strong", "reviewer": "fast",
                                  "rule_checker": "strong", "tester": "strong"})
         for n in r.names():

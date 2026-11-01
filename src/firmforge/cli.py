@@ -215,6 +215,41 @@ def _secrets(settings: config.Settings) -> tuple[str, ...]:
 ROLE_NAMES = {"planner": "规划", "coder": "编码", "tester": "测试", "reviewer": "审查", "diagnoser": "诊断"}
 
 
+_SCOPE_NAMES = {"compliance": "合规检查", "build": "编译", "board_test": "上板测试", "host_test": "电脑测试"}
+_BLAME_NAMES = {"code": "代码", "test": "测试", "rule": "规则", "hardware": "硬件或接线"}
+
+
+def _format_embedded(typ: str, node, d: dict) -> str | None:
+    if typ == "verify_finished" and d.get("scope") in _SCOPE_NAMES:
+        res = "通过" if d.get("ok") else ("跳过" if d.get("failed_layer") == "skipped" else "没通过")
+        return f"[{node}] 第 {d.get('attempt')} 次{_SCOPE_NAMES[d['scope']]}：{res}"
+    if typ == "verify_started" and d.get("scope") in _SCOPE_NAMES:
+        return f"[{node}] 第 {d.get('attempt')} 次{_SCOPE_NAMES[d['scope']]}开始"
+    if typ == "diagnosis" and "route" not in d and d.get("blame") in _BLAME_NAMES:
+        return f"[{node}] 诊断第 {d.get('attempt')} 次：问题出在{_BLAME_NAMES[d['blame']]}" \
+               + (f"（规则 {d['rule']}）" if d.get("rule") else "") + f"：{d.get('instruction', '')}"
+    if typ == "escalated" and d.get("level") == "rule":
+        return f"[{node}] 规则 {d.get('rule')} 被诊断为有问题，退回待核对：{d.get('note', '')}"
+    if typ == "rule_rejected":
+        return f"规则 {d.get('rule')} 被退回（第 {d.get('times')} 次）：" + "；".join(d.get("reasons", []))
+    if typ in ("rules_started", "rules_proposed", "rules_round_done", "rules_need_human", "rule_trusted",
+               "rules_finished"):
+        if typ == "rules_started":
+            return f"规则流程开始：要查 {', '.join(d.get('todo', [])) or '无'}，复用 {', '.join(d.get('reused', [])) or '无'}"
+        if typ == "rules_proposed":
+            return f"查资料第 {d.get('round')} 轮：提出 {d.get('count')} 条规则"
+        if typ == "rules_round_done":
+            return f"规则第 {d.get('round')} 轮核对：已核对 {d.get('checked')}，退回 {d.get('rejected')}"
+        if typ == "rules_need_human":
+            return f"{d.get('count')} 条规则等人工确认（没有确认的不会入库）"
+        if typ == "rule_trusted":
+            return f"规则 {d.get('rule')} 已入库"
+        return f"规则流程结束：入库 {d.get('trusted')}，待确认 {d.get('pending')}，退回 {d.get('rejected')}"
+    if typ == "node_ready" and d.get("layer"):
+        return f"[{node}] 开始：{d.get('title')}（{'硬件层' if d['layer'] == 'hardware' else '逻辑层'}）"
+    return None
+
+
 def format_event(e: dict, t0: float) -> str:
     """把一个事件格式化成一行中文，实时显示和回放共用。"""
     d = e.get("data", {})
@@ -223,6 +258,9 @@ def format_event(e: dict, t0: float) -> str:
     typ = e.get("type")
     role = d.get("role")
     who = f"[{node}] " if role else ""          # 多 Agent 运行的 Agent 事件前面标出模块
+    new = _format_embedded(typ, node, d)          # 嵌入式新流程的事件（DECISIONS 第 66 条）
+    if new is not None:
+        return f"[{t:7.1f}s] {new}"
     if typ == "run_started":
         msg = f"运行开始：任务 {d.get('task')}，配置 {d.get('config')}，模型 {d.get('model')}"
         if d.get("strategy"):
@@ -774,6 +812,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--workflow", help="多 Agent 用的工作流：名字或 名字@版本（默认 module_dev 当前版本）")
     s.set_defaults(func=cmd_run)
 
+    s = sub.add_parser("firmware", help="嵌入式新流程：按硬件资料约束写 ESP-IDF 代码并测试（调用模型）")
+    s.add_argument("--spec", required=True, help="需求文档（markdown）")
+    s.add_argument("--hw", default="hardware/esp32s3_supermini", help="硬件目录（含 profile.json、sources.toml、rules.json）")
+    s.add_argument("--rules", choices=["verified", "unverified", "none"], default="verified",
+                   help="规则模式：verified 完整流程（默认）；unverified 不核对；none 不给规则")
+    s.add_argument("--port", help="板子串口（默认自动找）")
+    s.add_argument("--no-board", action="store_true", help="不上板，硬件层只做到编译和合规检查")
+    s.add_argument("--runs-dir", default=DEFAULT_RUNS_DIR)
+    s.set_defaults(func=cmd_firmware)
     s = sub.add_parser("rules", help="硬件规则：build 查资料提炼并核对（调用模型、需人工确认）；list 列出；verify 重新核对")
     s.add_argument("action", choices=["build", "list", "verify"])
     s.add_argument("--hw", default="hardware/esp32s3_supermini", help="硬件目录（含 profile.json、sources.toml）")
@@ -928,6 +975,49 @@ def cmd_rules(args) -> int:
         print(f"缺项：{m}")
     print(f"规则库：{hwdir / 'rules.json'}")
     return EXIT_PASS if out.ok else EXIT_FAIL
+
+
+def cmd_firmware(args) -> int:
+    """嵌入式新流程：规则 → 设计分层 → 编码、写测试 → 编译 → 合规 → 测试 → 诊断修正（DECISIONS 第 66 条）。"""
+    from .embedded.flow import EmbeddedFlow
+    from .grounding.research import llm_semantic_checker
+    from .grounding.verifier import RuleVerifier
+    from .target.board import BoardRunner
+    from .target.esp_idf import IdfEnv, IdfUnavailable
+    spec_path = Path(args.spec)
+    if not spec_path.is_file():
+        raise UsageError(f"找不到需求文档 {spec_path}")
+    hwdir, profile, library, store, idf_tree, svd = _hw_context(args.hw, need_sources=args.rules != "none")
+    settings = config.load_settings()
+    llm = make_llm(settings)
+    verifier = None
+    if args.rules == "verified":
+        from .agents.registry import default_registry
+        chk = default_registry().get("rule_checker")
+        tier = settings.tier(chk.model_tier)
+        verifier = RuleVerifier(library, profile, idf=idf_tree, svd=svd,
+                                semantic=llm_semantic_checker(llm, tier.name, extra_body=tier.extra_body(chk.thinking) or None))
+    try:
+        idf = IdfEnv.load(want_version=str(profile.framework_version.value))
+    except IdfUnavailable as exc:
+        print(f"[SKIP] {exc}；硬件层只做合规检查", file=sys.stderr)
+        idf = None
+    board = BoardRunner(idf, args.port) if (idf is not None and not args.no_board) else None
+    printer = LivePrinter()
+    flow = EmbeddedFlow(llm=llm, settings=settings, profile=profile, spec=spec_path.read_text(encoding="utf-8"),
+                        rules=store, library=library, verifier=verifier, runs_root=Path(args.runs_dir),
+                        name=spec_path.stem, rule_mode=args.rules, human=terminal_rules_human, idf=idf, board=board,
+                        subscribers=(printer,), secrets=_secrets(settings))
+    try:
+        res = flow.run()
+    finally:
+        printer.close()
+    if args.rules == "verified":
+        store.save(hwdir / "rules.json")
+    print(f"\n运行目录：{res.run_dir}\n结论：{res.verdict}" + (f"（{res.error}）" if res.error else ""))
+    for mid, mr in res.modules.items():
+        print(f"- {mid}（{mr.layer}）：{mr.verdict}，尝试 {mr.attempts} 次")
+    return VERDICT_EXIT.get(res.verdict, EXIT_FAIL)
 
 
 def main(argv: list[str] | None = None) -> int:

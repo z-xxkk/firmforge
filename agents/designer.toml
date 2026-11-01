@@ -1,0 +1,11 @@
+name = "designer"
+role = "designer"
+version = "1.0.0"
+model_tier = "strong"             # 拆错了后面全白做（与规划 Agent 同理，DECISIONS 第 37 条）
+temperature = 0.2
+prompt = "prompts/designer.md"
+task_types = ["*"]
+description = "设计分层 Agent：把需求拆成模块，分出硬件层与逻辑层（DECISIONS 第 66 条第 ④ 步）"
+skills = ["分出硬件层和逻辑层", "写明模块接口、依赖和验收标准"]
+toolsets = []
+memory = { experience = false, knowledge = false }
