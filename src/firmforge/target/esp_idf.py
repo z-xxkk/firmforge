@@ -152,8 +152,11 @@ class IdfProject:
     """一个可反复编译的 ESP-IDF 工程：Agent 的代码放进 main/，硬件档案生成 main/include/hw_config.h。"""
 
     def __init__(self, root: Path, idf: IdfEnv, *, target: str = "esp32s3", name: str = "ff_app",
-                 requires: tuple[str, ...] = DEFAULT_REQUIRES):
-        self.root, self.idf, self.target, self.name, self.requires = Path(root), idf, target, name, requires
+                 requires: tuple[str, ...] = DEFAULT_REQUIRES, whole_archive: bool = False):
+        self.root, self.idf, self.target, self.name = Path(root), idf, target, name
+        self.requires = tuple(dict.fromkeys(requires))
+        # 测试程序必须保留全部目标文件：TEST_CASE 靠构造函数登记，没人引用的文件会被链接器丢掉，结果一个用例都不跑
+        self.whole_archive = whole_archive
 
     def write(self, profile: HardwareProfile, files: dict[str, str]) -> None:
         """files：main/ 下的相对路径 → 内容，例如 {"app_main.c": ..., "mpu6050.c": ..., "include/mpu6050.h": ...}。
@@ -181,7 +184,8 @@ class IdfProject:
         quoted = " ".join(f'"{s}"' for s in srcs)
         cmake = (f"idf_component_register(SRCS {quoted}\n"
                  f"                       INCLUDE_DIRS \".\" \"include\"\n"
-                 f"                       PRIV_REQUIRES {' '.join(self.requires)})\n")
+                 f"                       PRIV_REQUIRES {' '.join(self.requires)}"
+                 + ("\n                       WHOLE_ARCHIVE" if self.whole_archive else "") + ")\n")
         (main / "CMakeLists.txt").write_text(cmake, encoding="utf-8")
 
     def build(self, timeout: float = BUILD_TIMEOUT_S) -> BuildResult:

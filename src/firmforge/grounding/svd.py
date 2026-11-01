@@ -36,11 +36,12 @@ def _int(text: str | None, default: int = 0) -> int:
 
 class SvdDevice:
     def __init__(self, name: str, fields: dict[tuple[str, str, str], FieldInfo], registers: set[tuple[str, str]],
-                 peripherals: set[str]):
+                 peripherals: set[str], addresses: dict[tuple[str, str], int] | None = None):
         self.name = name
         self.fields = fields
         self.registers = registers
         self.peripherals = peripherals
+        self.addresses = addresses or {}        # (外设, 寄存器) → 绝对地址，供上板测试读寄存器
 
     @classmethod
     def parse(cls, xml_text: str) -> "SvdDevice":
@@ -48,7 +49,9 @@ class SvdDevice:
         periph_nodes = {p.findtext("name"): p for p in root.iter("peripheral")}
         fields: dict[tuple[str, str, str], FieldInfo] = {}
         registers: set[tuple[str, str]] = set()
+        addresses: dict[tuple[str, str], int] = {}
         for pname, p in periph_nodes.items():
+            base_addr = _int(p.findtext("baseAddress"))
             src = p
             base = p.get("derivedFrom")
             if base and base in periph_nodes and p.find("registers") is None:
@@ -56,6 +59,7 @@ class SvdDevice:
             for r in src.iter("register"):
                 rname = r.findtext("name") or ""
                 registers.add((pname, rname))
+                addresses[(pname, rname)] = base_addr + _int(r.findtext("addressOffset"))
                 for f in r.iter("field"):
                     fname = f.findtext("name") or ""
                     if f.find("bitOffset") is not None:
@@ -69,7 +73,7 @@ class SvdDevice:
                         width = int(rng[0]) - lsb + 1
                     access = f.findtext("access") or r.findtext("access") or ""
                     fields[(pname, rname, fname)] = FieldInfo(pname, rname, fname, lsb, width, access)
-        return cls(root.findtext("name") or "", fields, registers, set(periph_nodes))
+        return cls(root.findtext("name") or "", fields, registers, set(periph_nodes), addresses)
 
     @classmethod
     def load(cls, path: Path) -> "SvdDevice":
