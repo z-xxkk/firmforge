@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 gui = ["PySide6-Essentials>=6.7"]
+sources = ["pypdf>=5"]           # 读 PDF 资料（DECISIONS 第 73 条）
 
 [project.scripts]
 firmforge = "firmforge.cli:main"

@@ -10,3 +10,4 @@ build/
 dist/
 .ff_chats/
 .venv/
+.ff_sources/
