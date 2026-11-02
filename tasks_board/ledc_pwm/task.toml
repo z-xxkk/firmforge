@@ -1,0 +1,26 @@
+id = "ledc_pwm"
+title = "LEDC 输出 PWM"
+category = "peripheral"
+difficulty = 2
+source = "ESP-IDF v6.1 driver/ledc.h、soc_caps.h（SOC_LEDC_TIMER_BIT_WIDTH = 14）；规则见 tasks_inbox/esp32_batch_a_rules.md 第 3 题（DECISIONS 第 83 条）"
+target = "esp32s3"
+wiring = ["pwm.out", "pwm.in"]
+requires = ["esp_driver_pcnt"]
+
+[[mutants]]
+file = "fixed_13bit.c"
+replaces = "pwm_out.c"
+expect_fail = "board_test"
+why = "分辨率固定 13 位，100 kHz 时超出时钟能力，配置失败（规则 3.2）"
+
+[[mutants]]
+file = "percent.c"
+replaces = "pwm_out.c"
+expect_fail = "board_test"
+why = "把千分比当百分比换算（规则 3.3）"
+
+[[mutants]]
+file = "no_update.c"
+replaces = "pwm_out.c"
+expect_fail = "board_test"
+why = "改占空比时只调 ledc_set_duty，没调 ledc_update_duty，不生效（规则 3.4）"

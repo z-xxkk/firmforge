@@ -1,0 +1,26 @@
+id = "i2c_bus_scan"
+title = "I2C 总线扫描"
+category = "driver"
+difficulty = 2
+source = "ESP-IDF v6.1 driver/i2c_master.h（i2c_master_probe）；NXP UM10204 Rev 7.0 p.16 §3.1.12 保留地址；规则见 tasks_inbox/esp32_batch_a_rules.md 第 6 题（DECISIONS 第 83 条）"
+target = "esp32s3"
+wiring = ["i2c0.sda", "i2c0.scl"]
+requires = []
+
+[[mutants]]
+file = "legacy_api.c"
+replaces = "bus_scan.c"
+expect_fail = "compliance"
+why = "用旧版接口 i2c_driver_install / i2c_cmd_link_create（v6.1 仍能编译，运行时与新驱动冲突，规则 6.1）"
+
+[[mutants]]
+file = "n_capped.c"
+replaces = "bus_scan.c"
+expect_fail = "board_test"
+why = "*n 被截成 cap，调用方不知道还有更多地址（规则 6.4）"
+
+[[mutants]]
+file = "no_cap_check.c"
+replaces = "bus_scan.c"
+expect_fail = "board_test"
+why = "写结果时不检查 cap，越界写坏调用方的内存（规则 6.4）"

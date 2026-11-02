@@ -1,0 +1,26 @@
+id = "gptimer_tick"
+title = "通用定时器周期回调"
+category = "peripheral"
+difficulty = 2
+source = "ESP-IDF v6.1 driver/gptimer.h；规则见 tasks_inbox/esp32_batch_a_rules.md 第 4 题（DECISIONS 第 83 条）"
+target = "esp32s3"
+wiring = []
+requires = ["esp_driver_gptimer"]
+
+[[mutants]]
+file = "wrong_alarm.c"
+replaces = "tick.c"
+expect_fail = "board_test"
+why = "报警值算成 1000 / hz（以为分辨率是 1 kHz），快 1000 倍（规则 4.1）"
+
+[[mutants]]
+file = "no_reload.c"
+replaces = "tick.c"
+expect_fail = "board_test"
+why = "没开自动重装，只触发一次（规则 4.2）"
+
+[[mutants]]
+file = "no_enable.c"
+replaces = "tick.c"
+expect_fail = "board_test"
+why = "没调 gptimer_enable 就 start，启动失败（规则 4.3）"

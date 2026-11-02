@@ -1,0 +1,26 @@
+id = "pcnt_freq_meter"
+title = "脉冲计数器测频率"
+category = "peripheral"
+difficulty = 2
+source = "ESP-IDF v6.1 driver/pulse_cnt.h；规则见 tasks_inbox/esp32_batch_a_rules.md 第 2 题（DECISIONS 第 83 条）"
+target = "esp32s3"
+wiring = ["pwm.out", "pwm.in"]
+requires = ["esp_driver_pcnt"]
+
+[[mutants]]
+file = "no_accum.c"
+replaces = "freqmeter.c"
+expect_fail = "board_test"
+why = "没开 accum_count、没加观察点：16 位计数器在 100 kHz × 1000 ms 时溢出回绕（规则 2.2）"
+
+[[mutants]]
+file = "both_edges.c"
+replaces = "freqmeter.c"
+expect_fail = "board_test"
+why = "下降沿也加 1，频率翻倍（规则 2.1）"
+
+[[mutants]]
+file = "no_scale.c"
+replaces = "freqmeter.c"
+expect_fail = "board_test"
+why = "换算漏了乘 1000（规则 2.3）"

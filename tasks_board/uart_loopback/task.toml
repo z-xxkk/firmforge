@@ -1,0 +1,26 @@
+id = "uart_loopback"
+title = "UART1 回环收发与按行读取"
+category = "peripheral"
+difficulty = 2
+source = "ESP-IDF v6.1 driver/uart.h（uart_set_pin 为 5 或 7 参数的宏）；项目 sdkconfig CONFIG_FREERTOS_HZ=100；规则见 tasks_inbox/esp32_batch_a_rules.md 第 5 题（DECISIONS 第 83 条）"
+target = "esp32s3"
+wiring = ["uart1.tx", "uart1.rx"]
+requires = []
+
+[[mutants]]
+file = "ticks_as_ms.c"
+replaces = "link.c"
+expect_fail = "board_test"
+why = "超时毫秒直接当 tick 传给驱动（1 tick = 10 ms），等待时间变成 10 倍（共同规定 C2）"
+
+[[mutants]]
+file = "no_set_pin.c"
+replaces = "link.c"
+expect_fail = "board_test"
+why = "没调 uart_set_pin，数据走默认引脚，回环收不到（规则 5.1）"
+
+[[mutants]]
+file = "small_rx_buf.c"
+replaces = "link.c"
+expect_fail = "board_test"
+why = "接收缓冲区 128 字节，不大于硬件 FIFO，驱动安装失败（规则 5.3）"
