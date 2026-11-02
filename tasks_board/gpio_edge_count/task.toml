@@ -1,0 +1,26 @@
+id = "gpio_edge_count"
+title = "GPIO 上升沿计数"
+category = "peripheral"
+difficulty = 1
+source = "ESP-IDF v6.1 driver/gpio.h、hal/gpio_types.h；规则见 tasks_inbox/esp32_batch_a_rules.md 第 1 题（DECISIONS 第 83 条）"
+target = "esp32s3"
+wiring = ["pwm.out", "pwm.in"]
+requires = []
+
+[[mutants]]
+file = "anyedge.c"
+replaces = "edge_counter.c"
+expect_fail = "board_test"
+why = "上下沿都计数（规则 1.1 只数上升沿），1000 个脉冲数出 2000"
+
+[[mutants]]
+file = "reset_local.c"
+replaces = "edge_counter.c"
+expect_fail = "board_test"
+why = "清零只清了局部变量，计数没有归零"
+
+[[mutants]]
+file = "isr_service_error.c"
+replaces = "edge_counter.c"
+expect_fail = "board_test"
+why = "中断服务已被别人装过时把 ESP_ERR_INVALID_STATE 当错误返回（规则 1.2）"

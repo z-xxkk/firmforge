@@ -1,0 +1,14 @@
+[
+  {"id": "R-JUDGE-001", "kind": "forbidden", "scope": ["all"], "text": "不许用旧版 I2C 接口 i2c_driver_install（v6.1 仍能编译，运行时与新驱动冲突）",
+   "cite": {"doc": "esp32s3-judge", "page": null, "section": "DECISIONS 第 83 条", "quote": "i2c_driver_install"}, "tier": "user", "status": "trusted",
+   "check": {"type": "api_absent", "symbol": "i2c_driver_install"}},
+  {"id": "R-JUDGE-002", "kind": "forbidden", "scope": ["all"], "text": "不许用旧版 I2C 命令链接口 i2c_cmd_link_create",
+   "cite": {"doc": "esp32s3-judge", "page": null, "section": "DECISIONS 第 83 条", "quote": "i2c_cmd_link_create"}, "tier": "user", "status": "trusted",
+   "check": {"type": "api_absent", "symbol": "i2c_cmd_link_create"}},
+  {"id": "R-JUDGE-003", "kind": "forbidden", "scope": ["all"], "text": "不许进入深度睡眠（板子会断开，无法自动测试）",
+   "cite": {"doc": "esp32s3-judge", "page": null, "section": "prompts/coder_idf.md", "quote": "esp_deep_sleep_start"}, "tier": "user", "status": "trusted",
+   "check": {"type": "api_absent", "symbol": "esp_deep_sleep_start"}},
+  {"id": "R-JUDGE-004", "kind": "pin", "scope": ["all"], "text": "不许使用 GPIO19、GPIO20（USB）",
+   "cite": {"doc": "esp32s3-ds", "page": 24, "section": "", "quote": "USB_D-"}, "tier": "official_manual", "status": "trusted",
+   "check": {"type": "pin_forbidden", "gpio": [19, 20]}}
+]
