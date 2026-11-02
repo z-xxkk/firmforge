@@ -1,0 +1,26 @@
+id = "imu_uart_logger"
+title = "MPU6050 数据按帧从串口发出（综合）"
+category = "integration"
+difficulty = 3
+source = "第 5、7、8 题的依据；帧格式为本题自定（tasks_inbox/esp32_batch_b_rules.md 第 11 题，DECISIONS 第 84 条）；CRC-16/CCITT-FALSE 公开参数"
+target = "esp32s3"
+wiring = ["i2c0.sda", "i2c0.scl", "imu.int", "uart1.tx", "uart1.rx"]
+requires = []
+
+[[mutants]]
+file = "big_endian.c"
+replaces = "logger.c"
+expect_fail = "board_test"
+why = "数据字段写成大端（帧格式规定小端）"
+
+[[mutants]]
+file = "crc_with_header.c"
+replaces = "logger.c"
+expect_fail = "board_test"
+why = "CRC 把帧头也算进去了（帧格式规定只覆盖字节 2–16）"
+
+[[mutants]]
+file = "seq_fixed.c"
+replaces = "logger.c"
+expect_fail = "board_test"
+why = "序号不增加"

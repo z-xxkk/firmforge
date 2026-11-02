@@ -1,0 +1,26 @@
+id = "mpu6050_drdy"
+title = "MPU6050 数据就绪中断采集"
+category = "driver"
+difficulty = 3
+source = "MPU-6000/6050 寄存器手册 RM-MPU-6000A rev 4.0 p.12（采样率公式）、p.27–29（中断配置与状态）、p.42、46；规则见 tasks_inbox/esp32_batch_b_rules.md 第 8 题（DECISIONS 第 84 条）"
+target = "esp32s3"
+wiring = ["i2c0.sda", "i2c0.scl", "imu.int"]
+requires = []
+
+[[mutants]]
+file = "div_8khz.c"
+replaces = "mpu_stream.c"
+expect_fail = "board_test"
+why = "SMPLRT_DIV 按 8 kHz 陀螺输出率算（低通开着时是 1 kHz），采样率错 8 倍（规则 8.1–8.2）"
+
+[[mutants]]
+file = "i2c_in_isr.c"
+replaces = "mpu_stream.c"
+expect_fail = "board_test"
+why = "在中断里直接读 I2C（规则 8.5），会崩溃或卡死"
+
+[[mutants]]
+file = "latch_no_clear.c"
+replaces = "mpu_stream.c"
+expect_fail = "board_test"
+why = "开了锁存但只有读 INT_STATUS 才清除，代码从不读它：中断一直保持高电平，只来 1 次上升沿（规则 8.3）"

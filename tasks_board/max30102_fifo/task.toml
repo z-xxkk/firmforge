@@ -1,0 +1,26 @@
+id = "max30102_fifo"
+title = "MAX30102 配置与 FIFO 读取"
+category = "driver"
+difficulty = 3
+source = "MAX30102 数据手册 p.11（PART_ID）、p.14–16（FIFO 数据格式与读指针）、p.17–19（配置寄存器、表 6、表 7）、p.24、p.29（地址）；规则见 tasks_inbox/esp32_batch_b_rules.md 第 9 题（DECISIONS 第 84 条）"
+target = "esp32s3"
+wiring = ["i2c0.sda", "i2c0.scl"]
+requires = []
+
+[[mutants]]
+file = "no_wrap.c"
+replaces = "max30102.c"
+expect_fail = "board_test"
+why = "可读样本数直接用 写指针 − 读指针，写指针回绕到读指针前面时算出 0 或乱数，丢样本（规则 9.8）"
+
+[[mutants]]
+file = "wrong_rate_code.c"
+replaces = "max30102.c"
+expect_fail = "board_test"
+why = "采样率编码用了 SPO2_SR 表里的错误一行（100 sps 写成 200 sps 的编码，规则 9.6）"
+
+[[mutants]]
+file = "hr_mode.c"
+replaces = "max30102.c"
+expect_fail = "board_test"
+why = "模式写成心率模式（只有红光，MODE = 010），每个样本只有 3 字节，按 6 字节读就错位（规则 9.5）"

@@ -1,0 +1,7 @@
+#pragma once
+#include <stdint.h>
+#include "driver/i2c_master.h"
+#include "esp_err.h"
+
+esp_err_t logger_start(i2c_master_bus_handle_t bus, uint32_t rate_hz);   /* 10–100 Hz */
+esp_err_t logger_stop(void);

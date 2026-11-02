@@ -1,0 +1,32 @@
+id = "mpu6050_drv_idf"
+title = "MPU6050 驱动（ESP-IDF 新版 I2C 接口）"
+category = "driver"
+difficulty = 3
+source = "MPU-6000/6050 寄存器手册 RM-MPU-6000A rev 4.0 p.12、30–31、42、46；产品规格书 PS-MPU-6000A rev 3.1 p.12–13；规则见 tasks_inbox/esp32_batch_b_rules.md 第 7 题（DECISIONS 第 84 条）"
+target = "esp32s3"
+wiring = ["i2c0.sda", "i2c0.scl"]
+requires = []
+
+[[mutants]]
+file = "no_wake.c"
+replaces = "mpu6050.c"
+expect_fail = "board_test"
+why = "没清 PWR_MGMT_1 的 SLEEP 位，器件一直睡眠，数据全是 0（规则 7.2）"
+
+[[mutants]]
+file = "little_endian.c"
+replaces = "mpu6050.c"
+expect_fail = "board_test"
+why = "拼 16 位数据时低字节在前（手册规定高字节在前，规则 7.6）"
+
+[[mutants]]
+file = "range_not_shifted.c"
+replaces = "mpu6050.c"
+expect_fail = "board_test"
+why = "量程写在 bit1–0，没有左移 3 位到 bit4–3（规则 7.4）"
+
+[[mutants]]
+file = "temp_no_offset.c"
+replaces = "mpu6050.c"
+expect_fail = "board_test"
+why = "温度公式漏了 36.53 °C 偏移（规则 7.8）"

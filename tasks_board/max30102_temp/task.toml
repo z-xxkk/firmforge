@@ -1,0 +1,26 @@
+id = "max30102_temp"
+title = "MAX30102 片内温度"
+category = "driver"
+difficulty = 2
+source = "MAX30102 数据手册 p.22（温度寄存器）、p.26（测温流程）、p.29（地址）；规则见 tasks_inbox/esp32_batch_b_rules.md 第 10 题（DECISIONS 第 84 条）"
+target = "esp32s3"
+wiring = ["i2c0.sda", "i2c0.scl"]
+requires = []
+
+[[mutants]]
+file = "unsigned_int.c"
+replaces = "max30102_temp.c"
+expect_fail = "board_test"
+why = "整数部分当无符号处理，零下温度错（规则 10.2）"
+
+[[mutants]]
+file = "frac_tenth.c"
+replaces = "max30102_temp.c"
+expect_fail = "board_test"
+why = "小数部分按 0.1 °C 换算（手册是 0.0625 °C，规则 10.2）"
+
+[[mutants]]
+file = "resets_device.c"
+replaces = "max30102_temp.c"
+expect_fail = "board_test"
+why = "读温度前复位器件，冲掉了别的配置（规则 10.3）"
