@@ -71,3 +71,13 @@ version = "rev 1"
 url = "https://www.analog.com/media/en/technical-documentation/data-sheets/max30102.pdf"
 file = "max30102.pdf"
 sha256 = "252e039335aea4bf1dae577eada92fe2630bce123fde691a11b3d890bfd0b53c"
+
+[[doc]]
+id = "nxp-i2c-um10204"
+title = "NXP UM10204 I2C-bus specification and user manual Rev 7.0（nxp.com 直链已失效，取自 NXP 社区附件）"
+kind = "pdf"
+tier = "official_mirror"
+version = "Rev 7.0"
+url = "https://community.nxp.com/pwmxy87654/attachments/pwmxy87654/nxp-designs/931/1/UM10204.pdf"
+file = "nxp_um10204.pdf"
+sha256 = "dc91f00f65584e06ef36e26c93bf9d91a95fb3c8a1830a9223e53caf678b36af"
