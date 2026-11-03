@@ -29,7 +29,14 @@ port, timeout, end = sys.argv[1], float(sys.argv[2]), sys.argv[3]
 crash = ("Guru Meditation", "abort() was called", "Backtrace:")
 buf = ""
 deadline = time.time() + timeout
-with serial.Serial(port, 115200, timeout=0.2) as s:
+s = serial.Serial()
+s.port, s.baudrate, s.timeout = port, 115200, 0.2
+s.dtr = False                 # 打开前先释放 DTR/RTS：芯片自带 USB 上它们控制下载模式（GPIO9）和复位
+s.rts = False
+with s:
+    s.rts = True              # 硬复位一次，从头跑测试程序（DTR 保持释放，不进下载模式）
+    time.sleep(0.1)
+    s.rts = False
     while time.time() < deadline:
         chunk = s.read(4096).decode("utf-8", "replace")
         if chunk:

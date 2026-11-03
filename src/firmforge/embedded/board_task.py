@@ -179,3 +179,44 @@ def check_without_board(task: BoardTask, profile: HardwareProfile, rules: RuleSe
                 v.problems += [d.render() for d in b.errors] or [b.log_tail[-800:]]
         out.variants.append(v)
     return out
+
+
+# ---------------------------------------------------------------- 有板子时的自检
+
+@dataclass
+class BoardVariantResult:
+    name: str
+    expect: str
+    verdict: str                      # pass / fail / skipped
+    failed_cases: list[str] = field(default_factory=list)
+    report: str = ""
+
+    @property
+    def as_expected(self) -> bool:
+        if self.expect == "pass":
+            return self.verdict == "pass"
+        if self.expect == "board_test":
+            return self.verdict == "fail"
+        return True                    # compliance / build 类在没有板子的自检里已经判过
+
+
+def check_with_board(task: BoardTask, profile: HardwareProfile, rules: RuleSet | None, idf: IdfEnv, board,
+                     build_root: Path, log_dir: Path, only_reference: bool = False) -> list[BoardVariantResult]:
+    """标准答案必须通过全部隐藏用例；每个 expect_fail = board_test 的变异体至少一个用例失败。
+    board：target.board.BoardRunner。串口日志存在 log_dir/<题目>/<变体>.log。"""
+    variants = [("reference", "pass", task.reference_files())]
+    if not only_reference:
+        variants += [(m.file, m.expect_fail, task.mutant_files(m)) for m in task.mutants if m.expect_fail == "board_test"]
+    proj = IdfProject(Path(build_root) / f"{task.id}-{profile.chip.value}-board", idf, target=str(profile.chip.value),
+                      requires=DEFAULT_REQUIRES + TEST_REQUIRES + task.requires, whole_archive=True)
+    out = []
+    for name, expect, files in variants:
+        proj.write(profile, {**task.public_files(), **files, **task.hidden_files(), **harness_files(rules, None)})
+        b = proj.build()
+        if not b.ok:
+            out.append(BoardVariantResult(name, expect, "fail", ["编译失败"],
+                                          "\n".join(d.render() for d in b.errors) or b.log_tail[-800:]))
+            continue
+        r = board.run(proj, Path(log_dir) / task.id / f"{name}.log")
+        out.append(BoardVariantResult(name, expect, r.verdict(), [c.name for c in r.failed], r.report()))
+    return out

@@ -1,13 +1,13 @@
 {
   "chip": {
     "value": "esp32c3",
-    "origin": "user",
-    "note": "负责人换板（DECISIONS 第 87 条）；待 esptool 实测确认"
+    "origin": "measured",
+    "note": "esptool chip-id 2026-11-03：ESP32-C3 AZ (QFN32) revision v1.1"
   },
   "chip_variant": {
-    "value": "ESP32-C3FH4",
-    "origin": "document",
-    "note": "第三方资料说 4 MB Flash，是否合封待 esptool 实测确认"
+    "value": "ESP32-C3 AZ（QFN32，合封 4 MB Flash，XMC）",
+    "origin": "measured",
+    "note": "esptool flash-id 2026-11-03：Embedded Flash 4MB (XMC)，Manufacturer 46，Device 4016，晶振 40 MHz"
   },
   "board": {
     "value": "esp32c3_supermini",

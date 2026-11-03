@@ -816,6 +816,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("ids", nargs="*", help="题目 id，不写就是全部")
     s.add_argument("--hw", default="hardware/esp32c3_supermini", help="硬件目录（含 profile.json）")
     s.add_argument("--tasks-dir", default="tasks_board")
+    s.add_argument("--board", action="store_true", help="上板自检：标准答案要通过隐藏用例，变异体要被抓住")
+    s.add_argument("--reference-only", action="store_true", help="上板时只跑标准答案")
+    s.add_argument("--port", help="板子串口（默认自动找）")
     s.set_defaults(func=cmd_check_board_tasks)
     s = sub.add_parser("firmware", help="嵌入式新流程：按硬件资料约束写 ESP-IDF 代码并测试（调用模型）")
     s.add_argument("--spec", required=True, help="需求文档（markdown）")
@@ -1041,6 +1044,26 @@ def cmd_check_board_tasks(args) -> int:
         print(f"[SKIP] {exc}；只做合规检查，不编译", file=sys.stderr)
         idf = None
     all_ok = True
+    if args.board:
+        from .embedded.board_task import check_with_board
+        from .target.board import BoardRunner
+        if idf is None:
+            raise UsageError("上板自检需要 ESP-IDF")
+        runner = BoardRunner(idf, args.port)
+        for t in tasks:
+            t0 = time.time()
+            results = check_with_board(t, profile, judge, idf, runner, Path(".ff_data") / "selfcheck",
+                                       Path(".ff_data") / "board_logs", only_reference=args.reference_only)
+            ok = all(v.as_expected for v in results)
+            all_ok &= ok
+            print(f"== {t.id}（上板，{profile.chip.value}）：{'符合预期' if ok else '不符合预期'}（{time.time() - t0:.0f} 秒）")
+            for v in results:
+                extra = f"，失败用例：{'；'.join(v.failed_cases)}" if v.failed_cases else ""
+                print(f"   {'✓' if v.as_expected else '✗'} {v.name:24} 期望 {v.expect:11} 结果 {v.verdict}{extra}")
+                if not v.as_expected:
+                    for line in v.report.splitlines()[:12]:
+                        print(f"       {line[:300]}")
+        return EXIT_PASS if all_ok else EXIT_FAIL
     for t in tasks:
         t0 = time.time()
         r = check_without_board(t, profile, judge, idf, Path(".ff_data") / "selfcheck")

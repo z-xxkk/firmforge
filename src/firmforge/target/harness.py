@@ -163,7 +163,19 @@ class BoardTestResult:
         return "\n".join(lines)
 
 
+_ESCAPED = re.compile(r"(?:\\x[0-9A-Fa-f]{2})+")
+
+
+def unescape_unity(text: str) -> str:
+    """ESP-IDF 的 Unity 把非 ASCII 字符（中文用例名）打印成 \\xE4\\xB8… 这样的转义，还原成 UTF-8 文字。"""
+    def back(m: re.Match) -> str:
+        raw = bytes(int(h, 16) for h in re.findall(r"\\x([0-9A-Fa-f]{2})", m.group(0)))
+        return raw.decode("utf-8", "replace")
+    return _ESCAPED.sub(back, text)
+
+
 def parse_board_output(text: str) -> BoardTestResult:
+    text = unescape_unity(text)
     res = BoardTestResult()
     i = text.find(BEGIN)
     res.started = i >= 0

@@ -59,6 +59,12 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(r.verdict(), "fail")
         self.assertIn("失败：WHO_AM_I: 读回 0x68", r.report())
 
+    def test_unescape_chinese_names(self):
+        raw = f"{BEGIN}\n./main/t.c:9:\\xE6\\xB8\\x85\\xE9\\x9B\\xB6 ok:PASS\n1 Tests 0 Failures 0 Ignored\n{END}"
+        r = parse_board_output(raw)
+        self.assertEqual(r.cases[0].name, "清零 ok")
+        self.assertTrue(r.ok)
+
     def test_crash_hang_and_not_started(self):
         crash = parse_board_output(f"{BEGIN}\nGuru Meditation Error: Core  0 panic'ed (LoadProhibited)\nBacktrace: 0x4200")
         self.assertIn("Guru Meditation", crash.crash)
