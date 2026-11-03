@@ -5,6 +5,7 @@ difficulty = 2
 source = "ESP-IDF v6.1 driver/rmt_rx.h、hal/rmt_types.h、esp_driver_rmt/src/rmt_rx.c、esp32c3 soc_caps.h 与 rmt_ll.h；规则见 tasks_inbox/esp32_task2_rmt_rules.md（DECISIONS 第 88 条）"
 target = "esp32c3"   # 题目用引脚宏写，ESP32-C3、ESP32-S3、经典 ESP32 都有 RMT
 wiring = ["pwm.out", "pwm.in"]
+scopes = ["rmt"]   # 规则适用范围（评测时只给这些范围的规则）
 requires = ["esp_driver_rmt"]
 
 [[mutants]]

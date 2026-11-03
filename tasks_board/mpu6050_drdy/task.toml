@@ -5,6 +5,7 @@ difficulty = 3
 source = "MPU-6000/6050 寄存器手册 RM-MPU-6000A rev 4.0 p.12（采样率公式）、p.27–29（中断配置与状态）、p.42、46；规则见 tasks_inbox/esp32_batch_b_rules.md 第 8 题（DECISIONS 第 84 条）"
 target = "esp32"   # 题目用引脚宏写，经典 ESP32 与 ESP32-S3 都能跑（DECISIONS 第 86 条）
 wiring = ["i2c0.sda", "i2c0.scl", "imu.int"]
+scopes = ["i2c", "gpio", "mpu6050"]   # 规则适用范围（评测时只给这些范围的规则）
 requires = []
 
 [[mutants]]

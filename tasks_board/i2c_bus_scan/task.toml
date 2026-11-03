@@ -5,6 +5,7 @@ difficulty = 2
 source = "ESP-IDF v6.1 driver/i2c_master.h（i2c_master_probe）；NXP UM10204 Rev 7.0 p.16 §3.1.12 保留地址；规则见 tasks_inbox/esp32_batch_a_rules.md 第 6 题（DECISIONS 第 83 条）"
 target = "esp32"   # 题目用引脚宏写，经典 ESP32 与 ESP32-S3 都能跑（DECISIONS 第 86 条）
 wiring = ["i2c0.sda", "i2c0.scl"]
+scopes = ["i2c"]   # 规则适用范围（评测时只给这些范围的规则）
 requires = []
 
 [[mutants]]

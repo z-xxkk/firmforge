@@ -5,6 +5,7 @@ difficulty = 2
 source = "ESP-IDF v6.1 driver/uart.h（uart_set_pin 为 5 或 7 参数的宏）；项目 sdkconfig CONFIG_FREERTOS_HZ=100；规则见 tasks_inbox/esp32_batch_a_rules.md 第 5 题（DECISIONS 第 83 条）"
 target = "esp32"   # 题目用引脚宏写，经典 ESP32 与 ESP32-S3 都能跑（DECISIONS 第 86 条）
 wiring = ["uart1.tx", "uart1.rx"]
+scopes = ["uart"]   # 规则适用范围（评测时只给这些范围的规则）
 requires = []
 
 [[mutants]]

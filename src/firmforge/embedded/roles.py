@@ -87,7 +87,9 @@ def _common_constraints(profile: HardwareProfile, m: DesignModule) -> list[str]:
 # ---------------------------------------------------------------- 编码
 
 def coder_messages(requirement: str, profile: HardwareProfile, rules: RuleSet | None, design: Design,
-                   module: DesignModule, dep_headers: dict[str, str], where: str = "") -> list[dict]:
+                   module: DesignModule, dep_headers: dict[str, str], where: str = "",
+                   locked_header: str | None = None) -> list[dict]:
+    """locked_header：本模块的公共头文件已经定好（评测题的接口），编码 Agent 只能照着实现、不能改。"""
     system = system_prompt("coder_idf.md", profile, rules, _module_scopes(module))
     layer = "硬件层（受硬件规则约束，要上板测试）" if module.layer == "hardware" else "逻辑层（与硬件无关，在电脑上测试）"
     b = Brief(intent=f"实现模块 {module.id}：{module.title}", location=where or f"编码 › {module.id}")
@@ -97,6 +99,9 @@ def coder_messages(requirement: str, profile: HardwareProfile, rules: RuleSet | 
         b.constraints.append("逻辑层不能包含任何 ESP-IDF 驱动头文件或 hw_config.h，只用标准 C（C11）")
     b.attach("需求文档", requirement)
     b.attach("整体设计", design_json(design))
+    if locked_header is not None:
+        b.constraints.append(f"main/{module.header} 已经定好，不能修改，也不要输出它")
+        b.attach(f"本模块公共头文件 main/{module.header}（锁定）", f"```c\n{locked_header.rstrip()}\n```")
     b.attach("依赖模块的公共头文件（只读）", _deps_block(dep_headers))
     return [{"role": "system", "content": system}, {"role": "user", "content": b.render()}]
 

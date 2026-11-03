@@ -7,6 +7,7 @@ task.toml 多出的字段：
 - target：目标芯片（esp32s3）
 - wiring：用到的接线（硬件档案里的信号名），自检前先核对硬件档案里有这些信号
 - requires：额外的 ESP-IDF 组件（例如 esp_driver_pcnt）
+- scopes：涉及的外设和器件（规则适用范围，例如 ["i2c", "mpu6050"]）
 - 变异体的 expect_fail：compliance（合规检查拦下）/ build（编译不过）/ board_test（隐藏测试抓住）
 
 自检：
@@ -54,6 +55,7 @@ class BoardTask:
     wiring: tuple[str, ...] = ()
     requires: tuple[str, ...] = ()
     mutants: tuple[BoardMutant, ...] = ()
+    scopes: tuple[str, ...] = ()       # 涉及的外设和器件（规则适用范围），评测时只把这些范围的规则给 Agent
 
     @property
     def spec_path(self) -> Path:
@@ -103,7 +105,8 @@ def load_board_task(path: Path | str) -> BoardTask:
             raise BoardTaskError(f"{f}：变异体 {m.get('file')} 的 expect_fail 只能是 {', '.join(EXPECT)}")
         muts.append(BoardMutant(m["file"], m["replaces"], m["expect_fail"], m.get("why", "")))
     return BoardTask(d["id"], d["title"], d["category"], int(d["difficulty"]), d.get("source", ""), root.resolve(),
-                     d.get("target", "esp32s3"), tuple(d.get("wiring", [])), tuple(d.get("requires", [])), tuple(muts))
+                     d.get("target", "esp32s3"), tuple(d.get("wiring", [])), tuple(d.get("requires", [])), tuple(muts),
+                     tuple(d.get("scopes", [])))
 
 
 def judge_rules(tasks_root: Path | str, profile: HardwareProfile) -> RuleSet:
@@ -200,23 +203,59 @@ class BoardVariantResult:
         return True                    # compliance / build 类在没有板子的自检里已经判过
 
 
+@dataclass
+class JudgeResult:
+    """评测判定：固定判定规则的合规检查 → 编译 → 上板跑隐藏测试。所有配置用同一把尺子。"""
+    verdict: str                      # pass / fail / skipped
+    failed_layer: str = ""            # compliance / build / board_test / skipped
+    cases_passed: int = 0
+    cases_total: int = 0
+    failed_cases: list[str] = field(default_factory=list)
+    report: str = ""
+
+
+def hidden_case_count(task: BoardTask) -> int:
+    import re
+    return sum(len(re.findall(r"^TEST_CASE\(", c, re.M)) for c in task.hidden_files().values())
+
+
+def judge_on_board(task: BoardTask, profile: HardwareProfile, judge: RuleSet | None, idf: IdfEnv | None, board,
+                   files: dict[str, str], build_dir: Path, log_path: Path | None) -> JudgeResult:
+    """files：被测代码（相对 main/ 的路径 → 内容），公共头文件一律用题目自带的（Agent 改了也不算）。"""
+    total = hidden_case_count(task)
+    files = {k: v for k, v in files.items() if k not in task.public_files()}
+    comp = check_code(files, judge.select(None, "approved") if judge is not None else [])
+    if not comp.ok:
+        return JudgeResult("fail", "compliance", 0, total, [], comp.summary())
+    if idf is None:
+        return JudgeResult("skipped", "skipped", 0, total, [], "ESP-IDF 不可用，没有编译")
+    proj = IdfProject(Path(build_dir), idf, target=str(profile.chip.value),
+                      requires=DEFAULT_REQUIRES + TEST_REQUIRES + task.requires, whole_archive=True)
+    proj.write(profile, {**task.public_files(), **files, **task.hidden_files(), **harness_files(judge, None)})
+    b = proj.build()
+    if not b.ok:
+        return JudgeResult("fail", "build", 0, total, ["编译失败"],
+                           "\n".join(d.render() for d in b.errors) or b.log_tail[-800:])
+    if board is None:
+        return JudgeResult("skipped", "skipped", 0, total, [], "没有板子，只编译了")
+    r = board.run(proj, log_path)
+    if r.verdict() == "skipped":
+        return JudgeResult("skipped", "skipped", 0, total, [], r.report())
+    passed = sum(1 for c in r.cases if c.status == "pass")
+    return JudgeResult(r.verdict(), "" if r.ok else "board_test", passed, total, [c.name for c in r.failed], r.report())
+
+
 def check_with_board(task: BoardTask, profile: HardwareProfile, rules: RuleSet | None, idf: IdfEnv, board,
                      build_root: Path, log_dir: Path, only_reference: bool = False) -> list[BoardVariantResult]:
     """标准答案必须通过全部隐藏用例；每个 expect_fail = board_test 的变异体至少一个用例失败。
-    board：target.board.BoardRunner。串口日志存在 log_dir/<题目>/<变体>.log。"""
+    board：target.board.BoardRunner。串口日志存在 log_dir/<题目>/<变体>.log。
+    这里跑的变体（标准答案、board_test 类变异体）都应通过合规检查，合规预期另在没有板子的自检里判。"""
     variants = [("reference", "pass", task.reference_files())]
     if not only_reference:
         variants += [(m.file, m.expect_fail, task.mutant_files(m)) for m in task.mutants if m.expect_fail == "board_test"]
-    proj = IdfProject(Path(build_root) / f"{task.id}-{profile.chip.value}-board", idf, target=str(profile.chip.value),
-                      requires=DEFAULT_REQUIRES + TEST_REQUIRES + task.requires, whole_archive=True)
     out = []
     for name, expect, files in variants:
-        proj.write(profile, {**task.public_files(), **files, **task.hidden_files(), **harness_files(rules, None)})
-        b = proj.build()
-        if not b.ok:
-            out.append(BoardVariantResult(name, expect, "fail", ["编译失败"],
-                                          "\n".join(d.render() for d in b.errors) or b.log_tail[-800:]))
-            continue
-        r = board.run(proj, Path(log_dir) / task.id / f"{name}.log")
-        out.append(BoardVariantResult(name, expect, r.verdict(), [c.name for c in r.failed], r.report()))
+        j = judge_on_board(task, profile, rules, idf, board, files,
+                           Path(build_root) / f"{task.id}-{profile.chip.value}-board", Path(log_dir) / task.id / f"{name}.log")
+        out.append(BoardVariantResult(name, expect, j.verdict, j.failed_cases, j.report))
     return out

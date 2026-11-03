@@ -1,0 +1,280 @@
+"""上板评测运行器（DECISIONS 第 69 条 B 方向）：同一批上板题，在几种配置下各跑几次，用同一把尺子打分。
+
+配置（每一级只比上一级多一样东西，便于说明"多出来的效果来自哪里"）：
+- single：单 Agent 基线。一个编码 Agent，不给规则、不写测试，只把编译错误反馈给它，最多 max_attempts 次；
+- none：多 Agent 流程（编码、测试 Agent 上板测试、诊断修正），不给规则；
+- unverified：再加上查资料 Agent 当场提炼、没有核对的规则；
+- verified：改用经过规则判定器核对、人工确认过的规则库（事先用 `firmforge rules build` 建好）。
+
+判定（所有配置相同，Agent 看不到）：固定判定规则 tasks_board/judge_rules.json 的合规检查 → 编译 →
+上板跑隐藏测试（board_task.judge_on_board）。公共头文件一律用题目自带的。
+
+记录：每次运行一行写进 <out>/runs.jsonl（中断后重跑会跳过已有的组合），汇总写 summary.md 和 runs.csv。
+verified 模式要求规则库覆盖题目的每个适用范围，否则这次记为 skipped 并写明原因，不会临时去查资料或等人确认。
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable
+
+from .. import config
+from ..agents.registry import Registry, default_registry
+from ..grounding.profile import HardwareProfile
+from ..grounding.rules import RuleSet
+from ..grounding.sources import SourceLibrary
+from ..llm import CallLogger
+from ..orchestrator.dag import declared_functions
+from ..orchestrator.events import EventBus
+from ..runs import RunDir
+from ..target.esp_idf import DEFAULT_REQUIRES, IdfEnv, IdfProject
+from ..target.harness import TEST_REQUIRES, harness_files
+from .board_task import BoardTask, JudgeResult, hidden_case_count, judge_on_board
+from .design import Design, DesignModule
+from .flow import EmbeddedFlow, FlowResult, _Agents
+from .roles import coder_messages, coder_repair_message, parse_output
+
+CONFIGS = ("single", "none", "unverified", "verified")
+CSV_FIELDS = ("task", "config", "run", "verdict", "failed_layer", "cases_passed", "cases_total", "failed_cases",
+              "flow_verdict", "attempts", "tokens", "cost", "seconds", "rules_used", "run_dir", "note")
+
+
+def task_design(task: BoardTask) -> Design:
+    """评测题的固定设计：一个硬件层模块，编号取公共头文件名，文件就是标准答案的那几个 .c 文件。"""
+    headers = task.public_files()
+    if len(headers) != 1:
+        raise ValueError(f"{task.id}：评测题只能有一个公共头文件，现在有 {len(headers)} 个")
+    (hpath, htext), = headers.items()
+    mid = Path(hpath).stem
+    files = tuple(sorted(p for p in task.reference_files() if p.endswith(".c")))
+    return Design([DesignModule(mid, task.title, "hardware", files, tuple(declared_functions(htext)),
+                                task.scopes or ("all",))])
+
+
+def parse_configs(text: str) -> list[str]:
+    out = [c.strip() for c in text.split(",") if c.strip()]
+    bad = [c for c in out if c not in CONFIGS]
+    if bad:
+        raise ValueError(f"未知的配置 {', '.join(bad)}，只能是 {', '.join(CONFIGS)}")
+    return out
+
+
+def missing_scopes(rules: RuleSet, scopes: tuple[str, ...]) -> list[str]:
+    """规则库里没有已确认规则的适用范围（verified 模式的前提）。"""
+    return [s for s in scopes if s != "all" and not [r for r in rules.select({s}, "approved") if s in r.scope]]
+
+
+@dataclass
+class EvalContext:
+    llm: object
+    settings: config.Settings
+    profile: HardwareProfile
+    judge: RuleSet
+    rules: RuleSet                       # verified 模式用的规则库（每次运行拷贝一份，互不影响）
+    library: SourceLibrary | None
+    idf: IdfEnv | None
+    board: object | None                 # target.board.BoardRunner
+    runs_root: Path
+    build_root: Path
+    max_attempts: int = 6
+    registry: Registry | None = None
+    secrets: tuple[str, ...] = ()
+    subscribers: tuple[Callable[[dict], None], ...] = ()
+    judge_fn: Callable[..., JudgeResult] = judge_on_board      # 单元测试里换成假的判定
+
+
+@dataclass
+class EvalRow:
+    task: str
+    config: str
+    run: int
+    verdict: str = "fail"                # pass / fail / skipped（评测判定）
+    failed_layer: str = ""
+    cases_passed: int = 0
+    cases_total: int = 0
+    failed_cases: list[str] = field(default_factory=list)
+    flow_verdict: str = ""               # 流程自己的结论（它自己的测试是否通过），和评测判定对照
+    attempts: int = 0
+    tokens: int = 0
+    cost: float = 0.0
+    seconds: float = 0.0
+    rules_used: int = 0
+    run_dir: str = ""
+    note: str = ""
+
+    def to_dict(self) -> dict:
+        return {k: getattr(self, k) for k in CSV_FIELDS}
+
+
+# ---------------------------------------------------------------- 单 Agent 基线
+
+def run_single(task: BoardTask, ctx: EvalContext, name: str) -> tuple[FlowResult, dict[str, str], int]:
+    """一个编码 Agent，只看编译错误。返回 (结果, 最后的代码, 尝试次数)。"""
+    design = task_design(task)
+    m = design.modules[0]
+    rd = RunDir.create(ctx.runs_root, name)
+    bus = EventBus(rd.run_id, rd.events_path)
+    for s in ctx.subscribers:
+        bus.subscribe(s)
+    res = FlowResult(rd.path)
+    agents = _Agents(ctx.llm, ctx.settings, ctx.registry or default_registry(), bus,
+                     CallLogger(rd.path, list(ctx.secrets)), res, None)
+    bus.emit("run_started", None, task=task.id, config="embedded/single", board=ctx.profile.board.value)
+    header = task.public_files()[m.header]
+    msgs = coder_messages(task.spec_path.read_text(encoding="utf-8"), ctx.profile, None, design, m, {},
+                          locked_header=header)
+    files: dict[str, str] = {}
+    proj = (IdfProject(ctx.build_root / f"{rd.run_id}-single", ctx.idf, target=str(ctx.profile.chip.value),
+                       requires=DEFAULT_REQUIRES + TEST_REQUIRES + task.requires) if ctx.idf is not None else None)
+    attempt = 0
+    for attempt in range(1, ctx.max_attempts + 1):
+        resp = agents.call("coder-strong", msgs, m.id, attempt=attempt, purpose="编码" if attempt == 1 else "改代码")
+        files.update(parse_output(resp.text, set(m.files)).files)
+        msgs = msgs + [{"role": "assistant", "content": resp.text}]
+        if proj is None:
+            break
+        # 带上平台的测试主程序（没有用例），否则缺 app_main 链接不过，Agent 会收到和它的代码无关的报错
+        proj.write(ctx.profile, {**task.public_files(), **files, **harness_files(None, None)})
+        b = proj.build()
+        bus.emit("verify_finished", m.id, attempt=attempt, scope="build", ok=b.ok, failed_layer=None if b.ok else "build")
+        if b.ok:
+            res.verdict = "pass"
+            break
+        errs = "\n".join(d.render() for d in b.errors) or b.log_tail[-1500:]
+        if attempt < ctx.max_attempts:
+            msgs = msgs + [{"role": "user", "content": coder_repair_message(attempt, ctx.max_attempts, "编译失败：\n" + errs)}]
+    rd.write_json("run.json", {"verdict": res.verdict, "rule_mode": "single", "tokens": res.prompt_tokens +
+                               res.completion_tokens, "cost": round(res.cost, 6), "attempts": attempt})
+    bus.emit("run_finished", None, verdict=res.verdict, tokens=res.prompt_tokens + res.completion_tokens, error="")
+    return res, files, attempt
+
+
+# ---------------------------------------------------------------- 一次运行
+
+def run_once(task: BoardTask, cfg: str, run_no: int, ctx: EvalContext) -> EvalRow:
+    row = EvalRow(task.id, cfg, run_no, cases_total=hidden_case_count(task))
+    t0 = time.time()
+    name = f"eval-{task.id}-{cfg}-{run_no}"
+    if cfg == "verified":
+        miss = missing_scopes(ctx.rules, task.scopes)
+        if miss:
+            row.verdict, row.failed_layer = "skipped", "skipped"
+            row.note = f"规则库里没有这些范围的已确认规则：{'、'.join(miss)}（先用 firmforge rules build 建好并人工确认）"
+            return row
+    if cfg == "single":
+        res, files, attempts = run_single(task, ctx, name)
+    else:
+        design = task_design(task)
+        rules = RuleSet(list(ctx.rules)) if cfg == "verified" else RuleSet()
+        flow = EmbeddedFlow(llm=ctx.llm, settings=ctx.settings, profile=ctx.profile,
+                            spec=task.spec_path.read_text(encoding="utf-8"), rules=rules,
+                            library=ctx.library if cfg != "none" else None, verifier=None, runs_root=ctx.runs_root,
+                            name=name, rule_mode=cfg, idf=ctx.idf, board=ctx.board, registry=ctx.registry,
+                            max_attempts=ctx.max_attempts, subscribers=ctx.subscribers, secrets=ctx.secrets,
+                            design=design, locked=task.public_files(), extra_requires=task.requires,
+                            build_rules=False)
+        res = flow.run()
+        mr = res.modules.get(design.modules[0].id)
+        files = dict(mr.files) if mr else {}
+        attempts = mr.attempts if mr else 0
+        row.rules_used = len(res.rules_used)
+    row.flow_verdict = res.verdict + (f"（{res.error}）" if res.error else "")
+    row.attempts, row.tokens, row.cost = attempts, res.prompt_tokens + res.completion_tokens, round(res.cost, 6)
+    row.run_dir = str(res.run_dir)
+    if not files:
+        row.verdict, row.failed_layer, row.note = "fail", "no_code", "Agent 没有交出代码"
+    else:
+        j: JudgeResult = ctx.judge_fn(task, ctx.profile, ctx.judge, ctx.idf, ctx.board, files,
+                                        ctx.build_root / f"{name}-judge", Path(res.run_dir) / "judge_serial.log")
+        row.verdict, row.failed_layer = j.verdict, j.failed_layer
+        row.cases_passed, row.cases_total, row.failed_cases = j.cases_passed, j.cases_total, j.failed_cases
+        (Path(res.run_dir) / "judge_report.txt").write_text(j.report, encoding="utf-8")
+        if j.verdict == "skipped":
+            row.note = j.report[:200]
+    row.seconds = round(time.time() - t0, 1)
+    return row
+
+
+# ---------------------------------------------------------------- 批量与汇总
+
+def load_rows(out_dir: Path) -> list[dict]:
+    p = Path(out_dir) / "runs.jsonl"
+    if not p.is_file():
+        return []
+    return [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Path, ctx: EvalContext,
+             progress: Callable[[str], None] = print) -> list[dict]:
+    """按 题目 × 配置 × 次数 跑；已经在 runs.jsonl 里的组合跳过（skipped 的会重跑）。"""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows = load_rows(out_dir)
+    done = {(r["task"], r["config"], r["run"]) for r in rows if r["verdict"] != "skipped"}
+    rows = [r for r in rows if r["verdict"] != "skipped"]
+    todo = [(t, c, n) for n in range(1, runs + 1) for t in tasks for c in configs if (t.id, c, n) not in done]
+    progress(f"共 {len(todo)} 次运行要跑（已完成 {len(done)} 次）")
+    for k, (t, c, n) in enumerate(todo, 1):
+        row = run_once(t, c, n, ctx).to_dict()
+        rows.append(row)
+        with (out_dir / "runs.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        cases = f"隐藏用例 {row['cases_passed']}/{row['cases_total']}"
+        progress(f"[{k}/{len(todo)}] {t.id} · {c} · 第 {n} 次：{row['verdict']}"
+                 + (f"（{row['failed_layer']}）" if row["failed_layer"] else "")
+                 + f"，{cases}，{row['tokens']} token，{row['cost']:.4f} 元，{row['seconds']:.0f} 秒"
+                 + (f"；{row['note']}" if row["note"] else ""))
+    write_outputs(rows, out_dir, configs)
+    return rows
+
+
+def write_outputs(rows: list[dict], out_dir: Path, configs: list[str]) -> None:
+    with (Path(out_dir) / "runs.csv").open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        w.writeheader()
+        for r in rows:
+            w.writerow({**r, "failed_cases": "；".join(r["failed_cases"])})
+    (Path(out_dir) / "summary.md").write_text(summarize(rows, configs), encoding="utf-8")
+
+
+def summarize(rows: list[dict], configs: list[str] | None = None) -> str:
+    configs = configs or sorted({r["config"] for r in rows}, key=lambda c: CONFIGS.index(c) if c in CONFIGS else 99)
+    lines = ["# 上板评测汇总", "",
+             "判定：固定判定规则的合规检查 → 编译 → 上板隐藏测试（所有配置相同）。skipped 不计入通过率。", "",
+             "| 配置 | 通过 / 有效次数 | 通过率 | 隐藏用例通过率 | 平均尝试次数 | 平均 token | 平均成本（元） | 平均用时（秒） | 跳过 |",
+             "|---|---|---|---|---|---|---|---|---|"]
+    for c in configs:
+        rs = [r for r in rows if r["config"] == c]
+        valid = [r for r in rs if r["verdict"] != "skipped"]
+        skipped = len(rs) - len(valid)
+        if not valid:
+            lines.append(f"| {c} | 0 / 0 | - | - | - | - | - | - | {skipped} |")
+            continue
+        passes = sum(1 for r in valid if r["verdict"] == "pass")
+        cp, ct = sum(r["cases_passed"] for r in valid), sum(r["cases_total"] for r in valid)
+        avg = lambda k: sum(float(r[k]) for r in valid) / len(valid)       # noqa: E731
+        lines.append(f"| {c} | {passes} / {len(valid)} | {passes / len(valid):.0%} | "
+                     f"{(cp / ct if ct else 0):.0%} | {avg('attempts'):.1f} | {avg('tokens'):.0f} | "
+                     f"{avg('cost'):.4f} | {avg('seconds'):.0f} | {skipped} |")
+    tasks = sorted({r["task"] for r in rows})
+    lines += ["", "## 每道题（通过次数 / 有效次数）", "", "| 题目 | " + " | ".join(configs) + " |",
+              "|---|" + "---|" * len(configs)]
+    for t in tasks:
+        cells = []
+        for c in configs:
+            rs = [r for r in rows if r["task"] == t and r["config"] == c and r["verdict"] != "skipped"]
+            cells.append(f"{sum(1 for r in rs if r['verdict'] == 'pass')} / {len(rs)}" if rs else "-")
+        lines.append(f"| {t} | " + " | ".join(cells) + " |")
+    layers: dict[tuple[str, str], int] = {}
+    for r in rows:
+        if r["verdict"] == "fail":
+            layers[(r["config"], r["failed_layer"] or "?")] = layers.get((r["config"], r["failed_layer"] or "?"), 0) + 1
+    if layers:
+        lines += ["", "## 没通过的卡在哪一层", "", "| 配置 | 层 | 次数 |", "|---|---|---|"]
+        for (c, layer), n in sorted(layers.items(), key=lambda x: (configs.index(x[0][0]) if x[0][0] in configs else 99, x[0][1])):
+            lines.append(f"| {c} | {layer} | {n} |")
+    return "\n".join(lines) + "\n"

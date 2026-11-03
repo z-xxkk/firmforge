@@ -14,6 +14,9 @@
 - verified：完整流程（默认）
 - unverified：查资料 Agent 提出的规则不经核对、不经人工，直接当作已确认使用
 - none：不查资料、不给规则（相当于通用编程 Agent）
+
+评测（embedded/board_eval.py）另外传入：固定的设计（按题目公共接口生成，不经设计 Agent）、锁定的公共头文件
+（编码 Agent 只读）、事先建好的规则库（verified 模式不再查资料和等人确认，build_rules=False）。
 """
 
 from __future__ import annotations
@@ -72,6 +75,7 @@ class FlowResult:
     rules_used: list[str] = field(default_factory=list)
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cost: float = 0.0                   # 元，按配置里的模型价格估算
     error: str = ""
 
 
@@ -97,12 +101,14 @@ class _Agents:
             allowed = [t for t in reg.all() if t.name in {x.name for x in SOURCE_TOOLS}]
             pipe = ToolPipeline(reg, allowed=allowed, ctx=ToolContext(agent=agent.name, library=self.library),
                                 emit=self.bus.emit, node_id=node)
-            resp = call_with_tools(lambda m, t: client.complete(m, tools=t, **params), messages, allowed, pipe,
+            resp = call_with_tools(lambda m, tools: client.complete(m, tools=tools, **params), messages, allowed, pipe,
                                    max_rounds=int(self.settings.tools.get("max_rounds", 5)))
         else:
             resp = client.complete(messages, **params)
         self.result.prompt_tokens += resp.prompt_tokens
         self.result.completion_tokens += resp.completion_tokens
+        self.result.cost += tier.cost(resp.prompt_tokens, resp.completion_tokens, ts=time.time(),
+                                      schedule=self.settings.pricing)
         self.bus.emit("agent_finished", node, agent=agent.name, role=agent.role, attempt=attempt,
                       tokens=resp.prompt_tokens + resp.completion_tokens, latency_s=round(resp.latency_s, 3))
         return resp
@@ -114,12 +120,14 @@ class EmbeddedFlow:
                  rule_mode: str = "verified", human: Human | None = None, idf: IdfEnv | None = None,
                  board: BoardRunner | None = None, registry: Registry | None = None, max_attempts: int = 6,
                  subscribers: tuple[Callable[[dict], None], ...] = (), secrets: tuple[str, ...] = (),
-                 coder: str = "coder-strong"):
+                 coder: str = "coder-strong", design: Design | None = None, locked: dict[str, str] | None = None,
+                 extra_requires: tuple[str, ...] = (), build_rules: bool = True):
         if rule_mode not in RULE_MODES:
             raise ValueError(f"规则模式只能是 {', '.join(RULE_MODES)}")
         self.profile, self.spec, self.rules, self.library, self.verifier = profile, spec, rules, library, verifier
         self.rule_mode, self.human, self.idf, self.board, self.max_attempts = rule_mode, human, idf, board, max_attempts
-        self.coder = coder
+        self.coder, self.fixed_design, self.locked = coder, design, dict(locked or {})
+        self.extra_requires, self.build_rules = tuple(extra_requires), build_rules
         self.rd = RunDir.create(runs_root, name)
         self.bus = EventBus(self.rd.run_id, self.rd.events_path)
         for s in subscribers:
@@ -132,13 +140,18 @@ class EmbeddedFlow:
     def _rules_for_flow(self) -> RuleSet:
         if self.rule_mode == "none":
             return RuleSet()
-        scopes = sorted(self.profile.scopes())
+        if self.fixed_design is not None:              # 评测：只查本题涉及的外设和器件
+            scopes = sorted({x for m in self.fixed_design.modules for x in m.scopes} - {"all"})
+        else:
+            scopes = sorted(self.profile.scopes())
         if self.rule_mode == "unverified":
             resp = self.agents.call("researcher", research_messages(self.profile, scopes, self.library),
                                     "rules", purpose="提炼规则（不核对）", tools=True)
             rules, _ = parse_rules(resp.text)
             return RuleSet([replace(r, status="approved", notes=r.notes + ("规则模式 unverified：未核对",))
                             for r in rules])
+        if not self.build_rules:
+            return self.rules
         builder = RuleBuilder(self._research_with_tools, self.profile, self.library, self.verifier, self.rules,
                               emit=self.bus.emit, human=self.human)
         builder.run(scopes)
@@ -153,10 +166,17 @@ class EmbeddedFlow:
                                extra_body=tier.extra_body(agent.thinking) or None)
         self.result.prompt_tokens += resp.prompt_tokens
         self.result.completion_tokens += resp.completion_tokens
+        self.result.cost += tier.cost(resp.prompt_tokens, resp.completion_tokens, ts=time.time(),
+                                      schedule=self.agents.settings.pricing)
         return resp
 
     # ---------------------------------------------------------------- 设计
     def _design(self, rules: RuleSet) -> Design | None:
+        if self.fixed_design is not None:
+            self.rd.write_json("design.json", self.fixed_design.to_dict())
+            self.bus.emit("plan_ready", "design", modules=[m.to_dict() for m in self.fixed_design.modules],
+                          app=self.fixed_design.app, fixed=True)
+            return self.fixed_design
         msgs = designer_messages(self.spec, self.profile, rules)
         for k in range(1, MAX_DESIGN_TRIES + 1):
             resp = self.agents.call("designer", msgs, "design", attempt=k, purpose="设计分层")
@@ -171,7 +191,7 @@ class EmbeddedFlow:
 
     # ---------------------------------------------------------------- 模块
     def _dep_headers(self, design: Design, m: DesignModule) -> dict[str, str]:
-        out = {}
+        out = {p: c for p, c in self.locked.items() if p != m.header}
         for d in m.depends_on:
             dm = self.result.modules.get(d)
             if dm and design.by_id[d].header in dm.files:
@@ -195,7 +215,7 @@ class EmbeddedFlow:
             return "fail", "compliance", comp.summary()
         deps = self._dep_files(design, m)
         if m.layer == "logic":
-            r = run_host_tests({**deps, **mr.files, **mr.tests}, test_file(m), self.rd.path / "host" / m.id)
+            r = run_host_tests({**self.locked, **deps, **mr.files, **mr.tests}, test_file(m), self.rd.path / "host" / m.id)
             self.bus.emit("verify_finished", m.id, attempt=attempt, scope="host_test", ok=r.ok,
                           failed_layer=None if r.ok else ("skipped" if r.skipped else "host_test"))
             return r.verdict(), "host_test", r.report()
@@ -203,9 +223,9 @@ class EmbeddedFlow:
             return "skipped", "build", "ESP-IDF 不可用，硬件层无法编译和上板测试"
         proj = IdfProject(Path(config.project_root()) / ".ff_data" / "idf_build" / f"{self.rd.run_id}-{m.id}", self.idf,
                           target=str(self.profile.chip.value),
-                          requires=DEFAULT_REQUIRES + TEST_REQUIRES, whole_archive=True)
+                          requires=DEFAULT_REQUIRES + TEST_REQUIRES + self.extra_requires, whole_archive=True)
         svd = getattr(self.verifier, "svd", None)
-        proj.write(self.profile, {**deps, **mr.files, **mr.tests, **harness_files(rules, svd, scopes)})
+        proj.write(self.profile, {**self.locked, **deps, **mr.files, **mr.tests, **harness_files(rules, svd, scopes)})
         self.bus.emit("verify_started", m.id, attempt=attempt, scope="build")
         b = proj.build()
         self.bus.emit("verify_finished", m.id, attempt=attempt, scope="build", ok=b.ok,
@@ -233,12 +253,13 @@ class EmbeddedFlow:
         self.result.modules[m.id] = mr
         self.bus.emit("node_ready", m.id, title=m.title, layer=m.layer)
         deps_h = self._dep_headers(design, m)
-        c_msgs = coder_messages(self.spec, self.profile, rules, design, m, deps_h)
+        c_msgs = coder_messages(self.spec, self.profile, rules, design, m, deps_h,
+                                locked_header=self.locked.get(m.header))
         cr = self.agents.call(self.coder, c_msgs, m.id, purpose="编码", tools=self.rule_mode != "none")
         out = parse_output(cr.text, set(m.files))
         mr.files.update(out.files)
         self._new_facts(out.facts)
-        header = mr.files.get(m.header, "")
+        header = self.locked.get(m.header) or mr.files.get(m.header, "")
         t_msgs = tester_messages(self.spec, self.profile, rules, m, header, deps_h)
         tr = self.agents.call("tester", t_msgs, m.id, purpose="写测试")
         mr.tests.update(parse_output(tr.text, {test_file(m)}).files)
@@ -342,6 +363,7 @@ class EmbeddedFlow:
                                         "rules_used": res.rules_used,
                                         "modules": {k: v.verdict for k, v in res.modules.items()},
                                         "tokens": res.prompt_tokens + res.completion_tokens,
+                                        "cost": round(res.cost, 6),
                                         "seconds": round(time.time() - t0, 1)})
         self.bus.emit("run_finished", None, verdict=res.verdict, tokens=res.prompt_tokens + res.completion_tokens,
                       error=res.error)

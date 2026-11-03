@@ -49,6 +49,16 @@ class BoardTasksTest(unittest.TestCase):
                     self.assertEqual(v.compliance_ok, v.expect != "compliance", f"{v.name}：{v.problems}")
                     self.assertIsNone(v.build_ok)                              # 没有 ESP-IDF 时不编译
 
+    def test_source_manifests_are_valid(self):
+        # 资料清单每一项的等级、类型、网址白名单都合格（不需要原件；第 89 条加的资料曾因等级标错导致读不进来）
+        import tomllib
+        from firmforge.grounding.sources import Document
+        for manifest in sorted((ROOT / "hardware").glob("*/sources.toml")):
+            for d in tomllib.loads(manifest.read_text(encoding="utf-8")).get("doc", []):
+                with self.subTest(manifest=manifest.parent.name, doc=d.get("id")):
+                    Document(d["id"], d["title"], d["kind"], d["tier"], d.get("url", ""), d.get("version", ""))
+                    self.assertTrue(d.get("file") and d.get("sha256"))
+
     def test_bad_task_toml(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:

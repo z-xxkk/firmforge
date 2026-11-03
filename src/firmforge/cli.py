@@ -829,6 +829,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-board", action="store_true", help="不上板，硬件层只做到编译和合规检查")
     s.add_argument("--runs-dir", default=DEFAULT_RUNS_DIR)
     s.set_defaults(func=cmd_firmware)
+    s = sub.add_parser("board-eval", help="上板评测：上板题 × 配置（single/none/unverified/verified）× 次数（调用模型）")
+    s.add_argument("--configs", default="single,none,unverified,verified", help="配置列表，逗号分隔（默认四种都跑）")
+    s.add_argument("--tasks", default="all", help="all 或题目 id 列表，逗号分隔")
+    s.add_argument("--runs", type=int, default=3, help="每个组合跑几次（默认 3）")
+    s.add_argument("--out", required=True, help="输出目录，如 results/board_first；中断后用同一目录重跑会接着跑")
+    s.add_argument("--hw", default="hardware/esp32c3_supermini", help="硬件目录（含 profile.json、sources.toml、rules.json）")
+    s.add_argument("--tasks-dir", default="tasks_board")
+    s.add_argument("--port", help="板子串口（默认自动找）")
+    s.add_argument("--no-board", action="store_true", help="不上板（判定只做到编译，结果全部记为 skipped）")
+    s.add_argument("--max-attempts", type=int, default=6, help="每个模块最多尝试几次（默认 6）")
+    s.add_argument("--plan", action="store_true", help="只列出要跑多少次、verified 缺哪些规则，不调用模型")
+    s.set_defaults(func=cmd_board_eval)
     s = sub.add_parser("rules", help="硬件规则：build 查资料提炼并核对（调用模型、需人工确认）；list 列出；verify 重新核对")
     s.add_argument("action", choices=["build", "list", "verify"])
     s.add_argument("--hw", default="hardware/esp32c3_supermini", help="硬件目录（含 profile.json、sources.toml）")
@@ -1026,6 +1038,49 @@ def cmd_firmware(args) -> int:
     for mid, mr in res.modules.items():
         print(f"- {mid}（{mr.layer}）：{mr.verdict}，尝试 {mr.attempts} 次")
     return VERDICT_EXIT.get(res.verdict, EXIT_FAIL)
+
+
+def cmd_board_eval(args) -> int:
+    """上板评测（DECISIONS 第 69 条 B 方向）：同一批上板题在几种配置下各跑几次，用固定判定规则和隐藏测试打分。"""
+    from .embedded.board_eval import EvalContext, evaluate, missing_scopes, parse_configs
+    from .embedded.board_task import discover_board_tasks, judge_rules, load_board_task
+    from .target.board import BoardRunner
+    from .target.esp_idf import IdfEnv, IdfUnavailable
+    try:
+        configs = parse_configs(args.configs)
+    except ValueError as exc:
+        raise UsageError(str(exc)) from exc
+    if args.runs < 1:
+        raise UsageError("--runs 至少为 1")
+    root = Path(args.tasks_dir)
+    tasks = (discover_board_tasks(root) if args.tasks == "all"
+             else [load_board_task(root / t.strip()) for t in args.tasks.split(",") if t.strip()])
+    hwdir, profile, library, store, _, _ = _hw_context(args.hw, need_sources="unverified" in configs)
+    print(f"{len(tasks)} 道题 × {len(configs)} 种配置 × {args.runs} 次 = {len(tasks) * len(configs) * args.runs} 次运行")
+    if "verified" in configs:
+        for t in tasks:
+            miss = missing_scopes(store, t.scopes)
+            if miss:
+                print(f"  verified 会跳过 {t.id}：{hwdir / 'rules.json'} 里没有 {'、'.join(miss)} 的已确认规则")
+    if args.plan:
+        return EXIT_PASS
+    try:
+        idf = IdfEnv.load(want_version=str(profile.framework_version.value))
+    except IdfUnavailable as exc:
+        raise UsageError(f"上板评测需要 ESP-IDF：{exc}") from exc
+    board = None if args.no_board else BoardRunner(idf, args.port)
+    if board is not None and board.port is None:
+        raise UsageError("找不到板子的串口，请插上板子或用 --port 指定（只想编译就加 --no-board）")
+    settings = config.load_settings()
+    ctx = EvalContext(llm=make_llm(settings), settings=settings, profile=profile, judge=judge_rules(root, profile),
+                      rules=store, library=library, idf=idf, board=board, runs_root=Path(DEFAULT_RUNS_DIR),
+                      build_root=Path(".ff_data") / "idf_build", max_attempts=args.max_attempts,
+                      secrets=_secrets(settings))
+    out = Path(args.out)
+    evaluate(tasks, configs, args.runs, out, ctx)
+    print(f"\n汇总：{out / 'summary.md'}\n明细：{out / 'runs.csv'}")
+    print((out / "summary.md").read_text(encoding="utf-8"))
+    return EXIT_PASS
 
 
 def cmd_check_board_tasks(args) -> int:
