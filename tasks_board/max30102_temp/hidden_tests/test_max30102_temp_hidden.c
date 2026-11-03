@@ -1,5 +1,7 @@
 /* 隐藏测试：只有评测流程能读。零下温度在室温板子上测不到，所以单独测换算函数。 */
 #include <math.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "unity.h"
 #include "hw_config.h"
 #include "ff_test.h"
@@ -34,6 +36,23 @@ TEST_CASE("板上读出的温度合理，且是 1/16 °C 的整数倍", "[max301
     ff_log("温度 %.4f / %.4f C", t, t2);
     TEST_ASSERT_TRUE(t > 15.0f && t < 45.0f);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, roundf(t * 16.0f), t * 16.0f);
+    TEST_ASSERT_EQUAL(ESP_OK, i2c_del_master_bus(bus));
+}
+
+TEST_CASE("复位器件后第一次读数合理（要等测量真正完成）", "[max30102_temp]")
+{
+    i2c_master_bus_handle_t bus = bus_new();
+    i2c_device_config_t dc = {.dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = FF_PPG_ADDR, .scl_speed_hz = 100000};
+    i2c_master_dev_handle_t dev;
+    TEST_ASSERT_EQUAL(ESP_OK, i2c_master_bus_add_device(bus, &dc, &dev));
+    uint8_t reset[2] = {0x09, 0x40};                              /* 软复位：温度寄存器回到 0 */
+    TEST_ASSERT_EQUAL(ESP_OK, i2c_master_transmit(dev, reset, 2, 50));
+    vTaskDelay(pdMS_TO_TICKS(20));
+    i2c_master_bus_rm_device(dev);
+    float t = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, ppg_temp_read(bus, &t));
+    ff_log("复位后第一次读数 %.4f C", t);
+    TEST_ASSERT_TRUE(t > 15.0f && t < 45.0f);
     TEST_ASSERT_EQUAL(ESP_OK, i2c_del_master_bus(bus));
 }
 

@@ -4,8 +4,8 @@ MPU6050 每产生一次"数据就绪"中断，就读一组数据，按下面的�
 
 ## 硬件
 
-- MPU6050：地址 `FF_IMU_ADDR`（0x68），INT 脚接 `FF_PIN_IMU_INT`（GPIO7），I2C 总线由调用方创建好传入；
-- UART1：TX `FF_PIN_UART1_TX`（GPIO10）、RX `FF_PIN_UART1_RX`（GPIO11），115200 bps、8N1，不用 RTS/CTS。
+- MPU6050：地址 `FF_IMU_ADDR`（0x68），INT 脚接 `FF_PIN_IMU_INT`，I2C 总线由调用方创建好传入；
+- UART1：TX `FF_PIN_UART1_TX`、RX `FF_PIN_UART1_RX`，115200 bps、8N1，不用 RTS/CTS。
 
 ## 接口（`include/logger.h`，不能修改）
 

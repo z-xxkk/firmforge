@@ -18,7 +18,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..grounding.profile import HardwareProfile
+from ..grounding.profile import HardwareProfile, param_macro
 
 DEFAULT_IDF = Path.home() / "esp" / "esp-idf-v6.1"
 BUILD_TIMEOUT_S = 900
@@ -104,6 +104,13 @@ def hw_config_header(profile: HardwareProfile) -> str:
     for d in profile.devices:
         if d.address is not None:
             lines.append(f"#define FF_{d.name.upper()}_ADDR 0x{d.address:02X}  /* {d.part} */")
+        for k, f in sorted(d.params.items()):
+            v = f.value
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                continue                                   # 只有数值能写成宏
+            text = f"0x{v:02X}" if isinstance(v, int) else f"{v!r}f"
+            note = f.note[:120].replace("*/", "")
+            lines.append(f"#define {param_macro(d.name, k)} {text}  /* {f.origin}：{note} */")
     return "\n".join(lines) + "\n"
 
 

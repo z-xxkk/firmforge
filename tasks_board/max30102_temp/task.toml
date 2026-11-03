@@ -24,3 +24,9 @@ file = "resets_device.c"
 replaces = "max30102_temp.c"
 expect_fail = "board_test"
 why = "读温度前复位器件，冲掉了别的配置（规则 10.3）"
+
+[[mutants]]
+file = "polls_temp_en.c"
+replaces = "max30102_temp.c"
+expect_fail = "board_test"
+why = "只等 TEMP_EN 自动清零就读（实测 0.26 ms 就清零，数据 27.5 ms 才出来），复位后第一次读到 0 °C（规则 10.1，DECISIONS 第 90 条）"

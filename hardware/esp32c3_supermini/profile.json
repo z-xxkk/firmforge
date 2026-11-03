@@ -89,6 +89,23 @@
       "address": 104,
       "pins": {
         "int": 3
+      },
+      "params": {
+        "who_am_i": {
+          "value": 112,
+          "origin": "measured",
+          "note": "2026-11-03 上板读 WHO_AM_I(0x75)=0x70，是 MPU-6500 的编号（linux-inv-mpu INV_MPU6500_WHOAMI_VALUE）；真 MPU6050 为 0x68。按 MPU6050 寄存器用法可正常读数"
+        },
+        "temp_lsb_per_c": {
+          "value": 333.87,
+          "origin": "document",
+          "note": "linux-inv-mpu INV_MPU6500_TEMP_SCALE 2995178 n°C/LSB；实测原始值 3312 换算 30.9 °C，与旁边 MAX30102 的 29.2 °C 相符"
+        },
+        "temp_offset_c": {
+          "value": 21.0,
+          "origin": "document",
+          "note": "linux-inv-mpu INV_MPU6500_TEMP_OFFSET 7011 × 0.002995178 ≈ 21.0 °C；温度 = 原始值 / temp_lsb_per_c + temp_offset_c"
+        }
       }
     },
     {

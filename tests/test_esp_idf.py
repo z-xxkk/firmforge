@@ -18,6 +18,23 @@ class HwConfigTest(unittest.TestCase):
         self.assertIn("#define FF_IMU_ADDR 0x68  /* MPU6050 */", h)
         self.assertTrue(h.startswith("/* FirmForge"))
 
+    def test_device_params(self):
+        # 器件参数（DECISIONS 第 89 条）：实测的 WHO_AM_I 和温度系数写成宏，也进 system prompt，存取不丢来源
+        import dataclasses
+        from firmforge.grounding.profile import Fact, HardwareProfile
+        base = make_profile(**{"i2c0.sda": 4})
+        imu = dataclasses.replace(base.devices[0], params={
+            "who_am_i": Fact(0x70, "measured", "上板读到 0x70 */ 注释结束符要去掉"),
+            "temp_lsb_per_c": Fact(333.87, "document", "linux-inv-mpu"), "label": Fact("仿制", "user")})
+        prof = dataclasses.replace(base, devices=(imu,))
+        h = hw_config_header(prof)
+        self.assertIn("#define FF_IMU_WHO_AM_I 0x70", h)
+        self.assertIn("#define FF_IMU_TEMP_LSB_PER_C 333.87f", h)
+        self.assertNotIn("LABEL", h)                                    # 不是数值的不写成宏
+        self.assertEqual(h.count("*/"), h.count("/*"))                  # 说明里的注释结束符不会提前结束注释
+        self.assertIn("imu.who_am_i = 0x70（实测", "\n".join(prof.summary_lines()))
+        self.assertEqual(HardwareProfile.from_dict(prof.to_dict()), prof)
+
 
 class DiagnosticsTest(unittest.TestCase):
     def test_only_main_dir(self):

@@ -110,7 +110,7 @@ esp_err_t mpu_stream_start(i2c_master_bus_handle_t bus, uint32_t rate_hz, QueueH
         return err;
     }
     uint8_t who = 0;
-    if ((err = rd(REG_WHO_AM_I, &who, 1)) == ESP_OK && who != 0x68) {
+    if ((err = rd(REG_WHO_AM_I, &who, 1)) == ESP_OK && (who != 0x68 && who != FF_IMU_WHO_AM_I)) {
         err = ESP_ERR_NOT_FOUND;
     }
     /* DLPF 开着（DLPF_CFG = 3）时陀螺输出率 1 kHz：采样率 = 1000 / (1 + SMPLRT_DIV)（RM p.12） */

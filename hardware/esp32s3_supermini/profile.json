@@ -96,6 +96,23 @@
       "address": 104,
       "pins": {
         "int": 7
+      },
+      "params": {
+        "who_am_i": {
+          "value": 104,
+          "origin": "document",
+          "note": "mpu6050-rm WHO_AM_I（0x75）= 0x68；如果模块是仿制芯片，按实测值改（DECISIONS 第 89 条）"
+        },
+        "temp_lsb_per_c": {
+          "value": 340.0,
+          "origin": "document",
+          "note": "mpu6050-rm p.31：温度 = 原始值 / 340 + 36.53"
+        },
+        "temp_offset_c": {
+          "value": 36.53,
+          "origin": "document",
+          "note": "mpu6050-rm p.31"
+        }
       }
     },
     {

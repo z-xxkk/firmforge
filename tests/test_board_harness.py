@@ -44,7 +44,7 @@ class HarnessTest(unittest.TestCase):
         self.assertNotIn("SR", h)                                          # 草稿规则不进
         files = harness_files(rs, svd)
         self.assertIn(BEGIN, files["ff_test_main.c"])
-        self.assertIn("unity_run_all_tests", files["ff_test_main.c"])
+        self.assertIn("unity_run_test_by_index", files["ff_test_main.c"])
         self.assertIn("ff_reg_read", files["include/ff_test.h"])
 
     def test_parse_ok_and_fail(self):
@@ -63,6 +63,17 @@ class HarnessTest(unittest.TestCase):
         r = parse_board_output(f"{BEGIN}\nmain/t.c:3:a:PASS\n1 Tests 0 Failures 0 Ignored\nOK\n_END\n")
         self.assertFalse(r.hang)                         # 结束标记丢了几个字节，汇总行仍可判定结束
         self.assertTrue(r.ok)
+
+    def test_one_boot_per_case(self):
+        # 每个用例单独开机（DECISIONS 第 91 条）：中间夹着重启的启动日志，开始标记只有一次，汇总在最后
+        boot = "ESP-ROM:esp32c3-api1-20210207\nrst:0x3 (RTC_SW_SYS_RST),boot:0xc (SPI_FAST_FLASH_BOOT)\nI (71) main_task: Calling app_main()\n"
+        out = (boot + "FF_TESTS_BEGIN\nRunning a...\nt.c:3:a:PASS\n" + boot + "Running b...\nt.c:9:b:FAIL: Expected 1 Was 0\n"
+               + boot + "\n-----------------------\n2 Tests 1 Failures 0 Ignored\nFAIL\nFF_TESTS_END\n")
+        r = parse_board_output(out)
+        self.assertEqual([(c.name, c.status) for c in r.cases], [("a", "pass"), ("b", "fail")])
+        self.assertEqual(r.summary, (2, 1, 0))
+        self.assertFalse(r.crash or r.hang)
+        self.assertIn("unity_get_test_count", harness_files(None, None)["ff_test_main.c"])
 
     def test_unescape_chinese_names(self):
         raw = f"{BEGIN}\n./main/t.c:9:\\xE6\\xB8\\x85\\xE9\\x9B\\xB6 ok:PASS\n1 Tests 0 Failures 0 Ignored\n{END}"

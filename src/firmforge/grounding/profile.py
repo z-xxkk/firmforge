@@ -37,6 +37,7 @@ class Device:
     bus: str                    # i2c0 / spi2 / uart1 / gpio
     address: int | None = None  # I2C 地址
     pins: dict[str, int] = field(default_factory=dict)      # 例如 {"int": 5}
+    params: dict[str, Fact] = field(default_factory=dict)   # 器件参数，例如实测的 WHO_AM_I、温度换算系数（DECISIONS 第 89 条）
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,10 @@ class HardwareProfile:
         for d in self.devices:
             addr = f"，地址 0x{d.address:02X}" if d.address is not None else ""
             lines.append(f"外接器件 {d.name}：{d.part}，总线 {d.bus}{addr}")
+            for k, f in sorted(d.params.items()):
+                v = f"0x{f.value:02X}" if isinstance(f.value, int) and not isinstance(f.value, bool) else f.value
+                note = f"；{f.note}" if f.note else ""
+                lines.append(f"  {d.name}.{k} = {v}（{_ORIGIN_ZH[f.origin]}{note}，宏 {param_macro(d.name, k)}）")
         return lines
 
     def to_dict(self) -> dict:
@@ -110,7 +115,8 @@ class HardwareProfile:
                 framework=fact(d["framework"]), framework_version=fact(d["framework_version"]),
                 pins={k: fact(v) for k, v in d.get("pins", {}).items()},
                 reserved_pins={int(k): v for k, v in d.get("reserved_pins", {}).items()},
-                devices=tuple(Device(**x) for x in d.get("devices", [])))
+                devices=tuple(Device(**{**x, "params": {k: fact(v) for k, v in x.get("params", {}).items()}})
+                              for x in d.get("devices", [])))
         except (KeyError, TypeError) as exc:
             raise ProfileError(f"硬件档案缺字段或字段不对：{exc}") from exc
 
@@ -120,6 +126,14 @@ class HardwareProfile:
     @classmethod
     def load(cls, path: Path) -> "HardwareProfile":
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+_ORIGIN_ZH = {"user": "用户提供", "document": "资料", "measured": "实测", "default": "默认值"}
+
+
+def param_macro(device: str, key: str) -> str:
+    """器件参数在 hw_config.h 里的宏名：imu + temp_offset_c → FF_IMU_TEMP_OFFSET_C。"""
+    return "FF_" + re.sub(r"[^A-Za-z0-9]", "_", f"{device}_{key}").upper()
 
 
 def _gpio_ranges(gpios: list[int]) -> str:

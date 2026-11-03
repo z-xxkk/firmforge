@@ -2,6 +2,9 @@
 #include "hw_config.h"
 #include "max30102_temp.h"
 
+#define REG_INT_STATUS2 0x01
+#define REG_INT_ENABLE2 0x03
+#define DIE_TEMP_RDY    0x02
 #define REG_TINT        0x1F
 #define REG_TFRAC       0x20
 #define REG_TEMP_CONFIG 0x21
@@ -32,16 +35,31 @@ esp_err_t ppg_temp_read(i2c_master_bus_handle_t bus, float *celsius)
     if (err != ESP_OK) {
         return err;
     }
-    uint8_t start[2] = {REG_TEMP_CONFIG, TEMP_EN};
-    uint8_t cfg = TEMP_EN, tint = 0, tfrac = 0;
-    err = i2c_master_transmit(dev, start, sizeof start, XFER_TIMEOUT_MS);
-    for (int waited = 0; err == ESP_OK && (cfg & TEMP_EN); waited++) {   /* TEMP_EN 测完自动清零 */
+    /* 测温流程按数据手册 p.26：打开 DIE_TEMP_RDY 中断标志，置 TEMP_EN，等标志置位。
+       不能以 TEMP_EN 清零为准：实测它 0.26 ms 就清零，温度数据约 27.5 ms 才出来（p.4 采集时间 29 ms） */
+    uint8_t en = 0, st = 0, tint = 0, tfrac = 0;
+    err = rd(dev, REG_INT_ENABLE2, &en);
+    if (err == ESP_OK && !(en & DIE_TEMP_RDY)) {
+        uint8_t w[2] = {REG_INT_ENABLE2, (uint8_t)(en | DIE_TEMP_RDY)};     /* 只置这一位，其他位不动 */
+        err = i2c_master_transmit(dev, w, sizeof w, XFER_TIMEOUT_MS);
+    }
+    if (err == ESP_OK) {
+        err = rd(dev, REG_INT_STATUS2, &st);                                 /* 读一次清掉旧标志 */
+    }
+    if (err == ESP_OK) {
+        uint8_t start[2] = {REG_TEMP_CONFIG, TEMP_EN};
+        err = i2c_master_transmit(dev, start, sizeof start, XFER_TIMEOUT_MS);
+    }
+    for (int waited = 0; err == ESP_OK; waited++) {
+        err = rd(dev, REG_INT_STATUS2, &st);
+        if (err != ESP_OK || (st & DIE_TEMP_RDY)) {
+            break;
+        }
         if (waited >= 100) {
             err = ESP_ERR_TIMEOUT;
             break;
         }
         esp_rom_delay_us(1000);
-        err = rd(dev, REG_TEMP_CONFIG, &cfg);
     }
     if (err == ESP_OK) {
         err = rd(dev, REG_TINT, &tint);

@@ -4,7 +4,7 @@
 
 ## 硬件
 
-- 输入引脚：`FF_PIN_PWM_IN`（当前接线：ESP32-C3 SuperMini 上是 GPIO7）。
+- 输入引脚：`FF_PIN_PWM_IN`。
 
 ## 接口（`include/pulse_meter.h`，不能修改）
 

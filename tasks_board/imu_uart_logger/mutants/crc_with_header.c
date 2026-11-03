@@ -151,7 +151,7 @@ esp_err_t logger_start(i2c_master_bus_handle_t bus, uint32_t rate_hz)
         return err;
     }
     uint8_t who = 0;
-    if ((err = rd(REG_WHO_AM_I, &who, 1)) == ESP_OK && who != 0x68) {
+    if ((err = rd(REG_WHO_AM_I, &who, 1)) == ESP_OK && (who != 0x68 && who != FF_IMU_WHO_AM_I)) {
         err = ESP_ERR_NOT_FOUND;
     }
     uint8_t div = (uint8_t)(1000 / rate_hz - 1);          /* DLPF 开着：陀螺输出率 1 kHz */

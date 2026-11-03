@@ -3,7 +3,7 @@
 测试程序 = 被测模块及其依赖 + 测试 Agent 写的 Unity 用例 + 平台提供的辅助文件：
 - ff_test.h / ff_test.c：读寄存器、计时、打印调试信息；
 - ff_regs.h：规则里提到的寄存器的地址（从 SVD 算出），测试用 FF_REG_外设_寄存器 读，不靠被测代码自己报告；
-- ff_test_main.c：打印开始标记 → 跑全部用例 → 打印结束标记，然后停住（不重启，方便读完串口）。
+- ff_test_main.c：打印开始标记 → 每个用例单独开机跑（跑完一个软重启，失败不连累后面的用例）→ 打印汇总和结束标记，然后停住。
 
 结果解析看串口输出：
 - 每个用例一行  <文件>:<行>:<用例名>:PASS / FAIL:<原因> / IGNORE
@@ -55,20 +55,43 @@ void ff_log(const char *fmt, ...)
 }
 """
 
-FF_TEST_MAIN = f"""/* FirmForge 平台提供：跑全部 Unity 用例，打印开始、结束标记后停住。 */
+FF_TEST_MAIN = f"""/* FirmForge 平台提供：每个 Unity 用例单独开机运行（DECISIONS 第 91 条），全部跑完打印汇总和结束标记后停住。
+   跑到第几个、累计失败数记在软重启后不清零的内存里；上电或硬复位时从头开始。 */
 #include <stdio.h>
+#include "esp_attr.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "unity.h"
 #include "unity_test_runner.h"
 
+#define FF_MAGIC 0x46465431u
+
+static RTC_NOINIT_ATTR uint32_t s_magic, s_next, s_tests, s_failures, s_ignores;
+
 void app_main(void)
 {{
-    vTaskDelay(pdMS_TO_TICKS(2000));     /* 等电脑那边打开串口（烧录完自动复位后才开始读） */
-    printf("{BEGIN}\\n");
-    UNITY_BEGIN();
-    unity_run_all_tests();
-    UNITY_END();
+    if (esp_reset_reason() != ESP_RST_SW || s_magic != FF_MAGIC) {{
+        vTaskDelay(pdMS_TO_TICKS(2000));     /* 等电脑那边打开串口（烧录完自动复位后才开始读） */
+        printf("{BEGIN}\\n");
+        s_magic = FF_MAGIC;
+        s_next = s_tests = s_failures = s_ignores = 0;
+    }}
+    int total = unity_get_test_count();
+    if (s_next < (uint32_t)total) {{
+        UNITY_BEGIN();
+        unity_run_test_by_index((int)s_next);
+        s_tests += Unity.NumberOfTests;
+        s_failures += Unity.TestFailures;
+        s_ignores += Unity.TestIgnores;
+        s_next++;
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(50));       /* 让串口发完再重启 */
+        esp_restart();
+    }}
+    s_magic = 0;
+    printf("\\n-----------------------\\n%u Tests %u Failures %u Ignored\\n%s\\n",
+           (unsigned)s_tests, (unsigned)s_failures, (unsigned)s_ignores, s_failures ? "FAIL" : "OK");
     printf("{END}\\n");
     while (1) {{
         vTaskDelay(pdMS_TO_TICKS(1000));

@@ -4,7 +4,7 @@
 
 ## 硬件
 
-- 输入引脚：`FF_PIN_PWM_IN`（`hw_config.h` 里的宏，当前接线为 GPIO13）。
+- 输入引脚：`FF_PIN_PWM_IN`（`hw_config.h` 里的宏）。
 
 ## 接口（`include/edge_counter.h`，不能修改）
 

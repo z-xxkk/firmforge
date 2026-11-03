@@ -4,7 +4,7 @@
 
 ## 硬件
 
-- TX：`FF_PIN_UART1_TX`（GPIO10）；RX：`FF_PIN_UART1_RX`（GPIO11）；不用 RTS/CTS；
+- TX：`FF_PIN_UART1_TX`；RX：`FF_PIN_UART1_RX`；不用 RTS/CTS；
 - 8 位数据、无校验、1 位停止位。
 
 ## 接口（`include/link.h`，不能修改）

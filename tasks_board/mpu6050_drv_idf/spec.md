@@ -12,9 +12,9 @@
 
 ## 要求
 
-1. 初始化先读 WHO_AM_I 确认器件，不对返回 `ESP_ERR_NOT_FOUND`；
+1. 初始化先读 WHO_AM_I 确认器件：是 0x68 或硬件档案里的 `FF_IMU_WHO_AM_I`（有的模块是兼容的仿制芯片）都算对，否则返回 `ESP_ERR_NOT_FOUND`；
 2. 器件上电默认处于睡眠模式，必须唤醒；时钟源选 X 轴陀螺的 PLL；
 3. 数字低通滤波 DLPF_CFG = 3；
 4. 加速度、温度、陀螺数据要一次连续读出（保证是同一时刻的数据）；
-5. 换算系数和温度公式按 MPU6050 数据手册；
+5. 加速度、角速度的换算系数按 MPU6050 数据手册；温度 = 原始值 / `FF_IMU_TEMP_LSB_PER_C` + `FF_IMU_TEMP_OFFSET_C`（系数在硬件档案里）；
 6. 量程参数超范围返回 `ESP_ERR_INVALID_ARG`；出错返回 `esp_err_t` 错误码。

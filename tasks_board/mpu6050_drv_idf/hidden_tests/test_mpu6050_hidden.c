@@ -61,7 +61,7 @@ TEST_CASE("静止时加速度约 1 g、角速度接近 0、温度合理", "[mpu6
     for (int i = 0; i < 3; i++) {
         TEST_ASSERT_FLOAT_WITHIN(10.0f, 0.0f, d.gyro_dps[i]);
     }
-    TEST_ASSERT_TRUE(d.temp_c > 0.0f && d.temp_c < 60.0f);
+    TEST_ASSERT_TRUE(d.temp_c > 15.0f && d.temp_c < 45.0f);              /* 室温；公式或系数错会偏到 10 °C 或 46 °C 左右 */
     mpu_deinit();
     teardown();
 }

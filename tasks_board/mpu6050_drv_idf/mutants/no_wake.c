@@ -52,7 +52,7 @@ esp_err_t mpu_init(i2c_master_bus_handle_t bus, mpu_accel_range_t accel, mpu_gyr
         mpu_deinit();
         return err;
     }
-    if (who != 0x68) {
+    if ((who != 0x68 && who != FF_IMU_WHO_AM_I)) {
         mpu_deinit();
         return ESP_ERR_NOT_FOUND;
     }
@@ -103,7 +103,7 @@ esp_err_t mpu_read(mpu_data_t *out)
         out->accel_g[i] = r.accel[i] / ACCEL_LSB[s_accel];
         out->gyro_dps[i] = r.gyro[i] / GYRO_LSB[s_gyro];
     }
-    out->temp_c = r.temp / 340.0f + 36.53f;                  /* RM p.31 */
+    out->temp_c = r.temp / FF_IMU_TEMP_LSB_PER_C + FF_IMU_TEMP_OFFSET_C;   /* 系数按硬件档案（MPU6050：RM p.31；仿制 MPU-6500 不同） */
     return ESP_OK;
 }
 

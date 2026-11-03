@@ -4,7 +4,7 @@
 
 ## 硬件
 
-- 输出引脚：`FF_PIN_PWM_OUT`（当前接线 GPIO12）。
+- 输出引脚：`FF_PIN_PWM_OUT`。
 
 ## 接口（`include/pwm_out.h`，不能修改）
 
