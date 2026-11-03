@@ -13,7 +13,7 @@ ROOT = Path(helpers.ROOT)
 TASKS = ROOT / "tasks_board"
 PROFILE = HardwareProfile.load(ROOT / "hardware" / "esp32c3_supermini" / "profile.json")
 JUDGE = judge_rules(TASKS, PROFILE)
-EXPECTED = {"gpio_edge_count", "ledc_pwm", "gptimer_tick", "uart_loopback", "i2c_bus_scan",
+EXPECTED = {"gpio_edge_count", "rmt_pulse_meter", "ledc_pwm", "gptimer_tick", "uart_loopback", "i2c_bus_scan",
             "mpu6050_drv_idf", "mpu6050_drdy", "max30102_fifo", "max30102_temp", "imu_uart_logger"}
 
 

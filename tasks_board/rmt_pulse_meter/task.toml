@@ -1,0 +1,26 @@
+id = "rmt_pulse_meter"
+title = "RMT 测脉宽（频率与占空比）"
+category = "peripheral"
+difficulty = 2
+source = "ESP-IDF v6.1 driver/rmt_rx.h、hal/rmt_types.h、esp_driver_rmt/src/rmt_rx.c、esp32c3 soc_caps.h 与 rmt_ll.h；规则见 tasks_inbox/esp32_task2_rmt_rules.md（DECISIONS 第 88 条）"
+target = "esp32c3"   # 题目用引脚宏写，ESP32-C3、ESP32-S3、经典 ESP32 都有 RMT
+wiring = ["pwm.out", "pwm.in"]
+requires = ["esp_driver_rmt"]
+
+[[mutants]]
+file = "res_80mhz.c"
+replaces = "pulse_meter.c"
+expect_fail = "board_test"
+why = "分辨率设 80 MHz：1 kHz 半周期 40000 个计数超过 15 位，且 3 ms 结束阈值超过 32767 个计数，接收报参数错误（规则 2.2、2.4）"
+
+[[mutants]]
+file = "no_partial.c"
+replaces = "pulse_meter.c"
+expect_fail = "board_test"
+why = "没开分段接收：连续方波永远收不完，总是超时（规则 2.6）"
+
+[[mutants]]
+file = "min_ns_10us.c"
+replaces = "pulse_meter.c"
+expect_fail = "board_test"
+why = "毛刺阈值设 10 µs，超过滤波上限（255 个计数），接收报参数错误（规则 2.5）"
