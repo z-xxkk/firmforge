@@ -1,0 +1,108 @@
+{
+  "chip": {
+    "value": "esp32",
+    "origin": "user",
+    "note": "负责人换板（DECISIONS 第 86 条）；待 esptool 实测确认"
+  },
+  "chip_variant": {
+    "value": "ESP32-D0WD",
+    "origin": "default",
+    "note": "待 esptool 实测确认（模组可能是 WROOM-32D/32E）"
+  },
+  "board": {
+    "value": "esp32_devkit",
+    "origin": "user",
+    "note": ""
+  },
+  "framework": {
+    "value": "esp-idf",
+    "origin": "user",
+    "note": "DECISIONS 第 76 条"
+  },
+  "framework_version": {
+    "value": "v6.1",
+    "origin": "user",
+    "note": "DECISIONS 第 77 条"
+  },
+  "pins": {
+    "i2c0.sda": {
+      "value": 21,
+      "origin": "default",
+      "note": "两个传感器共用一条 I2C 总线（ESP32 开发板惯用 21/22）"
+    },
+    "i2c0.scl": {
+      "value": 22,
+      "origin": "default",
+      "note": ""
+    },
+    "imu.int": {
+      "value": 4,
+      "origin": "default",
+      "note": "MPU6050 INT"
+    },
+    "ppg.int": {
+      "value": 27,
+      "origin": "default",
+      "note": "MAX30102 INT，低电平有效、开漏，需上拉"
+    },
+    "uart1.tx": {
+      "value": 17,
+      "origin": "default",
+      "note": "回环测试：接到 uart1.rx"
+    },
+    "uart1.rx": {
+      "value": 16,
+      "origin": "default",
+      "note": ""
+    },
+    "pwm.out": {
+      "value": 25,
+      "origin": "default",
+      "note": "回环测试：接到 pwm.in"
+    },
+    "pwm.in": {
+      "value": 26,
+      "origin": "default",
+      "note": ""
+    }
+  },
+  "reserved_pins": {
+    "0": "启动配置引脚（BOOT 键），esp32-ds p.22",
+    "1": "UART0 TX，接 USB 转串口芯片，用于烧录和控制台",
+    "2": "启动配置引脚，esp32-ds p.22",
+    "3": "UART0 RX，接 USB 转串口芯片，用于烧录和控制台",
+    "5": "启动配置引脚（SDIO 时序），esp32-ds p.22",
+    "6": "接 SPI Flash，esp32-ds p.15–16",
+    "7": "接 SPI Flash，esp32-ds p.15–16",
+    "8": "接 SPI Flash，esp32-ds p.15–16",
+    "9": "接 SPI Flash，esp32-ds p.15–16",
+    "10": "接 SPI Flash，esp32-ds p.15–16",
+    "11": "接 SPI Flash，esp32-ds p.15–16",
+    "12": "启动配置引脚 MTDI（决定 Flash 电压，上电被拉高会启动失败），esp32-ds p.22",
+    "15": "启动配置引脚 MTDO，esp32-ds p.22",
+    "34": "只能输入，esp32-ds p.17",
+    "35": "只能输入，esp32-ds p.17",
+    "36": "只能输入，esp32-ds p.17",
+    "39": "只能输入，esp32-ds p.17"
+  },
+  "devices": [
+    {
+      "name": "imu",
+      "part": "MPU6050",
+      "bus": "i2c0",
+      "address": 104,
+      "pins": {
+        "int": 4
+      }
+    },
+    {
+      "name": "ppg",
+      "part": "MAX30102",
+      "bus": "i2c0",
+      "address": 87,
+      "pins": {
+        "int": 27
+      }
+    }
+  ]
+}

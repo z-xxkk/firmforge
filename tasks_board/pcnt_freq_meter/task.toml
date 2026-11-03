@@ -3,7 +3,7 @@ title = "脉冲计数器测频率"
 category = "peripheral"
 difficulty = 2
 source = "ESP-IDF v6.1 driver/pulse_cnt.h；规则见 tasks_inbox/esp32_batch_a_rules.md 第 2 题（DECISIONS 第 83 条）"
-target = "esp32s3"
+target = "esp32"   # 题目用引脚宏写，经典 ESP32 与 ESP32-S3 都能跑（DECISIONS 第 86 条）
 wiring = ["pwm.out", "pwm.in"]
 requires = ["esp_driver_pcnt"]
 

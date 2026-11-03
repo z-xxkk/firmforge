@@ -3,7 +3,7 @@ title = "MAX30102 片内温度"
 category = "driver"
 difficulty = 2
 source = "MAX30102 数据手册 p.22（温度寄存器）、p.26（测温流程）、p.29（地址）；规则见 tasks_inbox/esp32_batch_b_rules.md 第 10 题（DECISIONS 第 84 条）"
-target = "esp32s3"
+target = "esp32"   # 题目用引脚宏写，经典 ESP32 与 ESP32-S3 都能跑（DECISIONS 第 86 条）
 wiring = ["i2c0.sda", "i2c0.scl"]
 requires = []
 

@@ -5,7 +5,7 @@
   读到结束标记、崩溃或超时就停；
 - 串口找不到时结果记为 skipped 并写明原因，绝不判通过（CLAUDE.md 硬性规则 4）。
 
-串口：参数指定，其次环境变量 FF_SERIAL_PORT，再其次自动找乐鑫 USB 设备（Linux 的 /dev/ttyACM*）。
+串口：参数指定，其次环境变量 FF_SERIAL_PORT，再其次自动找（S3 自带 USB 是 /dev/ttyACM*，经典 ESP32 的 USB 转串口芯片是 /dev/ttyUSB*）。
 ⚠ 还没有在真实板子上跑过（2026-11-01 板子未进入下载模式），接上板子后要实测。
 """
 
@@ -49,7 +49,9 @@ def find_port(explicit: str | None = None, env: dict[str, str] | None = None) ->
         return explicit
     if env.get("FF_SERIAL_PORT"):
         return env["FF_SERIAL_PORT"]
-    for pattern in ("/dev/serial/by-id/usb-Espressif*", "/dev/ttyACM*"):
+    # 先找乐鑫自带 USB（ESP32-S3），再找经典 ESP32 开发板上的 USB 转串口芯片（CP210x、CH340/CH9102、FTDI）
+    for pattern in ("/dev/serial/by-id/usb-Espressif*", "/dev/ttyACM*", "/dev/serial/by-id/*CP210*",
+                    "/dev/serial/by-id/*1a86*", "/dev/serial/by-id/*CH34*", "/dev/serial/by-id/*FTDI*", "/dev/ttyUSB*"):
         hits = sorted(glob.glob(pattern))
         if hits:
             return hits[0]

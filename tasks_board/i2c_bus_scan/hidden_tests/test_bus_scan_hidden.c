@@ -6,7 +6,13 @@
 #include "ff_test.h"
 #include "bus_scan.h"
 
-#define I2C0_CTR_REG 0x60013004u     /* SVD：I2C0 基址 0x60013000 + CTR 偏移 0x4；MS_MODE 在 bit4 */
+#include "sdkconfig.h"
+/* I2C0 控制寄存器（CTR 偏移 0x4，MS_MODE 在 bit4），地址按芯片取自各自的 SVD */
+#if CONFIG_IDF_TARGET_ESP32
+#define I2C0_CTR_REG 0x3FF53004u
+#else
+#define I2C0_CTR_REG 0x60013004u
+#endif
 
 static i2c_master_bus_handle_t bus_new(void)
 {

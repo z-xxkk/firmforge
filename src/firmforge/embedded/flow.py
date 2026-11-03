@@ -202,6 +202,7 @@ class EmbeddedFlow:
         if self.idf is None:
             return "skipped", "build", "ESP-IDF 不可用，硬件层无法编译和上板测试"
         proj = IdfProject(Path(config.project_root()) / ".ff_data" / "idf_build" / f"{self.rd.run_id}-{m.id}", self.idf,
+                          target=str(self.profile.chip.value),
                           requires=DEFAULT_REQUIRES + TEST_REQUIRES, whole_archive=True)
         svd = getattr(self.verifier, "svd", None)
         proj.write(self.profile, {**deps, **mr.files, **mr.tests, **harness_files(rules, svd, scopes)})

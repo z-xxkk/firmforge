@@ -812,9 +812,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--workflow", help="多 Agent 用的工作流：名字或 名字@版本（默认 module_dev 当前版本）")
     s.set_defaults(func=cmd_run)
 
+    s = sub.add_parser("check-board-tasks", help="上板评测题自检：没有板子时编译标准答案和变异体，核对合规预期")
+    s.add_argument("ids", nargs="*", help="题目 id，不写就是全部")
+    s.add_argument("--hw", default="hardware/esp32_devkit", help="硬件目录（含 profile.json）")
+    s.add_argument("--tasks-dir", default="tasks_board")
+    s.set_defaults(func=cmd_check_board_tasks)
     s = sub.add_parser("firmware", help="嵌入式新流程：按硬件资料约束写 ESP-IDF 代码并测试（调用模型）")
     s.add_argument("--spec", required=True, help="需求文档（markdown）")
-    s.add_argument("--hw", default="hardware/esp32s3_supermini", help="硬件目录（含 profile.json、sources.toml、rules.json）")
+    s.add_argument("--hw", default="hardware/esp32_devkit", help="硬件目录（含 profile.json、sources.toml、rules.json）")
     s.add_argument("--rules", choices=["verified", "unverified", "none"], default="verified",
                    help="规则模式：verified 完整流程（默认）；unverified 不核对；none 不给规则")
     s.add_argument("--port", help="板子串口（默认自动找）")
@@ -823,7 +828,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_firmware)
     s = sub.add_parser("rules", help="硬件规则：build 查资料提炼并核对（调用模型、需人工确认）；list 列出；verify 重新核对")
     s.add_argument("action", choices=["build", "list", "verify"])
-    s.add_argument("--hw", default="hardware/esp32s3_supermini", help="硬件目录（含 profile.json、sources.toml）")
+    s.add_argument("--hw", default="hardware/esp32_devkit", help="硬件目录（含 profile.json、sources.toml）")
     s.add_argument("--scopes", help="外设和器件，逗号分隔，如 i2c,mpu6050")
     s.add_argument("--rounds", type=int, default=4, help="查资料 Agent 最多几轮（默认 4）")
     s.add_argument("--no-human", action="store_true", help="不做人工确认（规则停在已核对，不入库）")
@@ -1018,6 +1023,39 @@ def cmd_firmware(args) -> int:
     for mid, mr in res.modules.items():
         print(f"- {mid}（{mr.layer}）：{mr.verdict}，尝试 {mr.attempts} 次")
     return VERDICT_EXIT.get(res.verdict, EXIT_FAIL)
+
+
+def cmd_check_board_tasks(args) -> int:
+    """上板评测题自检（DECISIONS 第 85、86 条）：没有板子时，标准答案和变异体都用 ESP-IDF 编译，合规检查用固定的判定规则。"""
+    from .embedded.board_task import check_without_board, discover_board_tasks, judge_rules, load_board_task
+    from .grounding.profile import HardwareProfile
+    from .target.esp_idf import IdfEnv, IdfUnavailable
+    hwdir = Path(args.hw)
+    profile = HardwareProfile.load(hwdir / "profile.json")
+    root = Path(args.tasks_dir)
+    tasks = [load_board_task(root / t) for t in args.ids] if args.ids else discover_board_tasks(root)
+    judge = judge_rules(root, profile)
+    try:
+        idf = IdfEnv.load(want_version=str(profile.framework_version.value))
+    except IdfUnavailable as exc:
+        print(f"[SKIP] {exc}；只做合规检查，不编译", file=sys.stderr)
+        idf = None
+    all_ok = True
+    for t in tasks:
+        t0 = time.time()
+        r = check_without_board(t, profile, judge, idf, Path(".ff_data") / "selfcheck")
+        all_ok &= r.ok
+        print(f"== {t.id}（{profile.chip.value}）：{'符合预期' if r.ok else '不符合预期'}（{time.time() - t0:.0f} 秒）")
+        for p in r.problems:
+            print(f"   问题：{p}")
+        for v in r.variants:
+            build = {True: "过", False: "不过", None: "没编译"}[v.build_ok]
+            print(f"   {'✓' if v.as_expected else '✗'} {v.name:24} 期望 {v.expect:11} 合规 {'过' if v.compliance_ok else '不过'}"
+                  f"  编译 {build}")
+            if not v.as_expected:
+                for line in v.problems[:6]:
+                    print(f"       {line[:300]}")
+    return EXIT_PASS if all_ok else EXIT_FAIL
 
 
 def main(argv: list[str] | None = None) -> int:

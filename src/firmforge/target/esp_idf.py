@@ -24,11 +24,13 @@ DEFAULT_IDF = Path.home() / "esp" / "esp-idf-v6.1"
 BUILD_TIMEOUT_S = 900
 # 硬件层代码常用的驱动组件（ESP-IDF 5.3 起驱动拆成独立组件）
 DEFAULT_REQUIRES = ("esp_driver_gpio", "esp_driver_i2c", "esp_driver_uart", "esp_driver_ledc", "esp_timer")
-SDKCONFIG_DEFAULTS = """# FirmForge 生成：ESP32-S3 SuperMini（4 MB Flash，控制台走芯片自带的 USB 串口）
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
-"""
+# 每种芯片的默认配置：S3 的控制台走芯片自带的 USB 串口；经典 ESP32 走 UART0（接板上的 USB 转串口芯片）
+SDKCONFIG_DEFAULTS = {
+    "esp32s3": "# FirmForge 生成：ESP32-S3（4 MB Flash，控制台走芯片自带的 USB 串口）\n"
+               "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\nCONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y\nCONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y\n",
+    "esp32": "# FirmForge 生成：经典 ESP32（4 MB Flash，控制台走 UART0）\n"
+             "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\nCONFIG_ESP_CONSOLE_UART_DEFAULT=y\nCONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y\n",
+}
 _GCC_DIAG = re.compile(r"^(?P<file>[^:\n]+):(?P<line>\d+):(?:(?P<col>\d+):)?\s*(?P<kind>error|warning|fatal error):\s*(?P<msg>.+)$",
                        re.M)
 
@@ -171,7 +173,9 @@ class IdfProject:
         top = (f"cmake_minimum_required(VERSION 3.22)\ninclude($ENV{{IDF_PATH}}/tools/cmake/project.cmake)\n"
                f"project({self.name})\n")
         _write_if_changed(self.root / "CMakeLists.txt", top)
-        _write_if_changed(self.root / "sdkconfig.defaults", SDKCONFIG_DEFAULTS)
+        if self.target not in SDKCONFIG_DEFAULTS:
+            raise ValueError(f"不支持的芯片 {self.target}，可选：{', '.join(SDKCONFIG_DEFAULTS)}")
+        _write_if_changed(self.root / "sdkconfig.defaults", SDKCONFIG_DEFAULTS[self.target])
         for rel, content in files.items():
             rel = rel.replace("\\", "/").lstrip("/")
             if rel.startswith("..") or "/../" in rel:

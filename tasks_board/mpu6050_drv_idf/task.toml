@@ -3,7 +3,7 @@ title = "MPU6050 驱动（ESP-IDF 新版 I2C 接口）"
 category = "driver"
 difficulty = 3
 source = "MPU-6000/6050 寄存器手册 RM-MPU-6000A rev 4.0 p.12、30–31、42、46；产品规格书 PS-MPU-6000A rev 3.1 p.12–13；规则见 tasks_inbox/esp32_batch_b_rules.md 第 7 题（DECISIONS 第 84 条）"
-target = "esp32s3"
+target = "esp32"   # 题目用引脚宏写，经典 ESP32 与 ESP32-S3 都能跑（DECISIONS 第 86 条）
 wiring = ["i2c0.sda", "i2c0.scl"]
 requires = []
 

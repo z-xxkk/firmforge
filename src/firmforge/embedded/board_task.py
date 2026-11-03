@@ -22,7 +22,7 @@ from pathlib import Path
 
 from ..grounding.compliance import check_code
 from ..grounding.profile import HardwareProfile
-from ..grounding.rules import RuleSet
+from ..grounding.rules import Citation, Rule, RuleSet
 from ..target.esp_idf import DEFAULT_REQUIRES, IdfEnv, IdfProject
 from ..target.harness import TEST_REQUIRES, harness_files
 
@@ -106,6 +106,19 @@ def load_board_task(path: Path | str) -> BoardTask:
                      d.get("target", "esp32s3"), tuple(d.get("wiring", [])), tuple(d.get("requires", [])), tuple(muts))
 
 
+def judge_rules(tasks_root: Path | str, profile: HardwareProfile) -> RuleSet:
+    """评测判定用的合规规则：固定的 judge_rules.json，加上从硬件档案保留引脚生成的禁用引脚（DECISIONS 第 85、86 条）。
+    与 Agent 自己的规则库无关，所以不同配置按同一把尺子打分。"""
+    import json
+    data = json.loads((Path(tasks_root) / "judge_rules.json").read_text(encoding="utf-8"))
+    rs = RuleSet([Rule.from_dict(d) for d in data])
+    if profile.reserved_pins:
+        rs.put(Rule("R-JUDGE-PIN", "pin", ("all",), f"不许使用 {profile.board.value} 的保留引脚",
+                    Citation("profile", None, "硬件档案 reserved_pins", "reserved_pins"), "user", "trusted",
+                    {"type": "pin_forbidden", "gpio": sorted(profile.reserved_pins)}))
+    return rs
+
+
 def discover_board_tasks(root: Path | str) -> list[BoardTask]:
     return sorted((load_board_task(p.parent) for p in Path(root).glob("*/task.toml")), key=lambda t: t.id)
 
@@ -149,7 +162,8 @@ def check_without_board(task: BoardTask, profile: HardwareProfile, rules: RuleSe
         out.problems.append("硬件档案里没有这些信号：" + "、".join(missing))
     variants = [("reference", "pass", task.reference_files())]
     variants += [(m.file, m.expect_fail, task.mutant_files(m)) for m in task.mutants]
-    proj = IdfProject(Path(build_root) / task.id, idf, requires=DEFAULT_REQUIRES + TEST_REQUIRES + task.requires,
+    proj = IdfProject(Path(build_root) / f"{task.id}-{profile.chip.value}", idf, target=str(profile.chip.value),
+                      requires=DEFAULT_REQUIRES + TEST_REQUIRES + task.requires,
                       whole_archive=True) if idf is not None else None
     for name, expect, files in variants:
         v = VariantCheck(name, expect)

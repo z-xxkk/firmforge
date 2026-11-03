@@ -5,14 +5,14 @@ import unittest
 from pathlib import Path
 
 import helpers
-from firmforge.embedded.board_task import BoardTaskError, check_without_board, discover_board_tasks, load_board_task
+from firmforge.embedded.board_task import BoardTaskError, check_without_board, discover_board_tasks, judge_rules, load_board_task
 from firmforge.grounding.profile import HardwareProfile
 from firmforge.grounding.rules import Rule, RuleSet
 
 ROOT = Path(helpers.ROOT)
 TASKS = ROOT / "tasks_board"
-PROFILE = HardwareProfile.load(ROOT / "hardware" / "esp32s3_supermini" / "profile.json")
-JUDGE = RuleSet([Rule.from_dict(d) for d in json.loads((TASKS / "judge_rules.json").read_text(encoding="utf-8"))])
+PROFILE = HardwareProfile.load(ROOT / "hardware" / "esp32_devkit" / "profile.json")
+JUDGE = judge_rules(TASKS, PROFILE)
 EXPECTED = {"gpio_edge_count", "pcnt_freq_meter", "ledc_pwm", "gptimer_tick", "uart_loopback", "i2c_bus_scan",
             "mpu6050_drv_idf", "mpu6050_drdy", "max30102_fifo", "max30102_temp", "imu_uart_logger"}
 
