@@ -28,6 +28,8 @@ DEFAULT_REQUIRES = ("esp_driver_gpio", "esp_driver_i2c", "esp_driver_uart", "esp
 SDKCONFIG_DEFAULTS = {
     "esp32s3": "# FirmForge 生成：ESP32-S3（4 MB Flash，控制台走芯片自带的 USB 串口）\n"
                "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\nCONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y\nCONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y\n",
+    "esp32c3": "# FirmForge 生成：ESP32-C3（4 MB Flash，控制台走芯片自带的 USB 串口）\n"
+               "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\nCONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y\nCONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y\n",
     "esp32": "# FirmForge 生成：经典 ESP32（4 MB Flash，控制台走 UART0）\n"
              "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\nCONFIG_ESP_CONSOLE_UART_DEFAULT=y\nCONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y\n",
 }

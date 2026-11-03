@@ -1,0 +1,6 @@
+# ESP32-C3 SuperMini（第三方仿制小板，资料来自 espboards.dev，可信度低，待实测）。
+# 引出 GPIO0–10、GPIO20、GPIO21；USB-C 直连芯片自带的 USB 串口 / JTAG（GPIO18/19，不引出）。
+name = "ESP32-C3 SuperMini"
+chip = "esp32c3"
+exposed = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 21]
+prefer = [4, 5, 3, 10, 0, 1, 6, 7]

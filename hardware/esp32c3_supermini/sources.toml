@@ -1,0 +1,82 @@
+# ESP32-C3 SuperMini + MPU6050 + MAX30102 用到的资料（DECISIONS 第 66、79、87 条）。
+# 原件有版权，不进仓库：放在 .ff_sources/raw/，按 url 下载，用 sha256 核对是不是同一份文件。
+
+[[doc]]
+id = "esp32c3-ds"
+title = "ESP32-C3 Series Datasheet"
+kind = "pdf"
+tier = "official_manual"
+version = "v2.4"
+url = "https://documentation.espressif.com/esp32-c3_datasheet_en.pdf"
+file = "esp32-c3_datasheet_en.pdf"
+sha256 = "833fc000b4b3c3d39c496fcbd597fed5806956503ce7390b19cc8ae82f19f968"
+
+[[doc]]
+id = "esp32c3-trm"
+title = "ESP32-C3 Technical Reference Manual"
+kind = "pdf"
+tier = "official_manual"
+version = "v1.4"
+url = "https://documentation.espressif.com/esp32-c3_technical_reference_manual_en.pdf"
+file = "esp32-c3_trm_en.pdf"
+sha256 = "90ef825653e7a2657dc1bb294041aace9f9b69da87d775c2f1b5bd11eb317423"
+
+[[doc]]
+id = "esp32c3-errata"
+title = "ESP32-C3 Series SoC Errata"
+kind = "pdf"
+tier = "official_errata"
+version = "latest"
+url = "https://docs.espressif.com/projects/esp-chip-errata/en/latest/esp32c3/esp-chip-errata-en-master-esp32c3.pdf"
+file = "esp32-c3_errata_en.pdf"
+sha256 = "08c90dfd6085d2b04c87e5ce9eb08f9cacd1109189466486d9caa08ff1a7bcb2"
+
+[[doc]]
+id = "esp32c3-svd"
+title = "ESP32-C3 CMSIS-SVD（乐鑫注明仍在完善中）"
+kind = "svd"
+tier = "official_code"
+version = "main"
+url = "https://raw.githubusercontent.com/espressif/svd/main/svd/esp32c3.svd"
+file = "esp32c3.svd"
+sha256 = "9ef33dbff56d807996fd8edfa4aa4ad008b5a861c241d36280caa0dedbbca41a"
+
+[[doc]]
+id = "mpu6050-ps"
+title = "MPU-6000/MPU-6050 Product Specification PS-MPU-6000A-00（停产，非最新版，最新为 3.4）"
+kind = "pdf"
+tier = "official_mirror"
+version = "rev 3.1"
+url = "https://cdn.sparkfun.com/datasheets/Components/General%20IC/PS-MPU-6000A.pdf"
+file = "mpu6050_ps.pdf"
+sha256 = "7e87555c386d880a3db2ec2718df57e59de9105a0e5e4531ed96707df15678b4"
+
+[[doc]]
+id = "mpu6050-rm"
+title = "MPU-6000/MPU-6050 Register Map RM-MPU-6000A-00（停产，非最新版，最新为 4.2）"
+kind = "pdf"
+tier = "official_mirror"
+version = "rev 4.0"
+url = "https://cdn.sparkfun.com/datasheets/Sensors/Accelerometers/RM-MPU-6000A.pdf"
+file = "mpu6050_regmap.pdf"
+sha256 = "ccaa6312b9d86a9da79e26e511101e1150dc85a48255600010a854369cf7c05d"
+
+[[doc]]
+id = "max30102-ds"
+title = "MAX30102 High-Sensitivity Pulse Oximeter and Heart-Rate Sensor"
+kind = "pdf"
+tier = "official_manual"
+version = "rev 1"
+url = "https://www.analog.com/media/en/technical-documentation/data-sheets/max30102.pdf"
+file = "max30102.pdf"
+sha256 = "252e039335aea4bf1dae577eada92fe2630bce123fde691a11b3d890bfd0b53c"
+
+[[doc]]
+id = "nxp-i2c-um10204"
+title = "NXP UM10204 I2C-bus specification and user manual Rev 7.0（nxp.com 直链已失效，取自 NXP 社区附件）"
+kind = "pdf"
+tier = "official_mirror"
+version = "Rev 7.0"
+url = "https://community.nxp.com/pwmxy87654/attachments/pwmxy87654/nxp-designs/931/1/UM10204.pdf"
+file = "nxp_um10204.pdf"
+sha256 = "dc91f00f65584e06ef36e26c93bf9d91a95fb3c8a1830a9223e53caf678b36af"

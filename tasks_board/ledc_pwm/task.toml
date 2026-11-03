@@ -5,13 +5,13 @@ difficulty = 2
 source = "ESP-IDF v6.1 driver/ledc.h、soc_caps.h（SOC_LEDC_TIMER_BIT_WIDTH = 14）；规则见 tasks_inbox/esp32_batch_a_rules.md 第 3 题（DECISIONS 第 83 条）"
 target = "esp32"   # 题目用引脚宏写，经典 ESP32 与 ESP32-S3 都能跑（DECISIONS 第 86 条）
 wiring = ["pwm.out", "pwm.in"]
-requires = ["esp_driver_pcnt"]
+requires = []
 
 [[mutants]]
 file = "fixed_13bit.c"
 replaces = "pwm_out.c"
 expect_fail = "board_test"
-why = "分辨率固定 13 位，100 kHz 时超出时钟能力，配置失败（规则 3.2）"
+why = "分辨率固定 13 位，频率高于 9.7 kHz 时超出时钟能力，配置失败（规则 3.2）"
 
 [[mutants]]
 file = "percent.c"

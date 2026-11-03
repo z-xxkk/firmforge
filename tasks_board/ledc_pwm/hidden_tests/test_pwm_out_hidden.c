@@ -1,7 +1,9 @@
-/* 隐藏测试：只有评测流程能读。用 PCNT 在 FF_PIN_PWM_IN 测频率，用均匀采样估计高电平比例。 */
+/* 隐藏测试：只有评测流程能读。FF_PIN_PWM_OUT 经回环线进 FF_PIN_PWM_IN：
+   频率用 GPIO 上升沿中断计数测量（ESP32-C3 没有 PCNT，DECISIONS 第 87 条），占空比用均匀采样估计。 */
+#include <stdatomic.h>
 #include "unity.h"
 #include "driver/gpio.h"
-#include "driver/pulse_cnt.h"
+#include "esp_attr.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -9,30 +11,32 @@
 #include "hw_config.h"
 #include "pwm_out.h"
 
+static atomic_uint s_edges;
+
+static void IRAM_ATTR on_edge(void *arg)
+{
+    (void)arg;
+    atomic_fetch_add_explicit(&s_edges, 1, memory_order_relaxed);
+}
+
 static uint32_t measure_hz(void)
 {
-    pcnt_unit_handle_t u;
-    pcnt_channel_handle_t ch;
-    pcnt_unit_config_t ucfg = {.low_limit = -1, .high_limit = 30000, .flags.accum_count = 1};
-    TEST_ASSERT_EQUAL(ESP_OK, pcnt_new_unit(&ucfg, &u));
-    pcnt_chan_config_t ccfg = {.edge_gpio_num = FF_PIN_PWM_IN, .level_gpio_num = -1};
-    TEST_ASSERT_EQUAL(ESP_OK, pcnt_new_channel(u, &ccfg, &ch));
-    pcnt_channel_set_edge_action(ch, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_HOLD);
-    pcnt_unit_add_watch_point(u, 30000);
-    pcnt_unit_enable(u);
-    pcnt_unit_clear_count(u);
-    pcnt_unit_start(u);
+    gpio_config_t io = {.pin_bit_mask = 1ULL << FF_PIN_PWM_IN, .mode = GPIO_MODE_INPUT, .intr_type = GPIO_INTR_POSEDGE};
+    TEST_ASSERT_EQUAL(ESP_OK, gpio_config(&io));
+    esp_err_t e = gpio_install_isr_service(0);
+    TEST_ASSERT_TRUE(e == ESP_OK || e == ESP_ERR_INVALID_STATE);
+    TEST_ASSERT_EQUAL(ESP_OK, gpio_isr_handler_add(FF_PIN_PWM_IN, on_edge, NULL));
+    atomic_store(&s_edges, 0);
     int64_t t0 = esp_timer_get_time();
     vTaskDelay(pdMS_TO_TICKS(500));
-    int count = 0;
-    pcnt_unit_get_count(u, &count);
+    uint32_t n = atomic_load(&s_edges);
     int64_t t1 = esp_timer_get_time();
-    pcnt_unit_stop(u);
-    pcnt_unit_disable(u);
-    pcnt_del_channel(ch);
-    pcnt_unit_remove_watch_point(u, 30000);
-    pcnt_del_unit(u);
-    return (uint32_t)((int64_t)count * 1000000 / (t1 - t0));
+    gpio_isr_handler_remove(FF_PIN_PWM_IN);
+    gpio_set_intr_type(FF_PIN_PWM_IN, GPIO_INTR_DISABLE);
+    if (e == ESP_OK) {
+        gpio_uninstall_isr_service();
+    }
+    return (uint32_t)((int64_t)n * 1000000 / (t1 - t0));
 }
 
 static uint32_t measure_duty_permille(void)
@@ -57,7 +61,13 @@ static void check(uint32_t hz, uint32_t duty)
 
 TEST_CASE("1 kHz 占空比 250‰", "[pwm_out]")   { check(1000, 250); }
 TEST_CASE("10 kHz 占空比 500‰", "[pwm_out]")  { check(10000, 500); }
-TEST_CASE("100 kHz 占空比 500‰（分辨率必须降低）", "[pwm_out]") { check(100000, 500); }
+TEST_CASE("20 kHz 占空比 500‰（13 位分辨率已超出时钟能力）", "[pwm_out]") { check(20000, 500); }
+
+TEST_CASE("100 kHz 能配置成功（分辨率必须降低）", "[pwm_out]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, pwm_init(100000, 500));
+    pwm_deinit();
+}
 
 TEST_CASE("改占空比立即生效", "[pwm_out]")
 {

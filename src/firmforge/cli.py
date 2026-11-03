@@ -814,12 +814,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("check-board-tasks", help="上板评测题自检：没有板子时编译标准答案和变异体，核对合规预期")
     s.add_argument("ids", nargs="*", help="题目 id，不写就是全部")
-    s.add_argument("--hw", default="hardware/esp32_devkit", help="硬件目录（含 profile.json）")
+    s.add_argument("--hw", default="hardware/esp32c3_supermini", help="硬件目录（含 profile.json）")
     s.add_argument("--tasks-dir", default="tasks_board")
     s.set_defaults(func=cmd_check_board_tasks)
     s = sub.add_parser("firmware", help="嵌入式新流程：按硬件资料约束写 ESP-IDF 代码并测试（调用模型）")
     s.add_argument("--spec", required=True, help="需求文档（markdown）")
-    s.add_argument("--hw", default="hardware/esp32_devkit", help="硬件目录（含 profile.json、sources.toml、rules.json）")
+    s.add_argument("--hw", default="hardware/esp32c3_supermini", help="硬件目录（含 profile.json、sources.toml、rules.json）")
     s.add_argument("--rules", choices=["verified", "unverified", "none"], default="verified",
                    help="规则模式：verified 完整流程（默认）；unverified 不核对；none 不给规则")
     s.add_argument("--port", help="板子串口（默认自动找）")
@@ -828,7 +828,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_firmware)
     s = sub.add_parser("rules", help="硬件规则：build 查资料提炼并核对（调用模型、需人工确认）；list 列出；verify 重新核对")
     s.add_argument("action", choices=["build", "list", "verify"])
-    s.add_argument("--hw", default="hardware/esp32_devkit", help="硬件目录（含 profile.json、sources.toml）")
+    s.add_argument("--hw", default="hardware/esp32c3_supermini", help="硬件目录（含 profile.json、sources.toml）")
     s.add_argument("--scopes", help="外设和器件，逗号分隔，如 i2c,mpu6050")
     s.add_argument("--rounds", type=int, default=4, help="查资料 Agent 最多几轮（默认 4）")
     s.add_argument("--no-human", action="store_true", help="不做人工确认（规则停在已核对，不入库）")

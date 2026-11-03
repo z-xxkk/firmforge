@@ -12,7 +12,7 @@ FirmForge 是一个**面向嵌入式固件开发的多 Agent 编排与验证平�
 4. 检查失败就进入修正循环；
 5. 最终交付通过检查的代码和一份验证报告。
 
-- 目标芯片：STM32F103（Cortex-M3）
+- 目标芯片：ESP32-C3（ESP32-C3 SuperMini 开发板，ESP-IDF v6.1，DECISIONS 第 87 条）；旧流程的纯逻辑题仍按 STM32F103（Cortex-M3）
 - 大模型：DeepSeek，走 OpenAI 兼容接口
 - 产品形态：Python 核心库 + 命令行 + 桌面软件（PySide6）
 

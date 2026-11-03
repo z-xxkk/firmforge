@@ -1,0 +1,104 @@
+{
+  "chip": {
+    "value": "esp32c3",
+    "origin": "user",
+    "note": "负责人换板（DECISIONS 第 87 条）；待 esptool 实测确认"
+  },
+  "chip_variant": {
+    "value": "ESP32-C3FH4",
+    "origin": "document",
+    "note": "第三方资料说 4 MB Flash，是否合封待 esptool 实测确认"
+  },
+  "board": {
+    "value": "esp32c3_supermini",
+    "origin": "user",
+    "note": ""
+  },
+  "framework": {
+    "value": "esp-idf",
+    "origin": "user",
+    "note": "DECISIONS 第 76 条"
+  },
+  "framework_version": {
+    "value": "v6.1",
+    "origin": "user",
+    "note": "DECISIONS 第 77 条"
+  },
+  "pins": {
+    "i2c0.sda": {
+      "value": 4,
+      "origin": "default",
+      "note": "两个传感器共用一条 I2C 总线（ESP32-C3 只有一个 I2C 控制器）"
+    },
+    "i2c0.scl": {
+      "value": 5,
+      "origin": "default",
+      "note": ""
+    },
+    "imu.int": {
+      "value": 3,
+      "origin": "default",
+      "note": "MPU6050 INT"
+    },
+    "ppg.int": {
+      "value": 10,
+      "origin": "default",
+      "note": "MAX30102 INT，低电平有效、开漏，需上拉"
+    },
+    "uart1.tx": {
+      "value": 0,
+      "origin": "default",
+      "note": "回环测试：接到 uart1.rx（板上没有 32 kHz 晶振，GPIO0/1 可作普通 GPIO，待实测）"
+    },
+    "uart1.rx": {
+      "value": 1,
+      "origin": "default",
+      "note": ""
+    },
+    "pwm.out": {
+      "value": 6,
+      "origin": "default",
+      "note": "回环测试：接到 pwm.in"
+    },
+    "pwm.in": {
+      "value": 7,
+      "origin": "default",
+      "note": ""
+    }
+  },
+  "reserved_pins": {
+    "2": "启动配置引脚，esp32c3-ds p.30",
+    "8": "启动配置引脚（板载蓝色 LED），esp32c3-ds p.30",
+    "9": "启动配置引脚（BOOT 键），esp32c3-ds p.30",
+    "12": "接 SPI Flash，esp32c3-ds p.23",
+    "13": "接 SPI Flash，esp32c3-ds p.23",
+    "14": "接 SPI Flash，esp32c3-ds p.23",
+    "15": "接 SPI Flash，esp32c3-ds p.23",
+    "16": "接 SPI Flash，esp32c3-ds p.23",
+    "17": "接 SPI Flash，esp32c3-ds p.23",
+    "18": "USB D-，板子靠它烧录和通信，esp32c3-ds p.21",
+    "19": "USB D+，esp32c3-ds p.21",
+    "20": "UART0 RX（芯片启动时的串口），esp32c3-ds p.14",
+    "21": "UART0 TX（芯片启动时打印日志），esp32c3-ds p.14"
+  },
+  "devices": [
+    {
+      "name": "imu",
+      "part": "MPU6050",
+      "bus": "i2c0",
+      "address": 104,
+      "pins": {
+        "int": 3
+      }
+    },
+    {
+      "name": "ppg",
+      "part": "MAX30102",
+      "bus": "i2c0",
+      "address": 87,
+      "pins": {
+        "int": 10
+      }
+    }
+  ]
+}
