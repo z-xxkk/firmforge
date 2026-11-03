@@ -107,6 +107,7 @@ def harness_files(rules: RuleSet | None, svd: SvdDevice | None, scopes: set[str]
 _CASE = re.compile(r"^(?P<file>[^:\n]+):(?P<line>\d+):(?P<name>.+?):(?P<status>PASS|FAIL|IGNORE)(?::\s*(?P<msg>.*))?\s*$",
                    re.M)
 _SUMMARY = re.compile(r"^(\d+) Tests (\d+) Failures (\d+) Ignored", re.M)
+_DONE = re.compile(r"^\d+ Tests \d+ Failures \d+ Ignored\s*\r?\n(?:OK|FAIL)\b", re.M)
 _CRASH = re.compile(r"Guru Meditation|abort\(\) was called|Backtrace:|rst:0x[0-9a-f]+ \((?:TG\dWDT|RTCWDT|INT_WDT|"
                     r"TASK_WDT|PANIC)|Task watchdog got triggered|stack overflow", re.I)
 
@@ -181,9 +182,11 @@ def parse_board_output(text: str) -> BoardTestResult:
     res.started = i >= 0
     body = text[i + len(BEGIN):] if i >= 0 else text
     j = body.find(END)
-    res.hang = res.started and j < 0
     if j >= 0:
         body = body[:j]
+    # USB 串口偶尔丢几个字节，结束标记可能不完整；Unity 的汇总行加 OK/FAIL 也算正常结束
+    finished = j >= 0 or _DONE.search(body) is not None
+    res.hang = res.started and not finished
     for m in _CASE.finditer(body):
         res.cases.append(CaseResult(m["name"].strip(), m["status"].lower(), (m["msg"] or "").strip(),
                                     f"{m['file'].strip()}:{m['line']}"))

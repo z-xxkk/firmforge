@@ -59,6 +59,11 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(r.verdict(), "fail")
         self.assertIn("失败：WHO_AM_I: 读回 0x68", r.report())
 
+    def test_lost_end_marker_but_summary_present(self):
+        r = parse_board_output(f"{BEGIN}\nmain/t.c:3:a:PASS\n1 Tests 0 Failures 0 Ignored\nOK\n_END\n")
+        self.assertFalse(r.hang)                         # 结束标记丢了几个字节，汇总行仍可判定结束
+        self.assertTrue(r.ok)
+
     def test_unescape_chinese_names(self):
         raw = f"{BEGIN}\n./main/t.c:9:\\xE6\\xB8\\x85\\xE9\\x9B\\xB6 ok:PASS\n1 Tests 0 Failures 0 Ignored\n{END}"
         r = parse_board_output(raw)

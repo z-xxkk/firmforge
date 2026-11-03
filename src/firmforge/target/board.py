@@ -24,7 +24,7 @@ RUN_TIMEOUT_S = 60
 
 # 在 ESP-IDF 的 Python 环境里运行：读串口直到结束标记、崩溃或超时，原样写到标准输出
 READER = r"""
-import sys, time, serial
+import re, sys, time, serial
 port, timeout, end = sys.argv[1], float(sys.argv[2]), sys.argv[3]
 crash = ("Guru Meditation", "abort() was called", "Backtrace:")
 buf = ""
@@ -43,7 +43,8 @@ with s:
             buf += chunk
             sys.stdout.write(chunk)
             sys.stdout.flush()
-            if end in buf or any(c in buf for c in crash):
+            done = re.search(r"\d+ Tests \d+ Failures \d+ Ignored\s*\r?\n(OK|FAIL)", buf)
+            if end in buf or done or any(c in buf for c in crash):
                 time.sleep(0.5)                       # 崩溃时多读一会儿，把回溯信息读完
                 sys.stdout.write(s.read(8192).decode("utf-8", "replace"))
                 break
