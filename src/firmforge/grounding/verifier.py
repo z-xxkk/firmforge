@@ -31,6 +31,8 @@ CHECKLIST: dict[str, tuple[str, ...]] = {
     "uart": ("api", "pin"),
     "gpio": ("api", "pin"),
     "ledc": ("api", "pin", "peripheral"),
+    "rmt": ("api", "pin", "peripheral"),
+    "gptimer": ("api", "peripheral"),
     "adc": ("api", "pin", "peripheral"),
     "mpu6050": ("device", "sequence"),
     "max30102": ("device", "sequence"),

@@ -132,6 +132,16 @@ class EvaluateTest(unittest.TestCase):
             rows = evaluate([TASK], ["verified"], 1, out, make_ctx(d, team, approved, calls), progress=lambda s: None)
             self.assertEqual([r["verdict"] for r in rows], ["pass"])                  # skipped 的会重跑
 
+    def test_max_cost_stops_before_next_run(self):
+        team, calls = FakeTeam(), []
+        with tempfile.TemporaryDirectory() as d:
+            out, msgs = Path(d) / "out", []
+            rows = evaluate([TASK], ["single", "none"], 2, out, make_ctx(d, team, RuleSet(), calls),
+                            progress=msgs.append, max_cost=1e-9)
+            self.assertEqual(len(rows), 1)                                            # 第一次跑完就超了
+            self.assertTrue(any("达到上限" in m for m in msgs))
+            self.assertTrue((out / "summary.md").is_file())
+
     def test_failed_judgement_counts_layer(self):
         rows = [{"task": "a", "config": "none", "run": 1, "verdict": "fail", "failed_layer": "board_test",
                  "cases_passed": 1, "cases_total": 4, "attempts": 6, "tokens": 10, "cost": 0.1, "seconds": 5},

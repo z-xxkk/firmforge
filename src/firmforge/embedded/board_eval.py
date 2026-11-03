@@ -209,8 +209,9 @@ def load_rows(out_dir: Path) -> list[dict]:
 
 
 def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Path, ctx: EvalContext,
-             progress: Callable[[str], None] = print) -> list[dict]:
-    """按 题目 × 配置 × 次数 跑；已经在 runs.jsonl 里的组合跳过（skipped 的会重跑）。"""
+             progress: Callable[[str], None] = print, max_cost: float = 0.0) -> list[dict]:
+    """按 题目 × 配置 × 次数 跑；已经在 runs.jsonl 里的组合跳过（skipped 的会重跑）。
+    max_cost > 0：这次调用累计花费（元）达到就不再开始新的运行（正在跑的一次会跑完）。"""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = load_rows(out_dir)
@@ -218,8 +219,14 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
     rows = [r for r in rows if r["verdict"] != "skipped"]
     todo = [(t, c, n) for n in range(1, runs + 1) for t in tasks for c in configs if (t.id, c, n) not in done]
     progress(f"共 {len(todo)} 次运行要跑（已完成 {len(done)} 次）")
+    spent = 0.0
     for k, (t, c, n) in enumerate(todo, 1):
+        if max_cost > 0 and spent >= max_cost:
+            progress(f"已花 {spent:.2f} 元，达到上限 {max_cost:.2f} 元，停止；还剩 {len(todo) - k + 1} 次没跑，"
+                     f"用同一个输出目录重跑会接着跑")
+            break
         row = run_once(t, c, n, ctx).to_dict()
+        spent += float(row["cost"])
         rows.append(row)
         with (out_dir / "runs.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")

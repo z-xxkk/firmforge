@@ -89,6 +89,10 @@ class SourcesTest(unittest.TestCase):
         with self.assertRaises(SourceError):
             quote_found(doc, 9, "x")
         self.assertEqual(normalize("Ａ１  –\tb"), "A1 - b")
+        # 表格行尾本来就有的连字符不能被当成断行连字符吃掉（实测 ESP32-C3 数据手册 p.21 "GPIO18 USB_D-\n26 GPIO19"）
+        table = Document("ds", "DS", "pdf", "official_manual", pages=("25 GPIO18 USB_D-\n26 GPIO19 USB_D+\n",))
+        self.assertTrue(quote_found(table, 1, "GPIO18 USB_D-"))
+        self.assertTrue(quote_found(table, 1, "GPIO18 USB_D- 26 GPIO19"))
 
     def test_library_round_trip_and_load_text(self):
         with tempfile.TemporaryDirectory() as d:

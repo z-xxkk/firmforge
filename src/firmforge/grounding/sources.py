@@ -119,10 +119,11 @@ def load_document(path: Path, *, id: str, title: str, kind: str, tier: str, url:
 _DASHES = dict.fromkeys(map(ord, "‐‑‒–—―−"), "-")
 
 
-def normalize(text: str) -> str:
-    """全角转半角、统一连字符、去掉断行连字符、空白压成一个空格。"""
+def normalize(text: str, join_hyphens: bool = True) -> str:
+    """全角转半角、统一连字符、去掉断行连字符（join_hyphens）、空白压成一个空格。"""
     t = unicodedata.normalize("NFKC", text).translate(_DASHES)
-    t = re.sub(r"(\w)-\s*\n\s*(\w)", r"\1\2", t)          # 断行连字符：regis-\nter → register
+    if join_hyphens:
+        t = re.sub(r"(\w)-\s*\n\s*(\w)", r"\1\2", t)      # 断行连字符：regis-\nter → register
     return re.sub(r"\s+", " ", t).strip()
 
 
@@ -136,7 +137,12 @@ def quote_found(doc: Document, page: int | None, quote: str) -> bool:
     segments = [s for s in re.split(r"…|\.\.\.", normalize(quote)) if s.strip()]
     if not segments:
         return False
-    hay = _squash(normalize(doc.page(page)))
+    text = doc.page(page)
+    # 两种都试：去掉断行连字符（regis-\nter）和保留原样（表格里行尾本来就有的连字符，例如 USB_D-）
+    return any(_in_order(_squash(normalize(text, j)), segments) for j in (True, False))
+
+
+def _in_order(hay: str, segments: list[str]) -> bool:
     pos = 0
     for seg in segments:
         i = hay.find(_squash(seg), pos)

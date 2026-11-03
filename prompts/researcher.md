@@ -22,7 +22,7 @@ $kinds
   "kind": "api",
   "scope": ["i2c"],
   "text": "I2C 总线用 i2c_new_master_bus() 创建，不用旧的 i2c_driver_install()",
-  "cite": {"doc": "idf-i2c-master-h", "page": null, "section": "i2c_master.h", "quote": "esp_err_t i2c_new_master_bus("},
+  "cite": {"doc": "idf-driver-i2c-master-h", "page": null, "section": "i2c_master.h", "quote": "esp_err_t i2c_new_master_bus("},
   "tier": "official_code",
   "check": {"type": "api_exists", "symbol": "i2c_new_master_bus", "header": "driver/i2c_master.h"}
 }

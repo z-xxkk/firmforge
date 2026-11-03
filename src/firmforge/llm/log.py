@@ -82,3 +82,23 @@ class LoggedLLM:
         self.logger.log(agent=self.agent, model=model, request=self.inner.request_info(),
                         messages=messages, params=params, response=resp, error=None)
         return resp
+
+
+class MeteredLLM:
+    """包装一个 LLMClient：累计 token 和费用。cost_of(模型名, 输入 token, 输出 token) → 元。"""
+
+    def __init__(self, inner, cost_of):
+        self.inner, self.cost_of = inner, cost_of
+        self.prompt_tokens = self.completion_tokens = self.calls = 0
+        self.cost = 0.0
+
+    def request_info(self) -> dict:
+        return self.inner.request_info()
+
+    def complete(self, messages: list[dict], *, model: str, **kw) -> LLMResponse:
+        resp = self.inner.complete(messages, model=model, **kw)
+        self.calls += 1
+        self.prompt_tokens += resp.prompt_tokens
+        self.completion_tokens += resp.completion_tokens
+        self.cost += self.cost_of(model, resp.prompt_tokens, resp.completion_tokens)
+        return resp

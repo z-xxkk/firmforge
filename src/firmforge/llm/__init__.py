@@ -2,7 +2,7 @@
 
 from .client import LLMClient, LLMError, LLMResponse, OpenAICompatClient, redact_headers
 from .fake import FakeLLM
-from .log import CallLogger, LoggedLLM
+from .log import CallLogger, LoggedLLM, MeteredLLM
 
-__all__ = ["LLMClient", "LLMError", "LLMResponse", "OpenAICompatClient", "redact_headers",
+__all__ = ["MeteredLLM", "LLMClient", "LLMError", "LLMResponse", "OpenAICompatClient", "redact_headers",
            "FakeLLM", "CallLogger", "LoggedLLM"]

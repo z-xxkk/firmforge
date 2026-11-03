@@ -84,9 +84,181 @@ sha256 = "dc91f00f65584e06ef36e26c93bf9d91a95fb3c8a1830a9223e53caf678b36af"
 [[doc]]
 id = "linux-inv-mpu"
 title = "Linux 主线驱动 inv_mpu6050/inv_mpu_iio.h（版权 InvenSense；含 MPU-6500 的 WHO_AM_I 0x70 与温度换算常数；TDK 官网 MPU-6500 手册的下载页靠脚本，不能直接下载，DECISIONS 第 89 条）"
-kind = "header"
+kind = "text"
 tier = "community"
 version = "v6.12"
 url = "https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/iio/imu/inv_mpu6050/inv_mpu_iio.h"
 file = "linux_inv_mpu_iio_v6.12.h"
 sha256 = "76ff522acc20b29a69494ebb9c298d40d35f75b76c26f6650f6cf28db3de76df"
+
+# ESP-IDF v6.1 头文件与驱动源码（官方，取自本机安装的 v6.1 源码树，与 GitHub v6.1 标签同一份；DECISIONS 第 93 条）
+
+[[doc]]
+id = "idf-driver-gpio-h"
+title = "ESP-IDF v6.1 esp_driver_gpio/include/driver/gpio.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_gpio/include/driver/gpio.h"
+file = "idf_v6.1/components__esp_driver_gpio__include__driver__gpio.h"
+sha256 = "0e1d2476e807864f9e700bf12ac639d78c4b404e31525eda26c4a288c52e3fc2"
+
+[[doc]]
+id = "idf-hal-gpio-types-h"
+title = "ESP-IDF v6.1 esp_hal_gpio/include/hal/gpio_types.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_hal_gpio/include/hal/gpio_types.h"
+file = "idf_v6.1/components__esp_hal_gpio__include__hal__gpio_types.h"
+sha256 = "8c26fd9c251121827e5eb182c02a1228a21decc8ccc12d0b70207ead76a472c7"
+
+[[doc]]
+id = "idf-driver-i2c-master-h"
+title = "ESP-IDF v6.1 esp_driver_i2c/include/driver/i2c_master.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_i2c/include/driver/i2c_master.h"
+file = "idf_v6.1/components__esp_driver_i2c__include__driver__i2c_master.h"
+sha256 = "d24e2b3d3cd0816ea25b9196908f8991ff1b9437923542598fd0eb1e12302b5a"
+
+[[doc]]
+id = "idf-driver-i2c-types-h"
+title = "ESP-IDF v6.1 esp_driver_i2c/include/driver/i2c_types.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_i2c/include/driver/i2c_types.h"
+file = "idf_v6.1/components__esp_driver_i2c__include__driver__i2c_types.h"
+sha256 = "b097be521ad611af5642aa9278e34ed26f2a4233c1d420c4a273d51cce09588b"
+
+[[doc]]
+id = "idf-driver-uart-h"
+title = "ESP-IDF v6.1 esp_driver_uart/include/driver/uart.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_uart/include/driver/uart.h"
+file = "idf_v6.1/components__esp_driver_uart__include__driver__uart.h"
+sha256 = "1b32eca915e4fbe66e4de493d014f85122a3bc29d0a96ac6d5f63b585a9009d4"
+
+[[doc]]
+id = "idf-hal-uart-types-h"
+title = "ESP-IDF v6.1 esp_hal_uart/include/hal/uart_types.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_hal_uart/include/hal/uart_types.h"
+file = "idf_v6.1/components__esp_hal_uart__include__hal__uart_types.h"
+sha256 = "bc3d826bf916dbb38f91f2924214c7935b4893968e4ceb1b304f5e439f8089c6"
+
+[[doc]]
+id = "idf-driver-ledc-h"
+title = "ESP-IDF v6.1 esp_driver_ledc/include/driver/ledc.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_ledc/include/driver/ledc.h"
+file = "idf_v6.1/components__esp_driver_ledc__include__driver__ledc.h"
+sha256 = "31ddb1a6616a1c867db751dc2ae4bbefd12afd659b16127b113300d29f953c42"
+
+[[doc]]
+id = "idf-hal-ledc-types-h"
+title = "ESP-IDF v6.1 esp_hal_ledc/include/hal/ledc_types.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_hal_ledc/include/hal/ledc_types.h"
+file = "idf_v6.1/components__esp_hal_ledc__include__hal__ledc_types.h"
+sha256 = "824fcc6a05b0344d75827abf90feb3363b208ac46fff2390b7986fe1e56ba507"
+
+[[doc]]
+id = "idf-driver-rmt-rx-h"
+title = "ESP-IDF v6.1 esp_driver_rmt/include/driver/rmt_rx.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_rmt/include/driver/rmt_rx.h"
+file = "idf_v6.1/components__esp_driver_rmt__include__driver__rmt_rx.h"
+sha256 = "dca8d20ba101f395f57ce0b43825eb60336ef80f1a57beee4db49e3729716d68"
+
+[[doc]]
+id = "idf-driver-rmt-common-h"
+title = "ESP-IDF v6.1 esp_driver_rmt/include/driver/rmt_common.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_rmt/include/driver/rmt_common.h"
+file = "idf_v6.1/components__esp_driver_rmt__include__driver__rmt_common.h"
+sha256 = "a45cebe6e55c1aa5dddb162c0f526b2381ce29964c3090132c545eedf43ba9ab"
+
+[[doc]]
+id = "idf-driver-rmt-types-h"
+title = "ESP-IDF v6.1 esp_driver_rmt/include/driver/rmt_types.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_rmt/include/driver/rmt_types.h"
+file = "idf_v6.1/components__esp_driver_rmt__include__driver__rmt_types.h"
+sha256 = "e0f68b7e30b491e5eb28c82502c9fab5c819551cef2afdab7de32e507fd54dec"
+
+[[doc]]
+id = "idf-hal-rmt-types-h"
+title = "ESP-IDF v6.1 esp_hal_rmt/include/hal/rmt_types.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_hal_rmt/include/hal/rmt_types.h"
+file = "idf_v6.1/components__esp_hal_rmt__include__hal__rmt_types.h"
+sha256 = "d47ae37dbabaac2b3900b9a95d6778f75bcba788ae60bc9ef8c64839ebf6c086"
+
+[[doc]]
+id = "idf-driver-gptimer-h"
+title = "ESP-IDF v6.1 esp_driver_gptimer/include/driver/gptimer.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_gptimer/include/driver/gptimer.h"
+file = "idf_v6.1/components__esp_driver_gptimer__include__driver__gptimer.h"
+sha256 = "e51f7da452f9d8236eb72ce0a806f1ba9bcd5e310712bde0b036dc296fa41a84"
+
+[[doc]]
+id = "idf-driver-gptimer-types-h"
+title = "ESP-IDF v6.1 esp_driver_gptimer/include/driver/gptimer_types.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_gptimer/include/driver/gptimer_types.h"
+file = "idf_v6.1/components__esp_driver_gptimer__include__driver__gptimer_types.h"
+sha256 = "db0c518df3dd2b7549154cf9cff8f8418b55eba8d2df8485a65a50ce4db56aa3"
+
+[[doc]]
+id = "idf-c3-rmt-ll-h"
+title = "ESP-IDF v6.1 esp_hal_rmt/esp32c3/include/hal/rmt_ll.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_hal_rmt/esp32c3/include/hal/rmt_ll.h"
+file = "idf_v6.1/components__esp_hal_rmt__esp32c3__include__hal__rmt_ll.h"
+sha256 = "354d4b1a0e67282055b47e25135dcb8e65777e46c2349447f444f8f543a2f817"
+
+[[doc]]
+id = "idf-c3-soc-caps-h"
+title = "ESP-IDF v6.1 soc/esp32c3/include/soc/soc_caps.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/soc/esp32c3/include/soc/soc_caps.h"
+file = "idf_v6.1/components__soc__esp32c3__include__soc__soc_caps.h"
+sha256 = "98501450904a4a3a6d0eb3bc8916445d708da26dfd99b9146365b3c440dc4d28"
+
+[[doc]]
+id = "idf-esp-driver-rmt-src-rmt-rx-c"
+title = "ESP-IDF v6.1 esp_driver_rmt/src/rmt_rx.c"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_rmt/src/rmt_rx.c"
+file = "idf_v6.1/components__esp_driver_rmt__src__rmt_rx.c"
+sha256 = "5a44ce2d4be67b5b28b0d930af388792df524f82394bc8ad9fdaae16f022e198"

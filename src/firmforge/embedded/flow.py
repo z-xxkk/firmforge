@@ -163,6 +163,7 @@ class EmbeddedFlow:
         tier = self.agents.settings.tier(agent.model_tier)
         client = LoggedLLM(self.agents.llm, self.agents.logger, agent.name)
         resp = client.complete(messages, model=tier.name, tools=tools, temperature=agent.temperature,
+                               max_tokens=agent.max_tokens or tier.max_tokens or DEFAULT_MAX_TOKENS,
                                extra_body=tier.extra_body(agent.thinking) or None)
         self.result.prompt_tokens += resp.prompt_tokens
         self.result.completion_tokens += resp.completion_tokens

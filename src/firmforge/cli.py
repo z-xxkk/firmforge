@@ -840,6 +840,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-board", action="store_true", help="不上板（判定只做到编译，结果全部记为 skipped）")
     s.add_argument("--max-attempts", type=int, default=6, help="每个模块最多尝试几次（默认 6）")
     s.add_argument("--plan", action="store_true", help="只列出要跑多少次、verified 缺哪些规则，不调用模型")
+    s.add_argument("--max-cost", type=float, required=True,
+                   help="这次最多花多少元（按缓存未命中价估算）；累计达到就不再开始新的运行，已跑的结果照常保存")
     s.set_defaults(func=cmd_board_eval)
     s = sub.add_parser("rules", help="硬件规则：build 查资料提炼并核对（调用模型、需人工确认）；list 列出；verify 重新核对")
     s.add_argument("action", choices=["build", "list", "verify"])
@@ -973,24 +975,37 @@ def cmd_rules(args) -> int:
     from .orchestrator.events import EventBus
     if not args.scopes:
         raise UsageError("rules build 需要 --scopes，例如 --scopes i2c,mpu6050")
+    from .llm import CallLogger, LoggedLLM, MeteredLLM
+    from .runs import RunDir
     settings = config.load_settings()
-    llm = make_llm(settings)
     reg = default_registry()
     res_agent, chk_agent = reg.get("researcher"), reg.get("rule_checker")
     res_tier, chk_tier = settings.tier(res_agent.model_tier), settings.tier(chk_agent.model_tier)
-    complete = lambda m, tools: llm.complete(m, model=res_tier.name, tools=tools,          # noqa: E731
-                                             temperature=res_agent.temperature,
-                                             extra_body=res_tier.extra_body(res_agent.thinking) or None)
-    semantic = llm_semantic_checker(llm, chk_tier.name, extra_body=chk_tier.extra_body(chk_agent.thinking) or None)
-    bus = EventBus(f"rules-{int(time.time())}")
+    tiers = {t.name: t for t in (res_tier, chk_tier)}
+    meter = MeteredLLM(make_llm(settings), lambda model, pt, ct: tiers[model].cost(
+        pt, ct, ts=time.time(), schedule=settings.pricing) if model in tiers else 0.0)
+    rd = RunDir.create(Path(DEFAULT_RUNS_DIR), "rules")            # 每次调用都留底，事后可查（审计、排错不用再花钱）
+    logger = CallLogger(rd.path, _secrets(settings))
+    res_llm, chk_llm = LoggedLLM(meter, logger, "researcher"), LoggedLLM(meter, logger, "rule_checker")
+    complete = lambda m, tools: res_llm.complete(m, model=res_tier.name, tools=tools,      # noqa: E731
+                                                 temperature=res_agent.temperature,
+                                                 max_tokens=res_agent.max_tokens or res_tier.max_tokens or 8192,
+                                                 extra_body=res_tier.extra_body(res_agent.thinking) or None)
+    semantic = llm_semantic_checker(chk_llm, chk_tier.name, max_tokens=chk_agent.max_tokens or chk_tier.max_tokens or 8192,
+                                    extra_body=chk_tier.extra_body(chk_agent.thinking) or None)
+    bus = EventBus(rd.run_id, rd.events_path)
     bus.subscribe(_print_rule_event)
     verifier = RuleVerifier(library, profile, idf=idf, svd=svd, semantic=semantic)
     builder = RuleBuilder(complete, profile, library, verifier, store, emit=bus.emit,
                           human=None if args.no_human else terminal_rules_human, max_rounds=args.rounds)
-    out = builder.run([s.strip() for s in args.scopes.split(",") if s.strip()])
-    store.save(hwdir / "rules.json")
-    print(f"\n新入库 {len(out.trusted)} 条，复用 {len(out.reused)} 条，待确认 {len(out.pending)} 条，"
-          f"仍被退回 {len(out.rejected)} 条；token {out.prompt_tokens}+{out.completion_tokens}")
+    try:
+        out = builder.run([s.strip() for s in args.scopes.split(",") if s.strip()])
+    finally:                                                        # 中途出错或中断，已入库的规则也保存
+        store.save(hwdir / "rules.json")
+        print(f"\n调用模型 {meter.calls} 次，token {meter.prompt_tokens}+{meter.completion_tokens}，"
+              f"约 {meter.cost:.2f} 元（按缓存未命中价估算）；调用日志：{rd.path}")
+    print(f"新入库 {len(out.trusted)} 条，复用 {len(out.reused)} 条，待确认 {len(out.pending)} 条，"
+          f"仍被退回 {len(out.rejected)} 条")
     for m in out.missing:
         print(f"缺项：{m}")
     print(f"规则库：{hwdir / 'rules.json'}")
@@ -1016,7 +1031,8 @@ def cmd_firmware(args) -> int:
         chk = default_registry().get("rule_checker")
         tier = settings.tier(chk.model_tier)
         verifier = RuleVerifier(library, profile, idf=idf_tree, svd=svd,
-                                semantic=llm_semantic_checker(llm, tier.name, extra_body=tier.extra_body(chk.thinking) or None))
+                                semantic=llm_semantic_checker(llm, tier.name, max_tokens=chk.max_tokens or tier.max_tokens or 8192,
+                                                              extra_body=tier.extra_body(chk.thinking) or None))
     try:
         idf = IdfEnv.load(want_version=str(profile.framework_version.value))
     except IdfUnavailable as exc:
@@ -1057,6 +1073,7 @@ def cmd_board_eval(args) -> int:
              else [load_board_task(root / t.strip()) for t in args.tasks.split(",") if t.strip()])
     hwdir, profile, library, store, _, _ = _hw_context(args.hw, need_sources="unverified" in configs)
     print(f"{len(tasks)} 道题 × {len(configs)} 种配置 × {args.runs} 次 = {len(tasks) * len(configs) * args.runs} 次运行")
+    print(f"花费上限 {args.max_cost:.2f} 元：累计达到后不再开始新的运行")
     if "verified" in configs:
         for t in tasks:
             miss = missing_scopes(store, t.scopes)
@@ -1077,7 +1094,7 @@ def cmd_board_eval(args) -> int:
                       build_root=Path(".ff_data") / "idf_build", max_attempts=args.max_attempts,
                       secrets=_secrets(settings))
     out = Path(args.out)
-    evaluate(tasks, configs, args.runs, out, ctx)
+    evaluate(tasks, configs, args.runs, out, ctx, max_cost=args.max_cost)
     print(f"\n汇总：{out / 'summary.md'}\n明细：{out / 'runs.csv'}")
     print((out / "summary.md").read_text(encoding="utf-8"))
     return EXIT_PASS
