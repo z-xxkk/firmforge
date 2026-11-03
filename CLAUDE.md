@@ -77,6 +77,9 @@ firmforge mcp                                  # MCP 服务端（stdio）；--se
 firmforge bench --out results/bench            # 性能测试（假模型，不花钱）
 firmforge stats .ff_runs                       # 从运行记录统计延迟
 firmforge gui                                  # 桌面软件（先 pip install -e .[gui]）
+firmforge rules build --scopes i2c,mpu6050      # 查资料提炼规则（调用模型，需人工确认）
+firmforge firmware --spec 需求.md                # 嵌入式新流程：规则 → 设计 → 编码、测试 → 上板
+firmforge check-board-tasks [题目 id]            # 上板评测题自检（没有板子时编译标准答案和变异体）
 docker build -t firmforge-gui -f docker/Dockerfile.gui .   # 界面测试与截图用的镜像（offscreen）
 docker build -t firmforge -f docker/Dockerfile .
 docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge <子命令>
