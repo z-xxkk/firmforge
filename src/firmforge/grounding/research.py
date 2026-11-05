@@ -144,6 +144,8 @@ def research_messages(profile: HardwareProfile, scopes: list[str], library: Sour
     b = Brief(intent=intent, location="规则 › 查资料并提炼规则")
     b.constraints += ["只能引用已登记的资料；引用原文必须从 doc_page 读到的文字里逐字摘抄",
                       "官方资料优先：官方手册 > 官方勘误 > 官方代码 > 官方例程 > 官方文档的非官方镜像 > 社区资料",
+                      "等级为 user 的上板实测记录是在这块板子上实测的结果：与其他资料冲突时以实测为准，并引用实测记录的原句"
+                      "（DECISIONS 第 95 条）",
                       f"开发框架版本以硬件档案为准：{profile.framework.value} {profile.framework_version.value}",
                       "不确定的事实不要写成规则"]
     b.attach("硬件档案", "\n".join(profile.summary_lines()))

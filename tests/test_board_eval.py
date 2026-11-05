@@ -174,6 +174,22 @@ class EvaluateTest(unittest.TestCase):
             self.assertTrue(any("达到上限" in m for m in msgs))
             self.assertTrue((out / "summary.md").is_file())
 
+    def test_measured_rules_are_disclosed(self):
+        import dataclasses
+        from firmforge.grounding.rules import Citation
+        team, calls = FakeTeam(), []
+        approved = RuleSet([r.advance("checked").advance("approved") for r in good_rules()])
+        approved.put(dataclasses.replace(next(iter(approved)), id="R-MAX-009", tier="user", scope=("i2c",),
+                                         text="测温要等 DIE_TEMP_RDY，不能以 TEMP_EN 清零为准",
+                                         cite=Citation("board-measured", None, "M-003", "TEMP_EN 在置位后约 0.26 ms 就自动清零")))
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "out"
+            evaluate([TASK], ["verified"], 1, out, make_ctx(d, team, approved, calls), progress=lambda s: None)
+            summary = (out / "summary.md").read_text(encoding="utf-8")
+            self.assertIn("披露：来自上板实测记录的规则", summary)
+            self.assertIn("R-MAX-009", summary)
+            self.assertNotIn("R-I2C-001 |", summary.split("披露")[1])                 # 来自资料的规则不列
+
     def test_failed_judgement_counts_layer(self):
         rows = [{"task": "a", "config": "none", "run": 1, "verdict": "fail", "failed_layer": "board_test",
                  "cases_passed": 1, "cases_total": 4, "attempts": 6, "tokens": 10, "cost": 0.1, "seconds": 5},

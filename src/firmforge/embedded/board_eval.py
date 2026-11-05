@@ -274,11 +274,16 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
                  + (f"（{row['failed_layer']}）" if row["failed_layer"] else "")
                  + f"，{cases}，{row['tokens']} token，{row['cost']:.4f} 元，{row['seconds']:.0f} 秒"
                  + (f"；{row['note']}" if row["note"] else ""))
-    write_outputs(rows, out_dir, configs)
+    write_outputs(rows, out_dir, configs, ctx.rules if "verified" in configs else None)
     return rows
 
 
-def write_outputs(rows: list[dict], out_dir: Path, configs: list[str]) -> None:
+def measured_rules(rules: RuleSet | None) -> list[Rule]:
+    """引用上板实测记录（等级 user）的已确认规则：人按实测补充或纠正的知识，汇总里必须披露（DECISIONS 第 95 条）。"""
+    return [r for r in (rules.select(None, "approved") if rules is not None else []) if r.tier == "user"]
+
+
+def write_outputs(rows: list[dict], out_dir: Path, configs: list[str], verified_rules: RuleSet | None = None) -> None:
     with (Path(out_dir) / "runs.csv").open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         w.writeheader()
@@ -295,6 +300,20 @@ def write_outputs(rows: list[dict], out_dir: Path, configs: list[str]) -> None:
             total += float(d.get("cost", 0))
             lines.append(f"| {d['task']} | {len(d['rules'])} | {d.get('tokens', 0)} | {float(d.get('cost', 0)):.4f} |")
         lines.append(f"| 合计 | | | {total:.4f} |")
+        text += "\n".join(lines) + "\n"
+    shown = measured_rules(verified_rules)
+    for f in gen:
+        shown += [r for r in map(Rule.from_dict, json.loads(f.read_text(encoding="utf-8"))["rules"]) if r.tier == "user"]
+    if shown:
+        lines = ["", "## 披露：来自上板实测记录的规则（DECISIONS 第 95 条）", "",
+                 "这些规则的依据是在本板上实测的结果，而不是芯片或器件资料；verified 的规则还经过人工确认。", "",
+                 "| 规则 | 内容 | 引用 |", "|---|---|---|"]
+        seen = set()
+        for r in shown:
+            if (r.id, r.text) in seen:
+                continue
+            seen.add((r.id, r.text))
+            lines.append(f"| {r.id} | {r.text} | {r.cite.doc}：{r.cite.quote[:60]} |")
         text += "\n".join(lines) + "\n"
     (Path(out_dir) / "summary.md").write_text(text, encoding="utf-8")
 

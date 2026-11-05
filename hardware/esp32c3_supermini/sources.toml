@@ -91,6 +91,17 @@ url = "https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/iio/imu/in
 file = "linux_inv_mpu_iio_v6.12.h"
 sha256 = "76ff522acc20b29a69494ebb9c298d40d35f75b76c26f6650f6cf28db3de76df"
 
+# 上板实测记录（DECISIONS 第 95 条）：与资料不符或资料没写清的硬件事实，等级 user，规则引用时会在评测汇总中披露
+[[doc]]
+id = "board-measured"
+title = "ESP32-C3 SuperMini 上板实测记录（负责人的板子，2026-11-03）"
+kind = "text"
+tier = "user"
+version = "2026-11-03"
+url = ""
+file = "../../hardware/esp32c3_supermini/measured.md"
+sha256 = "2cbec90a7a1c528e583434e82718eec28f7075f3b8ec1068e0afcac2918b0193"
+
 # ESP-IDF v6.1 头文件与驱动源码（官方，取自本机安装的 v6.1 源码树，与 GitHub v6.1 标签同一份；DECISIONS 第 93 条）
 
 [[doc]]
