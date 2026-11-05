@@ -36,10 +36,10 @@ from ..target.esp_idf import DEFAULT_REQUIRES, IdfEnv, IdfProject
 from ..target.harness import TEST_REQUIRES, harness_files
 from .board_task import BoardTask, JudgeResult, hidden_case_count, judge_on_board
 from .design import Design, DesignModule
-from .flow import EmbeddedFlow, FlowResult, _Agents
+from .flow import MAX_FORMAT_RETRIES, EmbeddedFlow, FlowResult, _Agents
 from ..grounding.research import parse_rules, research_messages
 from ..grounding.rules import Rule
-from .roles import coder_messages, coder_repair_message, parse_output
+from .roles import coder_messages, coder_repair_message, format_reminder, parse_output
 
 CONFIGS = ("single", "none", "unverified", "verified")
 CSV_FIELDS = ("task", "config", "run", "verdict", "failed_layer", "cases_passed", "cases_total", "failed_cases",
@@ -136,9 +136,17 @@ def run_single(task: BoardTask, ctx: EvalContext, name: str) -> tuple[FlowResult
                        requires=DEFAULT_REQUIRES + TEST_REQUIRES + task.requires) if ctx.idf is not None else None)
     attempt = 0
     for attempt in range(1, ctx.max_attempts + 1):
-        resp = agents.call("coder-strong", msgs, m.id, attempt=attempt, purpose="编码" if attempt == 1 else "改代码")
-        files.update(parse_output(resp.text, set(m.files)).files)
-        msgs = msgs + [{"role": "assistant", "content": resp.text}]
+        need = sorted(f for f in m.files if f.endswith(".c") and f not in files) if attempt == 1 else []
+        for k in range(MAX_FORMAT_RETRIES + 1):                  # 没按格式交文件：当场补要（和多 Agent 流程一样）
+            resp = agents.call("coder-strong", msgs, m.id, attempt=attempt, purpose="编码" if attempt == 1 else "改代码")
+            out = parse_output(resp.text, set(m.files))
+            files.update(out.files)
+            msgs = msgs + [{"role": "assistant", "content": resp.text}]
+            missing = [f for f in need if f not in files] or ([] if out.files else sorted(f for f in m.files if f.endswith(".c")))
+            if not missing or k == MAX_FORMAT_RETRIES:
+                break
+            bus.emit("format_retry", m.id, agent="coder-strong", attempt=attempt, missing=missing, round=k + 1)
+            msgs = msgs + [{"role": "user", "content": format_reminder(missing, out.rejected)}]
         if proj is None:
             break
         # 带上平台的测试主程序（没有用例），否则缺 app_main 链接不过，Agent 会收到和它的代码无关的报错
@@ -250,6 +258,8 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
     rows = load_rows(out_dir)
     done = {(r["task"], r["config"], r["run"]) for r in rows if r["verdict"] != "skipped"}
     rows = [r for r in rows if r["verdict"] != "skipped"]
+    (out_dir / "runs.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                                        encoding="utf-8")         # 过期的 skipped 行去掉（会重跑）
     todo = [(t, c, n) for n in range(1, runs + 1) for t in tasks for c in configs if (t.id, c, n) not in done]
     progress(f"共 {len(todo)} 次运行要跑（已完成 {len(done)} 次）")
     spent = 0.0
@@ -278,9 +288,14 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
     return rows
 
 
+MEASURED_DOCS = ("board-measured",)        # 上板实测记录的资料编号（DECISIONS 第 95 条）
+
+
 def measured_rules(rules: RuleSet | None) -> list[Rule]:
-    """引用上板实测记录（等级 user）的已确认规则：人按实测补充或纠正的知识，汇总里必须披露（DECISIONS 第 95 条）。"""
-    return [r for r in (rules.select(None, "approved") if rules is not None else []) if r.tier == "user"]
+    """引用上板实测记录的已确认规则：人按实测补充或纠正的知识，汇总里必须披露（DECISIONS 第 95 条）。
+    按规则引用的资料判断（规则自己写的 tier 可能不准）。"""
+    return [r for r in (rules.select(None, "approved") if rules is not None else [])
+            if r.cite.doc in MEASURED_DOCS or r.tier == "user"]
 
 
 def write_outputs(rows: list[dict], out_dir: Path, configs: list[str], verified_rules: RuleSet | None = None) -> None:
@@ -301,19 +316,17 @@ def write_outputs(rows: list[dict], out_dir: Path, configs: list[str], verified_
             lines.append(f"| {d['task']} | {len(d['rules'])} | {d.get('tokens', 0)} | {float(d.get('cost', 0)):.4f} |")
         lines.append(f"| 合计 | | | {total:.4f} |")
         text += "\n".join(lines) + "\n"
-    shown = measured_rules(verified_rules)
+    shown = [("verified（规则库，人工确认过）", r) for r in measured_rules(verified_rules)]
     for f in gen:
-        shown += [r for r in map(Rule.from_dict, json.loads(f.read_text(encoding="utf-8"))["rules"]) if r.tier == "user"]
+        d = json.loads(f.read_text(encoding="utf-8"))
+        shown += [(f"unverified（{d['task']}，未核对）", r)
+                  for r in measured_rules(RuleSet([Rule.from_dict(x) for x in d["rules"]]))]
     if shown:
         lines = ["", "## 披露：来自上板实测记录的规则（DECISIONS 第 95 条）", "",
-                 "这些规则的依据是在本板上实测的结果，而不是芯片或器件资料；verified 的规则还经过人工确认。", "",
-                 "| 规则 | 内容 | 引用 |", "|---|---|---|"]
-        seen = set()
-        for r in shown:
-            if (r.id, r.text) in seen:
-                continue
-            seen.add((r.id, r.text))
-            lines.append(f"| {r.id} | {r.text} | {r.cite.doc}：{r.cite.quote[:60]} |")
+                 "这些规则的依据是在本板上实测的结果，而不是芯片或器件资料。", "",
+                 "| 配置 | 规则 | 内容 | 引用 |", "|---|---|---|---|"]
+        for where, r in shown:
+            lines.append(f"| {where} | {r.id} | {r.text} | {r.cite.doc}：{r.cite.quote[:60]} |")
         text += "\n".join(lines) + "\n"
     (Path(out_dir) / "summary.md").write_text(text, encoding="utf-8")
 

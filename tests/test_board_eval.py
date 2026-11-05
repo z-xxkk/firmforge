@@ -190,6 +190,41 @@ class EvaluateTest(unittest.TestCase):
             self.assertIn("R-MAX-009", summary)
             self.assertNotIn("R-I2C-001 |", summary.split("披露")[1])                 # 来自资料的规则不列
 
+    def test_markdown_code_fence_gets_format_retry(self):
+        # 试点里 deepseek-flash 把文件写成 ```c 代码块：程序要当场提醒格式再要，而不是当成"没交代码"往下走
+        class Sloppy(FakeTeam):
+            def __init__(self):
+                super().__init__()
+                self.first = {"coder": True, "tester": True}
+
+            def __call__(self, messages):
+                system = messages[0]["content"]
+                role = "coder" if "资深嵌入式 C 工程师" in system else "tester" if "测试工程师" in system else ""
+                if role and self.first[role]:
+                    self.first[role] = False
+                    self.seen.append("\n".join(m["content"] or "" for m in messages))
+                    return "```c\n/* GOOD */\nint x;\n```"
+                return super().__call__(messages)
+
+        for cfg in ("none", "single"):
+            with self.subTest(config=cfg):
+                team, calls = Sloppy(), []
+                with tempfile.TemporaryDirectory() as d:
+                    rows = evaluate([TASK], [cfg], 1, Path(d) / "out", make_ctx(d, team, RuleSet(), calls),
+                                    progress=lambda s: None)
+                    self.assertEqual(rows[0]["verdict"], "pass")
+                    self.assertTrue(any("程序只认下面这种文件块" in t for t in team.seen))
+                    events = (Path(rows[0]["run_dir"]) / "events.jsonl").read_text(encoding="utf-8")
+                    self.assertIn("format_retry", events)
+
+    def test_disclosure_uses_cited_document(self):
+        import dataclasses
+        from firmforge.embedded.board_eval import measured_rules
+        from firmforge.grounding.rules import Citation
+        r = dataclasses.replace(next(iter(good_rules())), status="approved", tier="official_manual",
+                                cite=Citation("board-measured", None, "M-003", "x"))
+        self.assertEqual([x.id for x in measured_rules(RuleSet([r]))], [r.id])        # 等级写错也照样披露
+
     def test_failed_judgement_counts_layer(self):
         rows = [{"task": "a", "config": "none", "run": 1, "verdict": "fail", "failed_layer": "board_test",
                  "cases_passed": 1, "cases_total": 4, "attempts": 6, "tokens": 10, "cost": 0.1, "seconds": 5},

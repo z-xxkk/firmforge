@@ -69,6 +69,17 @@ def parse_output(text: str, allowed: set[str]) -> AgentOutput:
     return out
 
 
+def format_reminder(missing: list[str], rejected: list[tuple[str, str]] | None = None) -> str:
+    """回复里没找到要交的文件块时，当场提醒格式（便宜模型常把代码写成 ```c 代码块）。"""
+    lines = ["你的回复里没有找到这些文件：" + "、".join(f"main/{p}" for p in missing) + "。",
+             "程序只认下面这种文件块，不认 ```c 代码块。请把每个文件完整地按这个格式重新输出：", ""]
+    for p in missing:
+        lines += [f"<<<FILE {p}", "…完整文件内容…", ">>>FILE", ""]
+    if rejected:
+        lines.append("这些文件块没有被收下：" + "；".join(f"{p}（{why}）" for p, why in rejected[:5]))
+    return "\n".join(lines).rstrip()
+
+
 def _deps_block(dep_headers: dict[str, str]) -> str:
     return "\n\n".join(f"`main/{p}`：\n\n```c\n{c.rstrip()}\n```" for p, c in sorted(dep_headers.items())) or "（无）"
 

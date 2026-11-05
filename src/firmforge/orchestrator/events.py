@@ -20,6 +20,7 @@ EVENT_TYPES = {
     "agent_started", "agent_finished",
     # 判定与循环
     "verify_started", "verify_finished", "diagnosis", "escalated", "rollback",
+    "format_retry",                 # Agent 没按格式交文件，当场补要（嵌入式新流程）
     # 经验库
     "experience_saved", "experience_used",
     # 工具（DECISIONS 第 63 条）

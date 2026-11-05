@@ -2,7 +2,7 @@
 
 ## 产出
 
-只写一个文件 `test/test_<模块名>.c`：
+只写一个文件 `test/test_<模块名>.c`，用下面的文件块格式完整输出。**程序只认这种文件块，不认 ```c 代码块**：
 
 <<<FILE test/test_imu.c
 #include "unity.h"

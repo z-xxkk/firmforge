@@ -47,10 +47,11 @@ from ..target.host_test import run_host_tests
 from ..tools import ToolContext, ToolPipeline, default_registry as default_tools
 from ..tools.loop import call_with_tools
 from .design import Design, DesignModule, design_from_text, designer_messages, designer_retry_message
-from .roles import (coder_messages, coder_repair_message, diagnoser_messages, parse_diagnosis, parse_output,
-                    test_file, tester_messages, tester_repair_message)
+from .roles import (coder_messages, coder_repair_message, diagnoser_messages, format_reminder, parse_diagnosis,
+                    parse_output, test_file, tester_messages, tester_repair_message)
 
 RULE_MODES = ("verified", "unverified", "none")
+MAX_FORMAT_RETRIES = 2              # 没按格式交文件时，当场补要几次
 MAX_DESIGN_TRIES = 3
 DEFAULT_MAX_TOKENS = 8192
 
@@ -256,16 +257,17 @@ class EmbeddedFlow:
         deps_h = self._dep_headers(design, m)
         c_msgs = coder_messages(self.spec, self.profile, rules, design, m, deps_h,
                                 locked_header=self.locked.get(m.header))
-        cr = self.agents.call(self.coder, c_msgs, m.id, purpose="编码", tools=self.rule_mode != "none")
-        out = parse_output(cr.text, set(m.files))
+        writable = set(m.files)
+        need_code = {f for f in writable if f.endswith(".c")} or writable     # 第一次要交齐全部 .c 文件
+        c_conv, out = self._ask_files(self.coder, c_msgs, m.id, writable, need_code, attempt=1, purpose="编码",
+                                      tools=self.rule_mode != "none")
         mr.files.update(out.files)
         self._new_facts(out.facts)
         header = self.locked.get(m.header) or mr.files.get(m.header, "")
         t_msgs = tester_messages(self.spec, self.profile, rules, m, header, deps_h)
-        tr = self.agents.call("tester", t_msgs, m.id, purpose="写测试")
-        mr.tests.update(parse_output(tr.text, {test_file(m)}).files)
-        c_conv = c_msgs + [{"role": "assistant", "content": cr.text}]
-        t_conv = t_msgs + [{"role": "assistant", "content": tr.text}]
+        t_conv, tout = self._ask_files("tester", t_msgs, m.id, {test_file(m)}, {test_file(m)}, attempt=1,
+                                       purpose="写测试")
+        mr.tests.update(tout.files)
         for attempt in range(1, self.max_attempts + 1):
             mr.attempts = attempt
             verdict, layer, report = self._check(design, m, mr, rules, attempt)
@@ -289,19 +291,39 @@ class EmbeddedFlow:
                 rules = self._dispute_rule(rules, diag)
             if diag["blame"] == "test":
                 msg = tester_repair_message(attempt, self.max_attempts, report, mr.files, diag)
-                resp = self.agents.call("tester", t_conv + [{"role": "user", "content": msg}], m.id,
-                                        attempt=attempt + 1, purpose="改测试")
-                mr.tests.update(parse_output(resp.text, {test_file(m)}).files)
+                t_conv, tout = self._ask_files("tester", t_conv + [{"role": "user", "content": msg}], m.id,
+                                               {test_file(m)}, {test_file(m)}, attempt=attempt + 1, purpose="改测试")
+                mr.tests.update(tout.files)
             else:
                 msg = coder_repair_message(attempt, self.max_attempts, report, diag)
-                resp = self.agents.call(self.coder, c_conv + [{"role": "user", "content": msg}], m.id,
-                                        attempt=attempt + 1, purpose="改代码", tools=self.rule_mode != "none")
-                o = parse_output(resp.text, set(m.files))
+                # 修改轮可以只交改动的文件，但至少要交一个
+                c_conv, o = self._ask_files(self.coder, c_conv + [{"role": "user", "content": msg}], m.id, writable,
+                                            None, attempt=attempt + 1, purpose="改代码", tools=self.rule_mode != "none")
                 mr.files.update(o.files)
                 self._new_facts(o.facts)
         mr.verdict = "fail"
         self.bus.emit("node_failed", m.id, verdict="fail", attempts=mr.attempts, note=mr.last_report[-300:])
         return mr
+
+    def _ask_files(self, agent: str, conv: list[dict], node: str, allowed: set[str], need: set[str] | None, *,
+                   attempt: int, purpose: str, tools: bool = False):
+        """调用 Agent 并取文件块；need 里的文件没交齐（need 为 None 时：一个文件都没交）就带着格式提醒当场再要，
+        最多 MAX_FORMAT_RETRIES 次。返回 (加上本次回复的对话, 解析结果)。"""
+        for k in range(MAX_FORMAT_RETRIES + 1):
+            resp = self.agents.call(agent, conv, node, attempt=attempt, purpose=purpose if k == 0 else purpose + "（补交文件）",
+                                    tools=tools)
+            out = parse_output(resp.text, allowed)
+            conv = conv + [{"role": "assistant", "content": resp.text}]
+            if need is None:
+                missing = [] if out.files else (sorted(f for f in allowed if f.endswith(".c")) or sorted(allowed))
+            else:
+                missing = sorted(need - set(out.files))
+            if not missing:
+                return conv, out
+            self.bus.emit("format_retry", node, agent=agent, attempt=attempt, missing=missing, round=k + 1)
+            if k < MAX_FORMAT_RETRIES:
+                conv = conv + [{"role": "user", "content": format_reminder(missing, out.rejected)}]
+        return conv, out
 
     def _diagnose(self, m: DesignModule, mr: ModuleResult, rules: RuleSet, layer: str, report: str,
                   attempt: int) -> dict:
