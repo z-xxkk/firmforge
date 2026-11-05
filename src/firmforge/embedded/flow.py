@@ -140,6 +140,8 @@ class EmbeddedFlow:
     def _rules_for_flow(self) -> RuleSet:
         if self.rule_mode == "none":
             return RuleSet()
+        if not self.build_rules:                       # 评测：规则事先准备好（verified 用规则库，unverified 用每题生成一次的）
+            return self.rules
         if self.fixed_design is not None:              # 评测：只查本题涉及的外设和器件
             scopes = sorted({x for m in self.fixed_design.modules for x in m.scopes} - {"all"})
         else:
@@ -150,8 +152,6 @@ class EmbeddedFlow:
             rules, _ = parse_rules(resp.text)
             return RuleSet([replace(r, status="approved", notes=r.notes + ("规则模式 unverified：未核对",))
                             for r in rules])
-        if not self.build_rules:
-            return self.rules
         builder = RuleBuilder(self._research_with_tools, self.profile, self.library, self.verifier, self.rules,
                               emit=self.bus.emit, human=self.human)
         builder.run(scopes)

@@ -3,7 +3,8 @@
 配置（每一级只比上一级多一样东西，便于说明"多出来的效果来自哪里"）：
 - single：单 Agent 基线。一个编码 Agent，不给规则、不写测试，只把编译错误反馈给它，最多 max_attempts 次；
 - none：多 Agent 流程（编码、测试 Agent 上板测试、诊断修正），不给规则；
-- unverified：再加上查资料 Agent 当场提炼、没有核对的规则；
+- unverified：再加上查资料 Agent 提炼、没有核对的规则（每道题生成一次，各次运行复用，DECISIONS 第 94 条；
+  生成的费用单独记在 unverified_rules/<题目>.json，汇总里单列）；
 - verified：改用经过规则判定器核对、人工确认过的规则库（事先用 `firmforge rules build` 建好）。
 
 判定（所有配置相同，Agent 看不到）：固定判定规则 tasks_board/judge_rules.json 的合规检查 → 编译 →
@@ -18,7 +19,7 @@ from __future__ import annotations
 import csv
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
@@ -36,6 +37,8 @@ from ..target.harness import TEST_REQUIRES, harness_files
 from .board_task import BoardTask, JudgeResult, hidden_case_count, judge_on_board
 from .design import Design, DesignModule
 from .flow import EmbeddedFlow, FlowResult, _Agents
+from ..grounding.research import parse_rules, research_messages
+from ..grounding.rules import Rule
 from .roles import coder_messages, coder_repair_message, parse_output
 
 CONFIGS = ("single", "none", "unverified", "verified")
@@ -80,8 +83,9 @@ class EvalContext:
     board: object | None                 # target.board.BoardRunner
     runs_root: Path
     build_root: Path
-    max_attempts: int = 6
-    registry: Registry | None = None
+    max_attempts: int = 4
+    registry: Registry | None = None     # 评测时用 Registry.with_overrides 统一档位和思考强度
+    rules_cache: Path | None = None      # 每题一份未核对规则；None 时用 <输出目录>/unverified_rules
     secrets: tuple[str, ...] = ()
     subscribers: tuple[Callable[[dict], None], ...] = ()
     judge_fn: Callable[..., JudgeResult] = judge_on_board      # 单元测试里换成假的判定
@@ -153,6 +157,32 @@ def run_single(task: BoardTask, ctx: EvalContext, name: str) -> tuple[FlowResult
     return res, files, attempt
 
 
+# ---------------------------------------------------------------- 未核对规则（每题一次）
+
+def unverified_rules(task: BoardTask, ctx: EvalContext) -> RuleSet:
+    """查资料 Agent 为这道题的适用范围提炼规则，不核对、不经人工，直接当作已确认使用；结果缓存，同一题各次运行复用。"""
+    cache = Path(ctx.rules_cache) / f"{task.id}.json"
+    if cache.is_file():
+        data = json.loads(cache.read_text(encoding="utf-8"))
+        return RuleSet([Rule.from_dict(d) for d in data["rules"]])
+    rd = RunDir.create(ctx.runs_root, f"eval-rules-{task.id}")
+    bus = EventBus(rd.run_id, rd.events_path)
+    res = FlowResult(rd.path)
+    agents = _Agents(ctx.llm, ctx.settings, ctx.registry or default_registry(), bus,
+                     CallLogger(rd.path, list(ctx.secrets)), res, ctx.library)
+    scopes = sorted(set(task.scopes) - {"all"})
+    resp = agents.call("researcher", research_messages(ctx.profile, scopes, ctx.library), "rules",
+                       purpose="提炼规则（不核对）", tools=ctx.library is not None)
+    rules, errors = parse_rules(resp.text)
+    rules = [replace(r, status="approved", notes=r.notes + ("规则模式 unverified：未核对",)) for r in rules]
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"task": task.id, "scopes": scopes, "rules": [r.to_dict() for r in rules],
+                                 "parse_errors": errors[:20], "tokens": res.prompt_tokens + res.completion_tokens,
+                                 "cost": round(res.cost, 6), "run_dir": str(rd.path)}, ensure_ascii=False, indent=2),
+                     encoding="utf-8")
+    return RuleSet(rules)
+
+
 # ---------------------------------------------------------------- 一次运行
 
 def run_once(task: BoardTask, cfg: str, run_no: int, ctx: EvalContext) -> EvalRow:
@@ -169,7 +199,8 @@ def run_once(task: BoardTask, cfg: str, run_no: int, ctx: EvalContext) -> EvalRo
         res, files, attempts = run_single(task, ctx, name)
     else:
         design = task_design(task)
-        rules = RuleSet(list(ctx.rules)) if cfg == "verified" else RuleSet()
+        rules = (RuleSet(list(ctx.rules)) if cfg == "verified" else
+                 unverified_rules(task, ctx) if cfg == "unverified" else RuleSet())
         flow = EmbeddedFlow(llm=ctx.llm, settings=ctx.settings, profile=ctx.profile,
                             spec=task.spec_path.read_text(encoding="utf-8"), rules=rules,
                             library=ctx.library if cfg != "none" else None, verifier=None, runs_root=ctx.runs_root,
@@ -214,12 +245,16 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
     max_cost > 0：这次调用累计花费（元）达到就不再开始新的运行（正在跑的一次会跑完）。"""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    if ctx.rules_cache is None:
+        ctx.rules_cache = out_dir / "unverified_rules"
     rows = load_rows(out_dir)
     done = {(r["task"], r["config"], r["run"]) for r in rows if r["verdict"] != "skipped"}
     rows = [r for r in rows if r["verdict"] != "skipped"]
     todo = [(t, c, n) for n in range(1, runs + 1) for t in tasks for c in configs if (t.id, c, n) not in done]
     progress(f"共 {len(todo)} 次运行要跑（已完成 {len(done)} 次）")
     spent = 0.0
+    cache = Path(ctx.rules_cache)
+    known = {f.name for f in cache.glob("*.json")}
     for k, (t, c, n) in enumerate(todo, 1):
         if max_cost > 0 and spent >= max_cost:
             progress(f"已花 {spent:.2f} 元，达到上限 {max_cost:.2f} 元，停止；还剩 {len(todo) - k + 1} 次没跑，"
@@ -227,6 +262,10 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
             break
         row = run_once(t, c, n, ctx).to_dict()
         spent += float(row["cost"])
+        for f in cache.glob("*.json"):                     # 这次新生成的未核对规则也算进花费
+            if f.name not in known:
+                known.add(f.name)
+                spent += float(json.loads(f.read_text(encoding="utf-8")).get("cost", 0))
         rows.append(row)
         with (out_dir / "runs.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -245,7 +284,19 @@ def write_outputs(rows: list[dict], out_dir: Path, configs: list[str]) -> None:
         w.writeheader()
         for r in rows:
             w.writerow({**r, "failed_cases": "；".join(r["failed_cases"])})
-    (Path(out_dir) / "summary.md").write_text(summarize(rows, configs), encoding="utf-8")
+    text = summarize(rows, configs)
+    gen = sorted((Path(out_dir) / "unverified_rules").glob("*.json"))
+    if gen:
+        lines = ["", "## 未核对规则（每题生成一次，各次运行复用；费用不含在上表里）", "",
+                 "| 题目 | 规则数 | token | 成本（元） |", "|---|---|---|---|"]
+        total = 0.0
+        for f in gen:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            total += float(d.get("cost", 0))
+            lines.append(f"| {d['task']} | {len(d['rules'])} | {d.get('tokens', 0)} | {float(d.get('cost', 0)):.4f} |")
+        lines.append(f"| 合计 | | | {total:.4f} |")
+        text += "\n".join(lines) + "\n"
+    (Path(out_dir) / "summary.md").write_text(text, encoding="utf-8")
 
 
 def summarize(rows: list[dict], configs: list[str] | None = None) -> str:

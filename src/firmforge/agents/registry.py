@@ -139,6 +139,15 @@ class Registry:
     def names(self) -> list[str]:
         return list(self._order)
 
+    def with_overrides(self, tier: str | None = None, thinking: str | None = None) -> "Registry":
+        """复制一份：所有 Agent 都改用同一档位和思考强度（评测时按同一模型比较各配置；不改原来的定义）。"""
+        from dataclasses import replace
+        out = Registry()
+        for name in self._order:
+            for d in self._defs[name].values():
+                out.register(replace(d, model_tier=tier or d.model_tier, thinking=thinking or d.thinking))
+        return out
+
     def versions(self, name: str) -> list[str]:
         return sorted(self._defs.get(name, {}), key=_version_key)
 

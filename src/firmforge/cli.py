@@ -838,7 +838,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--tasks-dir", default="tasks_board")
     s.add_argument("--port", help="板子串口（默认自动找）")
     s.add_argument("--no-board", action="store_true", help="不上板（判定只做到编译，结果全部记为 skipped）")
-    s.add_argument("--max-attempts", type=int, default=6, help="每个模块最多尝试几次（默认 6）")
+    s.add_argument("--max-attempts", type=int, default=4, help="每个模块最多尝试几次（默认 4，DECISIONS 第 94 条）")
+    s.add_argument("--tier", choices=["fast", "strong"], default="fast",
+                   help="所有 Agent 用这一档（默认 fast；四种配置用同一个模型才能比较）")
+    s.add_argument("--think", choices=["off", "low", "high", "max"], default="low", help="思考强度（默认 low）")
     s.add_argument("--plan", action="store_true", help="只列出要跑多少次、verified 缺哪些规则，不调用模型")
     s.add_argument("--max-cost", type=float, required=True,
                    help="这次最多花多少元（按缓存未命中价估算）；累计达到就不再开始新的运行，已跑的结果照常保存")
@@ -849,6 +852,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--scopes", help="外设和器件，逗号分隔，如 i2c,mpu6050")
     s.add_argument("--rounds", type=int, default=4, help="查资料 Agent 最多几轮（默认 4）")
     s.add_argument("--no-human", action="store_true", help="不做人工确认（规则停在已核对，不入库）")
+    s.add_argument("--tier", choices=["fast", "strong"], help="查资料、核对 Agent 用这一档（默认按 Agent 的设置）；"
+                   "给评测用的规则库要和 board-eval 用同一档")
+    s.add_argument("--think", choices=["off", "low", "high", "max"], help="思考强度（默认按 Agent 的设置）")
     s.set_defaults(func=cmd_rules)
     s = sub.add_parser("agents", help="列出注册的 Agent：角色、版本、档位、技能、工具、记忆、历史表现")
     s.add_argument("--role", help="只看某个角色，如 coder")
@@ -978,8 +984,9 @@ def cmd_rules(args) -> int:
     from .llm import CallLogger, LoggedLLM, MeteredLLM
     from .runs import RunDir
     settings = config.load_settings()
-    reg = default_registry()
+    reg = default_registry().with_overrides(args.tier, args.think)
     res_agent, chk_agent = reg.get("researcher"), reg.get("rule_checker")
+    print(f"查资料 Agent：{settings.tier(res_agent.model_tier).name}，思考强度 {res_agent.thinking or '跟随档位'}")
     res_tier, chk_tier = settings.tier(res_agent.model_tier), settings.tier(chk_agent.model_tier)
     tiers = {t.name: t for t in (res_tier, chk_tier)}
     meter = MeteredLLM(make_llm(settings), lambda model, pt, ct: tiers[model].cost(
@@ -1058,6 +1065,7 @@ def cmd_firmware(args) -> int:
 
 def cmd_board_eval(args) -> int:
     """上板评测（DECISIONS 第 69 条 B 方向）：同一批上板题在几种配置下各跑几次，用固定判定规则和隐藏测试打分。"""
+    from .agents.registry import default_registry
     from .embedded.board_eval import EvalContext, evaluate, missing_scopes, parse_configs
     from .embedded.board_task import discover_board_tasks, judge_rules, load_board_task
     from .target.board import BoardRunner
@@ -1073,7 +1081,8 @@ def cmd_board_eval(args) -> int:
              else [load_board_task(root / t.strip()) for t in args.tasks.split(",") if t.strip()])
     hwdir, profile, library, store, _, _ = _hw_context(args.hw, need_sources="unverified" in configs)
     print(f"{len(tasks)} 道题 × {len(configs)} 种配置 × {args.runs} 次 = {len(tasks) * len(configs) * args.runs} 次运行")
-    print(f"花费上限 {args.max_cost:.2f} 元：累计达到后不再开始新的运行")
+    print(f"花费上限 {args.max_cost:.2f} 元：累计达到后不再开始新的运行；所有 Agent 用 {args.tier} 档、思考强度 {args.think}、"
+          f"最多尝试 {args.max_attempts} 次")
     if "verified" in configs:
         for t in tasks:
             miss = missing_scopes(store, t.scopes)
@@ -1092,7 +1101,7 @@ def cmd_board_eval(args) -> int:
     ctx = EvalContext(llm=make_llm(settings), settings=settings, profile=profile, judge=judge_rules(root, profile),
                       rules=store, library=library, idf=idf, board=board, runs_root=Path(DEFAULT_RUNS_DIR),
                       build_root=Path(".ff_data") / "idf_build", max_attempts=args.max_attempts,
-                      secrets=_secrets(settings))
+                      registry=default_registry().with_overrides(args.tier, args.think), secrets=_secrets(settings))
     out = Path(args.out)
     evaluate(tasks, configs, args.runs, out, ctx, max_cost=args.max_cost)
     print(f"\n汇总：{out / 'summary.md'}\n明细：{out / 'runs.csv'}")

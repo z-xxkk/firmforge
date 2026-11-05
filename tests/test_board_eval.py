@@ -132,6 +132,38 @@ class EvaluateTest(unittest.TestCase):
             rows = evaluate([TASK], ["verified"], 1, out, make_ctx(d, team, approved, calls), progress=lambda s: None)
             self.assertEqual([r["verdict"] for r in rows], ["pass"])                  # skipped 的会重跑
 
+    def test_unverified_rules_generated_once_per_task(self):
+        team, calls = FakeTeam(), []
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "out"
+            rows = evaluate([TASK], ["unverified"], 2, out, make_ctx(d, team, RuleSet(), calls), progress=lambda s: None)
+            self.assertEqual([r["verdict"] for r in rows], ["pass", "pass"])
+            research = [t for t in team.seen if "资料核查员" in t]
+            self.assertEqual(len(research), 1)                                        # 两次运行只查一次资料
+            cached = json.loads((out / "unverified_rules" / f"{TASK.id}.json").read_text(encoding="utf-8"))
+            self.assertEqual({r["status"] for r in cached["rules"]}, {"approved"})
+            self.assertIn("未核对规则（每题生成一次", (out / "summary.md").read_text(encoding="utf-8"))
+            self.assertGreater(rows[0]["rules_used"], 0)
+
+    def test_registry_overrides_all_agents(self):
+        from firmforge.agents.registry import default_registry
+        base = default_registry()
+        reg = base.with_overrides("fast", "low")
+        for name in ("researcher", "coder-strong", "tester", "diagnoser"):
+            self.assertEqual((reg.get(name).model_tier, reg.get(name).thinking), ("fast", "low"))
+        self.assertEqual(base.get("coder-strong").model_tier, "strong")                 # 原来的定义不变
+        team, calls = FakeTeam(), []
+        with tempfile.TemporaryDirectory() as d:
+            ctx = make_ctx(d, team, RuleSet(), calls)
+            ctx.registry = reg
+            fake = ctx.llm
+            evaluate([TASK], ["none"], 1, Path(d) / "out", ctx, progress=lambda s: None)
+            fast = SETTINGS.tier("fast").name
+            self.assertEqual({c["model"] for c in fake.calls}, {fast})
+            want = SETTINGS.tier("fast").extra_body("low")
+            self.assertEqual(want.get("reasoning_effort"), "low")
+            self.assertTrue(all(c["extra_body"] == want for c in fake.calls))
+
     def test_max_cost_stops_before_next_run(self):
         team, calls = FakeTeam(), []
         with tempfile.TemporaryDirectory() as d:
