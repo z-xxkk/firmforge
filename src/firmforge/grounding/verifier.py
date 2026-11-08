@@ -170,9 +170,10 @@ class RuleVerifier:
         return "unknown", f"{t} 类规则在编码前无法机械核对，留到合规检查和上板测试"
 
     # ---- 整体 0–5 步
-    def run(self, rules: RuleSet, scopes: set[str] | None = None) -> VerifyReport:
+    def run(self, rules: RuleSet, scopes: set[str] | None = None, already: RuleSet | list[Rule] | None = None) -> VerifyReport:
+        """already：之前已经核对通过的规则，不再逐条核对（省掉重复的核对 Agent 调用），只参与冲突和完整性检查。"""
         results = [self.check_rule(r) for r in rules]
-        passed = RuleSet([r.rule for r in results if not r.rejected])
+        passed = RuleSet([r.rule for r in results if not r.rejected] + list(already or []))
         conflicts = passed.conflicts()
         prof = list(self.profile.problems())
         for r in passed:

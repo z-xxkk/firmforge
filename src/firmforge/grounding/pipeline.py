@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from ..tools import ToolContext, ToolPipeline, default_registry
@@ -63,6 +63,22 @@ class RuleBuilder:
         self.store, self.human, self.max_rounds, self.max_tool_rounds = store, human, max_rounds, max_tool_rounds
         self.emit = emit or (lambda *a, **k: None)
 
+    def _dedupe(self, rules: list[Rule], checked: dict[str, Rule]) -> list[Rule]:
+        """同一条规则（内容和出处都一样）已经核对过就不再核对；编号撞上但内容不同，给新规则换一个空编号，
+        两条都保留——以前按编号合并，后一轮的新规则会被前一轮同编号的规则悄悄盖掉（试点里测温规则就这样丢了）。"""
+        taken = set(checked) | set(self.store.rules)
+        out = []
+        for r in rules:
+            old = checked.get(r.id) or self.store.rules.get(r.id)
+            if old is not None and (old.text, old.cite) == (r.text, r.cite):
+                continue
+            if r.id in taken or r.id in {x.id for x in out}:
+                new_id = _free_id(r.id, taken | {x.id for x in out})
+                self.emit("rule_renamed", "rules", old=r.id, new=new_id, reason="编号已被另一条内容不同的规则占用")
+                r = replace(r, id=new_id)
+            out.append(r)
+        return out
+
     def _ask_agent(self, msgs: list[dict], out: RuleBuildResult) -> str:
         registry = default_registry()
         allowed = [t for t in registry.all() if t.name in {x.name for x in SOURCE_TOOLS}]
@@ -91,8 +107,9 @@ class RuleBuilder:
             text = self._ask_agent(msgs, out)
             rules, parse_errors = parse_rules(text)
             rules = [r for r in rules if r.id not in escalated]
+            rules = self._dedupe(rules, checked)
             self.emit("rules_proposed", "rules", round=rnd, count=len(rules), parse_errors=parse_errors[:5])
-            report = self.verifier.run(RuleSet(rules + list(checked.values())), scopes=set(todo))
+            report = self.verifier.run(RuleSet(rules), scopes=set(todo), already=list(checked.values()))
             for r in report.checked_rules():
                 checked[r.id] = r
             feedback = []
@@ -130,3 +147,12 @@ class RuleBuilder:
         self.emit("rules_finished", "rules", trusted=len(out.trusted), pending=len(out.pending),
                   rejected=len(out.rejected) + len(rejected_by_human))
         return out
+
+
+def _free_id(rule_id: str, taken: set[str]) -> str:
+    """R-PPG-005 被占用 → 同前缀下第一个空着的编号，如 R-PPG-012。"""
+    prefix = rule_id.rsplit("-", 1)[0]
+    n = 1
+    while f"{prefix}-{n:03d}" in taken:
+        n += 1
+    return f"{prefix}-{n:03d}"

@@ -37,6 +37,7 @@ from ..target.harness import TEST_REQUIRES, harness_files
 from .board_task import BoardTask, JudgeResult, hidden_case_count, judge_on_board
 from .design import Design, DesignModule
 from .flow import MAX_FORMAT_RETRIES, EmbeddedFlow, FlowResult, _Agents
+from ..grounding.pipeline import _free_id
 from ..grounding.research import parse_rules, research_messages
 from ..grounding.rules import Rule
 from .roles import coder_messages, coder_repair_message, format_reminder, parse_output
@@ -182,6 +183,11 @@ def unverified_rules(task: BoardTask, ctx: EvalContext) -> RuleSet:
     resp = agents.call("researcher", research_messages(ctx.profile, scopes, ctx.library), "rules",
                        purpose="提炼规则（不核对）", tools=ctx.library is not None)
     rules, errors = parse_rules(resp.text)
+    taken: set[str] = set()
+    for i, r in enumerate(rules):                       # 同一次回复里编号重复：换空编号，免得后一条盖掉前一条
+        if r.id in taken:
+            rules[i] = r = replace(r, id=_free_id(r.id, taken))
+        taken.add(r.id)
     rules = [replace(r, status="approved", notes=r.notes + ("规则模式 unverified：未核对",)) for r in rules]
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps({"task": task.id, "scopes": scopes, "rules": [r.to_dict() for r in rules],

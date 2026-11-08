@@ -27,6 +27,7 @@ EVENT_TYPES = {
     "tool_called", "tool_result",
     # 规则流程（DECISIONS 第 66 条第 ②③⑧ 步）
     "rules_started", "rules_proposed", "rule_rejected", "rules_round_done", "rules_need_human", "rule_trusted",
+    "rule_renamed",
     "rules_finished",
 }
 

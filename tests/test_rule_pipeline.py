@@ -49,6 +49,25 @@ class PipelineTest(unittest.TestCase):
     def types(self):
         return [e["type"] for e in self.events]
 
+    def test_same_id_different_rule_is_kept_and_not_rechecked(self):
+        # 试点里查资料 Agent 第 2 轮给一条新规则用了第 1 轮已有的编号，按编号合并时新规则被悄悄盖掉了
+        first = [g for g in GOOD if g["id"] != "R-IMU-002"] + [broken("R-IMU-002")]
+        old = next(g for g in GOOD if g["id"] == "R-I2C-002")
+        new = {**old, "text": "另一条内容不同的 I2C 规则（同编号）"}
+        fixed = next(g for g in GOOD if g["id"] == "R-IMU-002")
+        script = [reply(first), reply([fixed, new, old])]          # 第 2 轮：改正的、撞编号的新规则、原样重复的旧规则
+        checked = []
+        b, _ = self.builder(script, human=lambda pending, esc: {r.id: ("approve", "") for r in pending})
+        b.verifier.semantic = lambda r, page: (checked.append(r.text) or True, "一致")
+        out = b.run(["i2c", "mpu6050"])
+        by_text = {r.text: r.id for r in out.trusted}
+        self.assertEqual(by_text[old["text"]], "R-I2C-002")                          # 原来那条还在、编号不变
+        self.assertIn(new["text"], by_text)                                         # 新规则没被盖掉
+        self.assertNotEqual(by_text[new["text"]], "R-I2C-002")                      # 换了空编号
+        self.assertEqual(len(by_text), len(out.trusted))
+        self.assertIn("rule_renamed", self.types())
+        self.assertEqual(checked.count(old["text"]), 1)                             # 已核对的规则不再重复核对
+
     def test_feedback_round_then_human(self):
         first = [g for g in GOOD if g["id"] != "R-IMU-002"] + [broken("R-IMU-002")]
         script = [
