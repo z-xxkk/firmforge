@@ -1,0 +1,352 @@
+{
+  "task": "mpu6050_drv_idf",
+  "scopes": [
+    "i2c",
+    "mpu6050"
+  ],
+  "rules": [
+    {
+      "id": "R-I2C-001",
+      "kind": "api",
+      "scope": [
+        "i2c"
+      ],
+      "text": "I2C 主机总线用 i2c_new_master_bus() 创建，返回 i2c_master_bus_handle_t，不要用旧版 i2c_driver_install()",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master.h",
+        "quote": "@brief Allocate an I2C master bus"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "i2c_new_master_bus",
+        "header": "driver/i2c_master.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-002",
+      "kind": "api",
+      "scope": [
+        "i2c",
+        "mpu6050"
+      ],
+      "text": "每个从设备用 i2c_master_bus_add_device() 挂到总线上，得到 i2c_master_dev_handle_t 后再收发",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master.h",
+        "quote": "esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t bus_handle, const i2c_device_config_t *dev_config, i2c_master_dev_handle_t *ret_handle);"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "i2c_master_bus_add_device",
+        "header": "driver/i2c_master.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-003",
+      "kind": "api",
+      "scope": [
+        "i2c",
+        "mpu6050"
+      ],
+      "text": "读器件寄存器用 i2c_master_transmit_receive()（先写寄存器地址再读），不要自己拼 START/STOP 序列",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master.h",
+        "quote": "esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t i2c_dev, const uint8_t *write_buffer, size_t write_size, uint8_t *read_buffer, size_t read_size, int xfer_ti"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "i2c_master_transmit_receive",
+        "header": "driver/i2c_master.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-004",
+      "kind": "api",
+      "scope": [
+        "i2c",
+        "mpu6050"
+      ],
+      "text": "设备配置里 device_address 填 7 位原始地址，不含读写位；MPU6050（AD0 接低）填 0x68",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master.h",
+        "quote": "uint16_t device_address;                    /*!< I2C device raw address. (The 7/10 bit address without read/write bit)."
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "i2c_master_bus_add_device",
+        "header": "driver/i2c_master.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-005",
+      "kind": "pin",
+      "scope": [
+        "i2c"
+      ],
+      "text": "总线引脚在 i2c_master_bus_config_t 里设置：sda_io_num=GPIO4（硬件档案），scl_io_num=GPIO5（硬件档案）",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master.h",
+        "quote": "gpio_num_t sda_io_num;                /*!< GPIO number of I2C SDA signal, pulled-up internally */"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-006",
+      "kind": "api",
+      "scope": [
+        "i2c"
+      ],
+      "text": "i2c_port 填 -1 表示由驱动自动选择 I2C 端口",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master.h",
+        "quote": "i2c_port_num_t i2c_port;              /*!< I2C port number, `-1` for auto selecting"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-007",
+      "kind": "api",
+      "scope": [
+        "i2c"
+      ],
+      "text": "每个设备的 SCL 频率单独在 i2c_device_config_t.scl_speed_hz 里设置，不要指望总线级统一速率",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master.h",
+        "quote": "uint32_t scl_speed_hz;                      /*!< I2C SCL line frequency. */"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-008",
+      "kind": "api",
+      "scope": [
+        "i2c"
+      ],
+      "text": "glitch_ignore_cnt 典型填 7，用于滤除线上的窄毛刺（单位 I2C 模块时钟周期）",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master.h",
+        "quote": "typically value is 7 (unit: I2C module clock cycle)"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-009",
+      "kind": "peripheral",
+      "scope": [
+        "i2c"
+      ],
+      "text": "不要依赖内部上拉跑高速率：内部上拉强度不足，高速时须外加外部上拉电阻（enable_internal_pullup 仅作辅助）",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master.h",
+        "quote": "Enable internal pullups. Note: This is not strong enough to pullup buses under high-speed frequency. Recommend proper external pull-up if possible"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-010",
+      "kind": "api",
+      "scope": [
+        "i2c"
+      ],
+      "text": "ACK/NACK 取值：I2C_ACK_VAL = 0、I2C_NACK_VAL = 1，读操作末字节用 i2c_ack_value_t 指定",
+      "cite": {
+        "doc": "idf-driver-i2c-types-h",
+        "page": null,
+        "section": "i2c_types.h",
+        "quote": "I2C_ACK_VAL = 0,  /**< Acknowledge (ACK) signal */"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MPU-001",
+      "kind": "sequence",
+      "scope": [
+        "mpu6050"
+      ],
+      "text": "初始化第一步：向 PWR_MGMT_1（0x6B）写 DEVICE_RESET=1 复位全部寄存器，等该位自动清 0 后再配置",
+      "cite": {
+        "doc": "mpu6050-rm",
+        "page": 42,
+        "section": "4.30 PWR_MGMT_1 / DEVICE_RESET",
+        "quote": "When set to 1, this bit resets all internal registers to their default values."
+      },
+      "tier": "official_mirror",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MPU-002",
+      "kind": "sequence",
+      "scope": [
+        "mpu6050"
+      ],
+      "text": "复位后必须把 PWR_MGMT_1 的 SLEEP 位清 0 退出睡眠，否则传感器不出数据",
+      "cite": {
+        "doc": "mpu6050-rm",
+        "page": 42,
+        "section": "4.30 PWR_MGMT_1 / SLEEP",
+        "quote": "SLEEP When set to 1, this bit puts the MPU-60X0 into sleep mode."
+      },
+      "tier": "official_mirror",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MPU-003",
+      "kind": "register",
+      "scope": [
+        "mpu6050"
+      ],
+      "text": "PWR_MGMT_1 的 CLKSEL 应选陀螺 PLL 作为时钟参考（如 CLKSEL=1，X 轴陀螺 PLL），提高稳定性",
+      "cite": {
+        "doc": "mpu6050-rm",
+        "page": 41,
+        "section": "4.30 PWR_MGMT_1 / CLKSEL",
+        "quote": "PLL with X axis gyroscope reference"
+      },
+      "tier": "official_mirror",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MPU-004",
+      "kind": "peripheral",
+      "scope": [
+        "mpu6050"
+      ],
+      "text": "上电默认时钟源是内部 8MHz 振荡器，未改 CLKSEL 前不要指望数据稳定",
+      "cite": {
+        "doc": "mpu6050-rm",
+        "page": 41,
+        "section": "4.30 PWR_MGMT_1",
+        "quote": "Upon power up, the MPU-60X0 clock source defaults to the internal oscillator."
+      },
+      "tier": "official_mirror",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MPU-005",
+      "kind": "register",
+      "scope": [
+        "mpu6050"
+      ],
+      "text": "要读温度时把 PWR_MGMT_1 的 TEMP_DIS 位清 0（该位置 1 即关闭温度传感器）",
+      "cite": {
+        "doc": "mpu6050-rm",
+        "page": 42,
+        "section": "4.30 PWR_MGMT_1 / TEMP_DIS",
+        "quote": "TEMP_DIS When set to 1, this bit disables the temperature sensor."
+      },
+      "tier": "official_mirror",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MPU-006",
+      "kind": "register",
+      "scope": [
+        "mpu6050"
+      ],
+      "text": "PWR_MGMT_1 的 bit4 为保留位，写配置时该位必须保持 0",
+      "cite": {
+        "doc": "mpu6050-rm",
+        "page": 41,
+        "section": "4.30 PWR_MGMT_1",
+        "quote": "Bit 4 is reserved."
+      },
+      "tier": "official_mirror",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    }
+  ],
+  "parse_errors": [],
+  "tokens": 47473,
+  "cost": 0.064309,
+  "run_dir": ".ff_runs/20261108-181720-eval-rules-mpu6050_drv_idf"
+}

@@ -1,0 +1,320 @@
+{
+  "task": "max30102_temp",
+  "scopes": [
+    "i2c",
+    "max30102"
+  ],
+  "rules": [
+    {
+      "id": "R-I2C-001",
+      "kind": "api",
+      "scope": [
+        "i2c"
+      ],
+      "text": "I2C 主机总线必须用 i2c_new_master_bus() 创建，参数为 i2c_master_bus_config_t 和总线句柄；禁止用旧版 i2c_driver_install()",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_new_master_bus",
+        "quote": "esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *bus_config, i2c_master_bus_handle_t *ret_bus_handle);"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "i2c_new_master_bus",
+        "header": "driver/i2c_master.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-002",
+      "kind": "api",
+      "scope": [
+        "i2c"
+      ],
+      "text": "总线引脚通过 i2c_master_bus_config_t 的 sda_io_num、scl_io_num 填写；i2c_port 填端口号，-1 表示自动选择",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master_bus_config_t",
+        "quote": "gpio_num_t sda_io_num;                /*!< GPIO number of I2C SDA signal, pulled-up internally */"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-003",
+      "kind": "api",
+      "scope": [
+        "i2c"
+      ],
+      "text": "i2c_device_config_t 的 device_address 填 7 位原始地址（不含读写位），地址长度由 dev_addr_length 指定，速率由 scl_speed_hz 指定",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_device_config_t",
+        "quote": "uint16_t device_address;                    /*!< I2C device raw address. (The 7/10 bit address without read/write bit)."
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-004",
+      "kind": "forbidden",
+      "scope": [
+        "i2c"
+      ],
+      "text": "禁止使用旧版驱动接口 i2c_driver_install()/i2c_cmd_link_* 命令行接口，v6.1 一律走 i2c_master_* 新接口",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_new_master_bus",
+        "quote": "esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *bus_config, i2c_master_bus_handle_t *ret_bus_handle);"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_absent",
+        "symbol": "i2c_driver_install"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-005",
+      "kind": "pin",
+      "scope": [
+        "i2c"
+      ],
+      "text": "i2c0 用 SDA=GPIO4、SCL=GPIO5，所有 I2C 器件共用这条总线",
+      "cite": {
+        "doc": "board-measured",
+        "page": 1,
+        "section": "板子说明",
+        "quote": "I2C0 SDA=GPIO4、SCL=GPIO5"
+      },
+      "tier": "user",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-006",
+      "kind": "timing",
+      "scope": [
+        "i2c"
+      ],
+      "text": "SCL 用 100 kHz 或 400 kHz 都可正常通信，任选其一即可",
+      "cite": {
+        "doc": "board-measured",
+        "page": 1,
+        "section": "M-004 I2C 速率",
+        "quote": "100 kHz 和 400 kHz 两种速率下 50 次读取都没有出错"
+      },
+      "tier": "user",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX30102-001",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "MAX30102 的 7 位从地址固定为 0b1010111（0x57），写地址 0xAE、读地址 0xAF；i2c_device_config_t 里填 7 位地址 0x57",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 29,
+        "section": "Table 17. Slave ID Description",
+        "quote": "The MAX30102 slave ID consists of seven fixed bits, B7–B1 (set to 0b1010111)."
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX30102-002",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "上电后可读 PART_ID 寄存器 0xFF，值应为 0x15，用于确认器件在线",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 11,
+        "section": "PART ID",
+        "quote": "Part ID PART_ID[7] 0xFF 0x15 R"
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX30102-003",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "开始新的 SpO2 或心率转换前，先把 FIFO_WR_PTR(0x04)、OVF_COUNTER(0x05)、FIFO_RD_PTR(0x06) 全部写 0x00，保证 FIFO 为空且状态已知",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Register",
+        "quote": "it is recommended to first clear the FIFO_WR_PTR, OVF_COUNTER, and FIFO_RD_PTR registers to all zeroes (0x00)"
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX30102-004",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "读 FIFO_DATA(0x07) 时寄存器地址不自增，必须在同一 I2C 事务里连续读多字节；一个样本 Red+IR 共 6 字节（每通道 3 字节，左对齐）",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "Reading from the FIFO",
+        "quote": "Reading the FIFO_DATA register does not automatically increment the register address."
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX30102-005",
+      "kind": "forbidden",
+      "scope": [
+        "max30102"
+      ],
+      "text": "FIFO 相关的 0x04–0x07 虽都可写，但运行中只允许写 FIFO_RD_PTR(0x06)，不要写 FIFO_WR_PTR 与 OVF_COUNTER",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Register",
+        "quote": "in practice only the FIFO_RD_PTR register should be written to in operation"
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX30102-006",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "MODE(0x09) 的 MODE[2:0] 只允许用 0b010（仅红光，心率模式）、0b011（红光+IR，SpO2 模式）、0b111（多 LED 模式），其余编码不能使用",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 18,
+        "section": "Table 4. Mode Control",
+        "quote": "011 SpO2 mode Red and IR"
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX30102-007",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "测温流程：先置中断使能 2(0x03) 的 DIE_TEMP_RDY_EN，再置 TEMP_EN(0x21 bit0)，等 DIE_TEMP_RDY 置位后才读 TINT(0x1F)/TFRAC(0x20)；禁止以 TEMP_EN 自动清零作为测完标志",
+      "cite": {
+        "doc": "board-measured",
+        "page": 1,
+        "section": "M-003",
+        "quote": "测温要等 DIE_TEMP_RDY（需先置 DIE_TEMP_RDY_EN），不能以 TEMP_EN 自动清零作为测完的标志。"
+      },
+      "tier": "user",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX30102-008",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "DIE_TEMP_RDY 中断通过读中断状态 2(0x01) 或 TFRAC(0x20) 清除；A_FULL/PPG_RDY/ALC_OVF 通过读中断状态 1(0x00) 或读 FIFO_DATA 清除",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 12,
+        "section": "DIE_TEMP_RDY",
+        "quote": "The interrupt is cleared by reading either the Interrupt Status 2 register (0x01) or the TFRAC register (0x20)."
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX30102-009",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "写 MODE(0x09) 的 RESET 位（bit6）触发上电复位，该位复位完成后自动恢复为 0，不要反复写 1 或轮询等待它保持 1",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 18,
+        "section": "Mode Configuration (0x09)",
+        "quote": "The RESET bit is cleared automatically back to zero after the reset sequence is completed."
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    }
+  ],
+  "parse_errors": [],
+  "tokens": 62602,
+  "cost": 0.080533,
+  "run_dir": ".ff_runs/20261108-191620-eval-rules-max30102_temp"
+}

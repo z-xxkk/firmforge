@@ -1,0 +1,224 @@
+{
+  "task": "ledc_pwm",
+  "scopes": [
+    "ledc"
+  ],
+  "rules": [
+    {
+      "id": "R-LEDC-001",
+      "kind": "api",
+      "scope": [
+        "ledc"
+      ],
+      "text": "LEDC 初始化用 driver/ledc.h 的 ledc_timer_config() 与 ledc_channel_config()，不要用旧版 ledc_init 之类接口",
+      "cite": {
+        "doc": "idf-driver-ledc-h",
+        "page": null,
+        "section": "ledc_channel_config_t / ledc_timer_config_t",
+        "quote": "Configuration parameters of LEDC channel for ledc_channel_config function"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "ledc_timer_config",
+        "header": "driver/ledc.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-LEDC-002",
+      "kind": "api",
+      "scope": [
+        "ledc"
+      ],
+      "text": "改占空比先 ledc_set_duty() 再 ledc_update_duty()，不调用 update 不生效",
+      "cite": {
+        "doc": "idf-driver-ledc-h",
+        "page": null,
+        "section": "ledc_set_duty / ledc_update_duty",
+        "quote": "ledc_set_duty, ledc_set_duty_with_hpoint and ledc_update_duty are not thread-safe, do not call these functions to"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "ledc_update_duty",
+        "header": "driver/ledc.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-LEDC-003",
+      "kind": "forbidden",
+      "scope": [
+        "ledc"
+      ],
+      "text": "不要在多个任务里并发调用 ledc_set_duty/ledc_set_duty_with_hpoint/ledc_update_duty 控制同一通道（非线程安全）",
+      "cite": {
+        "doc": "idf-driver-ledc-h",
+        "page": null,
+        "section": "ledc_set_duty / ledc_update_duty",
+        "quote": "are not thread-safe, do not call these functions to"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-LEDC-004",
+      "kind": "peripheral",
+      "scope": [
+        "ledc"
+      ],
+      "text": "ESP32-C3 只有低速模式，speed_mode 填 LEDC_LOW_SPEED_MODE，禁止使用 LEDC_HIGH_SPEED_MODE",
+      "cite": {
+        "doc": "idf-hal-ledc-types-h",
+        "page": null,
+        "section": "ledc_mode_t",
+        "quote": "#if SOC_LEDC_SUPPORT_HS_MODE"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-LEDC-005",
+      "kind": "peripheral",
+      "scope": [
+        "ledc"
+      ],
+      "text": "C3 有 4 个定时器和 6 个通道，channel 只能取 0–5（LEDC_CHANNEL_0…LEDC_CHANNEL_5），timer_sel 只能取 0–3",
+      "cite": {
+        "doc": "idf-c3-soc-caps-h",
+        "page": null,
+        "section": "soc_caps.h",
+        "quote": "#define SOC_LEDC_TIMER_NUM (4) #define SOC_LEDC_CHANNEL_NUM (6)"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-LEDC-006",
+      "kind": "peripheral",
+      "scope": [
+        "ledc"
+      ],
+      "text": "PWM 分辨率最高 14 位，duty_resolution 最大用 LEDC_TIMER_14_BIT，禁止 15 位及以上",
+      "cite": {
+        "doc": "esp32c3-trm",
+        "page": 830,
+        "section": "32.x LEDC 定时器",
+        "quote": "the maximum resolution of the PWM signal is 14 bits"
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-LEDC-007",
+      "kind": "peripheral",
+      "scope": [
+        "ledc"
+      ],
+      "text": "duty 取值范围是 [0, 2**duty_resolution]，不要超过该上限",
+      "cite": {
+        "doc": "idf-driver-ledc-h",
+        "page": null,
+        "section": "ledc_channel_config_t.duty",
+        "quote": "LEDC channel duty, the range of duty setting is [0, (2**duty_resolution)]"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-LEDC-008",
+      "kind": "peripheral",
+      "scope": [
+        "ledc"
+      ],
+      "text": "C3 上所有 LEDC 定时器共用同一个时钟源，各 timer 的 clk_cfg 必须一致，不能一个用 RC_FAST 一个用 XTAL",
+      "cite": {
+        "doc": "idf-driver-ledc-h",
+        "page": null,
+        "section": "ledc_timer_config_t.clk_cfg",
+        "quote": "All chips except esp32 and esp32s2 do not have timer-specific clock sources, which means clock source for all timers must be the same one."
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-LEDC-009",
+      "kind": "sequence",
+      "scope": [
+        "ledc"
+      ],
+      "text": "用渐变前先调一次 ledc_fade_func_install()，调用 ledc_set_fade_* 之后再调 ledc_fade_start() 才会开始渐变",
+      "cite": {
+        "doc": "idf-driver-ledc-h",
+        "page": null,
+        "section": "ledc_set_fade_with_time",
+        "quote": "Call ledc_fade_func_install() once before calling this function."
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "call_order",
+        "before": "ledc_fade_func_install",
+        "after": "ledc_fade_start"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-LEDC-010",
+      "kind": "forbidden",
+      "scope": [
+        "ledc"
+      ],
+      "text": "不要在 ledc_channel_config_t 里配置 intr_type（已废弃），中断由驱动内部处理",
+      "cite": {
+        "doc": "idf-driver-ledc-h",
+        "page": null,
+        "section": "ledc_channel_config_t.intr_type",
+        "quote": "@deprecated, no need to explicitly configure interrupt, handled in the driver"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    }
+  ],
+  "parse_errors": [],
+  "tokens": 45541,
+  "cost": 0.057268,
+  "run_dir": ".ff_runs/20261108-180116-eval-rules-ledc_pwm"
+}

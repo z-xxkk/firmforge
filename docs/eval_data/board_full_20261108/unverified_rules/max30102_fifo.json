@@ -1,0 +1,202 @@
+{
+  "task": "max30102_fifo",
+  "scopes": [
+    "i2c",
+    "max30102"
+  ],
+  "rules": [
+    {
+      "id": "R-I2C-001",
+      "kind": "api",
+      "scope": [
+        "i2c"
+      ],
+      "text": "I2C 主机总线必须用 i2c_new_master_bus() 创建，传入 i2c_master_bus_config_t 并取回 bus 句柄，禁止使用旧版 i2c_driver_install 一类的写法",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_new_master_bus",
+        "quote": "esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *bus_config, i2c_master_bus_handle_t *ret_bus_handle);"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "i2c_new_master_bus",
+        "header": "driver/i2c_master.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-002",
+      "kind": "api",
+      "scope": [
+        "i2c",
+        "max30102"
+      ],
+      "text": "i2c_device_config_t.device_address 只填 7 位原始地址（不含读写位），MAX30102 填 0x57，不得填 0xAE/0xAF",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_device_config_t",
+        "quote": "I2C device raw address. (The 7/10 bit address without read/write bit)."
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "i2c_new_master_bus",
+        "header": "driver/i2c_master.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-I2C-003",
+      "kind": "peripheral",
+      "scope": [
+        "i2c"
+      ],
+      "text": "不要依赖芯片内部上拉跑高速率：enable_internal_pullup 内部上拉不够强，高速频率下必须要有外部上拉电阻",
+      "cite": {
+        "doc": "idf-driver-i2c-master-h",
+        "page": null,
+        "section": "i2c_master_bus_config_t.flags",
+        "quote": "Enable internal pullups. Note: This is not strong enough to pullup buses under high-speed frequency. Recommend proper external pull-up if possible"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX-001",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "MAX30102 的从机 ID 是 7 位固定值 0b1010111（即 0x57），写地址 0xAE、读地址 0xAF；驱动里用 7 位 0x57",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 29,
+        "section": "Slave ID / Table 17. Slave ID Description",
+        "quote": "The MAX30102 slave ID consists of seven fixed bits, B7–B1 (set to 0b1010111)."
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX-002",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "开始新的 SpO2 或心率转换前，先把 FIFO_WR_PTR(0x04)、OVF_COUNTER(0x05)、FIFO_RD_PTR(0x06) 三个寄存器清零，保证 FIFO 为空且状态已知",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Register",
+        "quote": "When starting a new SpO2 or heart rate conversion, it is recommended to first clear the FIFO_WR_PTR, OVF_COUNTER, and FIFO_RD_PTR registers to all zeroes (0x00) to ensure the FIFO is empty and in a known state."
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX-003",
+      "kind": "peripheral",
+      "scope": [
+        "max30102"
+      ],
+      "text": "读 FIFO_DATA(0x07) 时 I2C 寄存器地址指针不自增：必须在一个事务里连续读出整样本（IR+Red 共 6 字节），不能靠地址自增换样本",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "Reading from the FIFO",
+        "quote": "Reading the FIFO_DATA register does not automatically increment the register address. Burst reading this register reads data from the same address over and over."
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX-004",
+      "kind": "peripheral",
+      "scope": [
+        "max30102"
+      ],
+      "text": "FIFO 深度 32 个样本；两通道激活时每样本 6 字节（每通道 3 字节、左对齐 18 位），一次读满一个样本要读 6 字节",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Structure",
+        "quote": "The data FIFO consists of a 32-sample memory bank that can store IR and Red ADC data. Since each sample consists of two channels of data, there are 6 bytes of data for each sample, and therefore 192 total bytes of data can be stored in the FIFO."
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX-005",
+      "kind": "forbidden",
+      "scope": [
+        "max30102"
+      ],
+      "text": "禁止越过寄存器 0xFF 继续连续读：读到 0xFF 之后地址指针不会回绕到 0x00，多读出的数据无意义",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "Reading from the FIFO",
+        "quote": "The other exception is 0xFF. Reading more bytes after the 0xFF register does not advance the address pointer back to 0x00, and the data read is not meaningful."
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-MAX-006",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "配置寄存器按手册地址访问：FIFO_CONFIG=0x08、MODE_CONFIG=0x09、SPO2_CONFIG=0x0A、LED1_PA=0x0C、LED2_PA=0x0D、SLOT 控制=0x11/0x12，0x0B/0x0E/0x0F 为保留寄存器不要配置",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 10,
+        "section": "Register Maps and Descriptions",
+        "quote": "Mode Configuration SHDN RESET MODE[2:0] 0x09 0x00 R/W SpO2 Configuration 0 (Reserved) SPO2_ADC_RGE [1:0] SPO2_SR[2:0] LED_PW[1:0] 0x0A 0x00 R/W RESERVED 0x0B 0x00 R/W LED Pulse Amplitude LED1_PA[7:0] 0x0C 0x00 R/W LED2_PA[7:0] 0x0D 0x00 R/W"
+      },
+      "tier": "official_manual",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    }
+  ],
+  "parse_errors": [],
+  "tokens": 40775,
+  "cost": 0.052052,
+  "run_dir": ".ff_runs/20261108-185827-eval-rules-max30102_fifo"
+}

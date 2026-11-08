@@ -1,0 +1,352 @@
+{
+  "task": "rmt_pulse_meter",
+  "scopes": [
+    "rmt"
+  ],
+  "rules": [
+    {
+      "id": "R-RMT-001",
+      "kind": "api",
+      "scope": [
+        "rmt"
+      ],
+      "text": "RMT 通道用 rmt_new_rx_channel() / rmt_new_tx_channel() 创建，拿到 rmt_channel_handle_t 后再操作",
+      "cite": {
+        "doc": "idf-driver-rmt-rx-h",
+        "page": null,
+        "section": "rmt_rx.h",
+        "quote": "esp_err_t rmt_new_rx_channel(const rmt_rx_channel_config_t *config, rmt_channel_handle_t *ret_chan);"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "rmt_new_rx_channel",
+        "header": "driver/rmt_rx.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-002",
+      "kind": "sequence",
+      "scope": [
+        "rmt"
+      ],
+      "text": "调用 rmt_receive() 之前必须先 rmt_enable()，否则返回 ESP_ERR_INVALID_STATE（通道未使能）",
+      "cite": {
+        "doc": "idf-driver-rmt-rx-h",
+        "page": null,
+        "section": "rmt_receive",
+        "quote": "ESP_ERR_INVALID_STATE: Initiate receive job failed because channel is not enabled"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "call_order",
+        "before": "rmt_enable",
+        "after": "rmt_receive"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-003",
+      "kind": "api",
+      "scope": [
+        "rmt"
+      ],
+      "text": "rmt_receive() 是非阻塞的，调用后立即返回，接收结果只能在 on_recv_done 回调里取",
+      "cite": {
+        "doc": "idf-driver-rmt-rx-h",
+        "page": null,
+        "section": "rmt_receive",
+        "quote": "This function is non-blocking, it initiates a new receive job and then returns."
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "rmt_receive",
+        "header": "driver/rmt_rx.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-004",
+      "kind": "sequence",
+      "scope": [
+        "rmt"
+      ],
+      "text": "删除通道前先 rmt_disable()，通道仍在工作时 rmt_del_channel() 会返回 ESP_ERR_INVALID_STATE",
+      "cite": {
+        "doc": "idf-driver-rmt-common-h",
+        "page": null,
+        "section": "rmt_del_channel",
+        "quote": "ESP_ERR_INVALID_STATE: Delete RMT channel failed because it is still in working"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "call_order",
+        "before": "rmt_disable",
+        "after": "rmt_del_channel"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-005",
+      "kind": "peripheral",
+      "scope": [
+        "rmt"
+      ],
+      "text": "rmt_rx_channel_config_t.mem_block_symbols 必须是偶数，否则创建通道失败",
+      "cite": {
+        "doc": "idf-driver-rmt-rx-h",
+        "page": null,
+        "section": "rmt_rx_channel_config_t",
+        "quote": "Size of memory block, in number of `rmt_symbol_word_t`, must be an even."
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-006",
+      "kind": "peripheral",
+      "scope": [
+        "rmt"
+      ],
+      "text": "同一 RMT 组内的各通道必须使用同一个时钟源 clk_src（C3 只有一个组）",
+      "cite": {
+        "doc": "idf-driver-rmt-rx-h",
+        "page": null,
+        "section": "rmt_rx_channel_config_t",
+        "quote": "Clock source of RMT RX channel, channels in the same group must use the same clock source"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-007",
+      "kind": "peripheral",
+      "scope": [
+        "rmt"
+      ],
+      "text": "ESP32-C3 只有 1 个 RMT 组、共 4 个通道，其中 2 个可发送、2 个可接收，分配通道时不要超过这个数",
+      "cite": {
+        "doc": "idf-c3-rmt-ll-h",
+        "page": null,
+        "section": "rmt_ll.h",
+        "quote": "#define RMT_LL_CHANS_PER_INST                 (4)  /*!< Total 4 channels */"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-008",
+      "kind": "peripheral",
+      "scope": [
+        "rmt"
+      ],
+      "text": "底层通道号从 0 开始：TX 为 [0,1]，RX 为 [0,1]，直接使用 LL 接口时按此编号",
+      "cite": {
+        "doc": "idf-c3-rmt-ll-h",
+        "page": null,
+        "section": "rmt_ll.h",
+        "quote": "@note TX and RX channels are index from 0 in the LL driver, i.e. tx_channel = [0,1], rx_channel = [0,1]"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-009",
+      "kind": "peripheral",
+      "scope": [
+        "rmt"
+      ],
+      "text": "每个 RMT 通道只有 48 个字（word，4 字节）的 memory block，单次传输/接收的符号数不能超过这个容量",
+      "cite": {
+        "doc": "idf-c3-soc-caps-h",
+        "page": null,
+        "section": "RMT CAPS",
+        "quote": "#define SOC_RMT_MEM_WORDS_PER_CHANNEL 48 /*!< Each channel owns 48 words memory (1 word = 4 Bytes) */"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-010",
+      "kind": "timing",
+      "scope": [
+        "rmt"
+      ],
+      "text": "配置 resolution_hz 时按 rmt_sclk = module_clock_src / (1 + div_num + div_a/div_b) 计算分频，使 1 tick 分辨率符合需求",
+      "cite": {
+        "doc": "idf-c3-rmt-ll-h",
+        "page": null,
+        "section": "rmt_ll_set_group_clock_src",
+        "quote": "// Formula: rmt_sclk = module_clock_src / (1 + div_num + div_a / div_b)"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-011",
+      "kind": "peripheral",
+      "scope": [
+        "rmt"
+      ],
+      "text": "RMT 符号用 rmt_symbol_word_t，每个 duration 字段只有 15 位（最大 32767 tick），超长电平必须拆成多个符号",
+      "cite": {
+        "doc": "idf-hal-rmt-types-h",
+        "page": null,
+        "section": "rmt_symbol_word_t",
+        "quote": "uint16_t duration0 : 15; /*!< Duration of level0 */"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-012",
+      "kind": "peripheral",
+      "scope": [
+        "rmt"
+      ],
+      "text": "RX 空闲阈值（idle）字段最大只能取 32767，超过要改分辨率或换方案",
+      "cite": {
+        "doc": "idf-c3-rmt-ll-h",
+        "page": null,
+        "section": "rmt_ll.h",
+        "quote": "#define RMT_LL_MAX_IDLE_VALUE             32767"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-013",
+      "kind": "peripheral",
+      "scope": [
+        "rmt"
+      ],
+      "text": "RX 毛刺滤波（signal_range_min_ns）对应滤波器宽度最大 255 个时钟，超过此值的脉冲无法靠硬件滤除",
+      "cite": {
+        "doc": "idf-c3-rmt-ll-h",
+        "page": null,
+        "section": "rmt_ll.h",
+        "quote": "#define RMT_LL_MAX_FILTER_VALUE           255"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-014",
+      "kind": "api",
+      "scope": [
+        "rmt"
+      ],
+      "text": "rmt_rx_register_event_callbacks() 注册的回调运行在 ISR 上下文，回调里不能阻塞、不能调用耗时或非 ISR 安全函数",
+      "cite": {
+        "doc": "idf-driver-rmt-rx-h",
+        "page": null,
+        "section": "rmt_rx_event_callbacks_t",
+        "quote": "The callbacks are all running under ISR environment"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": {
+        "type": "api_exists",
+        "symbol": "rmt_rx_register_event_callbacks",
+        "header": "driver/rmt_rx.h"
+      },
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-015",
+      "kind": "api",
+      "scope": [
+        "rmt"
+      ],
+      "text": "RX 通道配置里的 gpio_num 写实际接收引脚编号；不用引脚时填 -1",
+      "cite": {
+        "doc": "idf-driver-rmt-rx-h",
+        "page": null,
+        "section": "rmt_rx_channel_config_t",
+        "quote": "GPIO number used by RMT RX channel. Set to -1 if unused"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    },
+    {
+      "id": "R-RMT-016",
+      "kind": "peripheral",
+      "scope": [
+        "rmt"
+      ],
+      "text": "载波配置里 frequency_hz 填 0 表示关闭载波调制/解调，duty_cycle 用 0~100 的百分比",
+      "cite": {
+        "doc": "idf-driver-rmt-types-h",
+        "page": null,
+        "section": "rmt_carrier_config_t",
+        "quote": "uint32_t frequency_hz; /*!< Carrier wave frequency, in Hz, 0 means disabling the carrier */"
+      },
+      "tier": "official_code",
+      "status": "approved",
+      "check": null,
+      "notes": [
+        "规则模式 unverified：未核对"
+      ]
+    }
+  ],
+  "parse_errors": [],
+  "tokens": 55559,
+  "cost": 0.072422,
+  "run_dir": ".ff_runs/20261108-174947-eval-rules-rmt_pulse_meter"
+}
