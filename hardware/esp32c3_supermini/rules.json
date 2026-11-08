@@ -1,0 +1,1125 @@
+[
+  {
+    "id": "R-GPIO-001",
+    "kind": "pin",
+    "scope": [
+      "gpio",
+      "all"
+    ],
+    "text": "GPIO12–GPIO17 接封装内 SPI Flash（手册列为优先级 4，不建议使用），任何外设都不要分配到这六个引脚",
+    "cite": {
+      "doc": "esp32c3-ds",
+      "page": 23,
+      "section": "2.3.4 Peripheral Pin Assignment p.23",
+      "quote": "GPIO12, GPIO13, GPIO14, GPIO15, GPIO16, GPIO17: SPI0/1 interface connected to the in-package flash"
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": {
+      "type": "pin_forbidden",
+      "gpio": [
+        12,
+        13,
+        14,
+        15,
+        16,
+        17
+      ]
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPIO-003",
+    "kind": "api",
+    "scope": [
+      "gpio"
+    ],
+    "text": "多个引脚统一用 gpio_config() 一次配置：gpio_config_t 的 pin_bit_mask 每位对应一个 GPIO，同时给 mode/pull/intr_type",
+    "cite": {
+      "doc": "idf-driver-gpio-h",
+      "page": null,
+      "section": "gpio_config_t",
+      "quote": "GPIO pin: set with bit mask, each bit maps to a GPIO"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "gpio_config",
+      "header": "driver/gpio.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPIO-004",
+    "kind": "api",
+    "scope": [
+      "gpio"
+    ],
+    "text": "读电平用 gpio_get_level()；引脚若没配置成输入（或输入输出），返回值恒为 0，读中断脚前先配成输入",
+    "cite": {
+      "doc": "idf-driver-gpio-h",
+      "page": null,
+      "section": "gpio_get_level",
+      "quote": "If the pad is not configured for input (or input and output) the returned value is always 0."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "gpio_get_level",
+      "header": "driver/gpio.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPIO-005",
+    "kind": "pin",
+    "scope": [
+      "gpio"
+    ],
+    "text": "GPIO11 是 VDD_SPI 引脚，默认给 flash 供电，只有 flash 改由外部电源供电时才可重配为普通 GPIO；手册把它列为 Priority 3，使用需谨慎",
+    "cite": {
+      "doc": "esp32c3-ds",
+      "page": 23,
+      "section": "2.3.4 Peripheral Pin Assignment",
+      "quote": "GPIO11 : The VDD_SPI pin. The power supply pin for flash by default, and can only be reconfigured as a GPIO pin if the flash is powered by an external power supply."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-001",
+    "kind": "api",
+    "scope": [
+      "i2c"
+    ],
+    "text": "I2C 主机总线用 i2c_new_master_bus() 创建（传 i2c_master_bus_config_t），不要用旧版的 i2c_driver_install()",
+    "cite": {
+      "doc": "idf-driver-i2c-master-h",
+      "page": null,
+      "section": "i2c_master.h",
+      "quote": "esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *bus_config, i2c_master_bus_handle_t *ret_bus_handle);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "i2c_new_master_bus",
+      "header": "driver/i2c_master.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-002",
+    "kind": "api",
+    "scope": [
+      "i2c"
+    ],
+    "text": "设备地址用 i2c_master_bus_add_device() 加入总线；device_address 填不含读写位的 7 位原始地址（MPU6050 填 0x68，不是 0xD0/0xD1）",
+    "cite": {
+      "doc": "idf-driver-i2c-master-h",
+      "page": null,
+      "section": "i2c_device_config_t",
+      "quote": "uint16_t device_address;                    /*!< I2C device raw address. (The 7/10 bit address without read/write bit)."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "i2c_master_bus_add_device",
+      "header": "driver/i2c_master.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-003",
+    "kind": "api",
+    "scope": [
+      "i2c",
+      "mpu6050"
+    ],
+    "text": "“写寄存器地址再读数据”用一次 i2c_master_transmit_receive()，不要拆成 trans 和 recv 两次事务（会丢重复起始条件）",
+    "cite": {
+      "doc": "idf-driver-i2c-master-h",
+      "page": null,
+      "section": "i2c_master.h",
+      "quote": "esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t i2c_dev, const uint8_t *write_buffer, size_t write_size, uint8_t *read_buffer, size_t read_size"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "i2c_master_transmit_receive",
+      "header": "driver/i2c_master.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-004",
+    "kind": "api",
+    "scope": [
+      "i2c"
+    ],
+    "text": "扫描/确认器件是否在线用 i2c_master_probe()（传总线句柄、地址、超时毫秒），不要靠读寄存器返回值判断地址是否存在",
+    "cite": {
+      "doc": "idf-driver-i2c-master-h",
+      "page": null,
+      "section": "i2c_master.h",
+      "quote": "esp_err_t i2c_master_probe(i2c_master_bus_handle_t bus_handle, uint16_t address, int xfer_timeout_ms);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "i2c_master_probe",
+      "header": "driver/i2c_master.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-005",
+    "kind": "api",
+    "scope": [
+      "i2c"
+    ],
+    "text": "总线异常（SDA/SCL 被从机拉住）先用 i2c_master_bus_reset() 复位总线，再重试事务；不要直接删总线重建",
+    "cite": {
+      "doc": "idf-driver-i2c-master-h",
+      "page": null,
+      "section": "i2c_master.h",
+      "quote": "esp_err_t i2c_master_bus_reset(i2c_master_bus_handle_t bus_handle);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "i2c_master_bus_reset",
+      "header": "driver/i2c_master.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-006",
+    "kind": "api",
+    "scope": [
+      "i2c"
+    ],
+    "text": "设备用完用 i2c_master_bus_rm_device() 移除，总线用 i2c_del_master_bus() 释放；不要只置空 handle",
+    "cite": {
+      "doc": "idf-driver-i2c-master-h",
+      "page": null,
+      "section": "i2c_master.h",
+      "quote": "esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t handle);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "i2c_master_bus_rm_device",
+      "header": "driver/i2c_master.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-007",
+    "kind": "peripheral",
+    "scope": [
+      "i2c"
+    ],
+    "text": "不要在高速频率下只依赖 enable_internal_pullup：内部上拉不足以驱动高速总线，要配外部上拉电阻",
+    "cite": {
+      "doc": "idf-driver-i2c-master-h",
+      "page": null,
+      "section": "i2c_master_bus_config_t",
+      "quote": "Enable internal pullups. Note: This is not strong enough to pullup buses under high-speed frequency. Recommend proper external pull-up if possible"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-008",
+    "kind": "pin",
+    "scope": [
+      "i2c"
+    ],
+    "text": "本板 I2C0 的 SDA=GPIO4、SCL=GPIO5，MPU6050 模块与 MAX30102 模块都接在这两条线上",
+    "cite": {
+      "doc": "board-measured",
+      "page": null,
+      "section": "板子信息",
+      "quote": "I2C0 SDA=GPIO4、SCL=GPIO5，面包板接 MPU6050 模块与 MAX30102 模块"
+    },
+    "tier": "user",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-009",
+    "kind": "timing",
+    "scope": [
+      "i2c",
+      "mpu6050"
+    ],
+    "text": "本板 I2C 在 100 kHz 和 400 kHz 下读 MPU6050 均无错，scl_speed_hz 取 100000 或 400000 都可用",
+    "cite": {
+      "doc": "board-measured",
+      "page": null,
+      "section": "M-004 I2C 速率",
+      "quote": "100 kHz 和 400 kHz 两种速率下 50 次读取都没有出错。"
+    },
+    "tier": "user",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-010",
+    "kind": "pin",
+    "scope": [
+      "gpio",
+      "i2c",
+      "jtag"
+    ],
+    "text": "GPIO4、GPIO5（以及 GPIO6、GPIO7）属 JTAG 接口，手册列为 Priority 3「应谨慎使用」，分配前须确认不会与调试接口冲突",
+    "cite": {
+      "doc": "esp32c3-ds",
+      "page": 23,
+      "section": "2.3.4 Peripheral Pin Assignment",
+      "quote": "GPIO4, GPIO5, GPIO6, GPIO7: JTAG interface."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": {
+      "type": "pin_forbidden",
+      "gpio": []
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-I2C-011",
+    "kind": "forbidden",
+    "scope": [
+      "i2c",
+      "gpio"
+    ],
+    "text": "不要把 I2C 引脚选在启动配置引脚 GPIO2、GPIO8、GPIO9 上，芯片复位时会被采样为启动模式",
+    "cite": {
+      "doc": "esp32c3-ds",
+      "page": 30,
+      "section": "Table 3-1 Default Configuration of Strapping Pins",
+      "quote": "Strapping pins: GPIO2, GPIO8, and GPIO9"
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": {
+      "type": "pin_forbidden",
+      "gpio": [
+        2,
+        8,
+        9
+      ]
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-LEDC-001",
+    "kind": "api",
+    "scope": [
+      "ledc"
+    ],
+    "text": "LEDC 定时器用 ledc_timer_config() 配置（ledc_timer_config_t：speed_mode、duty_resolution、timer_num、freq_hz、clk_cfg）",
+    "cite": {
+      "doc": "idf-driver-ledc-h",
+      "page": null,
+      "section": "ledc_timer_config_t",
+      "quote": "Configuration parameters of LEDC timer for ledc_timer_config function"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "ledc_timer_config",
+      "header": "driver/ledc.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-LEDC-002",
+    "kind": "api",
+    "scope": [
+      "ledc"
+    ],
+    "text": "LEDC 通道用 ledc_channel_config() 配置，gpio_num 直接填 GPIO 编号（如 GPIO6 填 6），通道再绑定到上面的 timer_sel",
+    "cite": {
+      "doc": "idf-driver-ledc-h",
+      "page": null,
+      "section": "ledc_channel_config_t",
+      "quote": "Configuration parameters of LEDC channel for ledc_channel_config function"
+    },
+    "tier": "official_code",
+    "status": "draft",
+    "check": {
+      "type": "api_exists",
+      "symbol": "ledc_channel_config",
+      "header": "driver/ledc.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认",
+      "负责人驳回（2026-11-08，确认时漏按，事后在对话里要求驳回，由 Claude Code 代为执行）：让 gpio_num 直接填编号（如填 6），但引脚必须用 hw_config.h 里的宏，直接写数字会被合规检查判错"
+    ]
+  },
+  {
+    "id": "R-LEDC-004",
+    "kind": "api",
+    "scope": [
+      "ledc"
+    ],
+    "text": "ESP32-C3 只有低速模式，speed_mode 填 LEDC_LOW_SPEED_MODE；高速模式（LEDC_HIGH_SPEED_MODE）仅在 esp32 上存在",
+    "cite": {
+      "doc": "idf-driver-ledc-h",
+      "page": null,
+      "section": "ledc_channel_config_t",
+      "quote": "LEDC speed speed_mode, high-speed mode (only exists on esp32) or low-speed mode"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-LEDC-005",
+    "kind": "api",
+    "scope": [
+      "ledc"
+    ],
+    "text": "在任务里改占空比用线程安全版本 ledc_set_duty_and_update()；ledc_set_duty + ledc_update_duty 的两个调用组合不是线程安全的",
+    "cite": {
+      "doc": "idf-driver-ledc-h",
+      "page": null,
+      "section": "ledc_set_duty_and_update",
+      "quote": "A thread-safe version of API is ledc_set_duty_and_update"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "ledc_set_duty_and_update",
+      "header": "driver/ledc.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-LEDC-006",
+    "kind": "peripheral",
+    "scope": [
+      "ledc"
+    ],
+    "text": "ESP32-C3 除 esp32/esp32s2 外没有定时器专用时钟源，所有 LEDC 定时器必须用同一个时钟源，不要给不同 timer 配 RC_FAST 和 XTAL 两种",
+    "cite": {
+      "doc": "idf-driver-ledc-h",
+      "page": null,
+      "section": "ledc_timer_config_t",
+      "quote": "timer-specific clock sources, which means clock source for all timers"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-LEDC-007",
+    "kind": "pin",
+    "scope": [
+      "ledc"
+    ],
+    "text": "反初始化已配置过的 LEDC 通道用 ledc_channel_config_t.deconfigure 置 true，驱动会释放该通道占用的引脚；不要靠丢弃句柄来释放引脚",
+    "cite": {
+      "doc": "idf-driver-ledc-h",
+      "page": null,
+      "section": "ledc_channel_config_t",
+      "quote": "The driver only does limited action to release the pins occupied by this channel only."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "ledc_channel_config",
+      "header": "driver/ledc.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MAX-001",
+    "kind": "device",
+    "scope": [
+      "max30102",
+      "i2c"
+    ],
+    "text": "MAX30102 的从机 ID 是固定的 7 位 0b1010111（B7–B1），对应写地址 0xAE、读地址 0xAF",
+    "cite": {
+      "doc": "max30102-ds",
+      "page": 29,
+      "section": "Slave ID",
+      "quote": "The MAX30102 slave ID consists of seven fixed bits, B7–B1 (set to 0b1010111)."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MAX-002",
+    "kind": "register",
+    "scope": [
+      "max30102"
+    ],
+    "text": "读 FIFO_DATA(0x07) 地址指针不自增，必须在同一次事务里连读 6 字节（RED 3 字节 + IR 3 字节）才得到一个样点",
+    "cite": {
+      "doc": "max30102-ds",
+      "page": 14,
+      "section": "Reading from the FIFO",
+      "quote": "Reading the FIFO_DATA register does not automatically increment the register address."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MAX-003",
+    "kind": "device",
+    "scope": [
+      "max30102"
+    ],
+    "text": "FIFO 三个指针寄存器地址固定：FIFO_WR_PTR=0x04、OVF_COUNTER=0x05、FIFO_RD_PTR=0x06，都是 R/W、复位值 0x00，不要自行推算地址",
+    "cite": {
+      "doc": "max30102-ds",
+      "page": 13,
+      "section": "FIFO (0x04–0x07)",
+      "quote": "Pointer FIFO_WR_PTR[4:0] 0x04 0x00 R/W"
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MAX-004",
+    "kind": "device",
+    "scope": [
+      "max30102"
+    ],
+    "text": "PART_ID(0xFF) 的复位值固定为 0x15；REV_ID(0xFE) 复位值是 0xXX，XX 为两位十六进制数，用于版本识别",
+    "cite": {
+      "doc": "max30102-ds",
+      "page": 11,
+      "section": "PART ID",
+      "quote": "XX denotes a 2-digit hexadecimal number (00 to FF) for part revision identification."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MAX-005",
+    "kind": "register",
+    "scope": [
+      "max30102"
+    ],
+    "text": "MODE[2:0] 只允许 010（心率，仅 Red）、011（SpO2，Red+IR）、111（多 LED）；000、001、100–110 手册标为 Do not use",
+    "cite": {
+      "doc": "max30102-ds",
+      "page": 18,
+      "section": "Table 4. Mode Control",
+      "quote": "010 Heart Rate mode Red only"
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MAX-007",
+    "kind": "register",
+    "scope": [
+      "max30102"
+    ],
+    "text": "片内温度 = TINT(0x1F，二进制补码，1 °C/LSB) + TFRAC(0x20) × 0.0625 °C；两个寄存器都要读，TFRAC 的 4 位在低位",
+    "cite": {
+      "doc": "max30102-ds",
+      "page": 22,
+      "section": "Temperature Data (0x1F–0x21)",
+      "quote": "This register stores the fractional temperature data in increments of 0.0625°C."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MAX-008",
+    "kind": "device",
+    "scope": [
+      "max30102"
+    ],
+    "text": "启动单次温度测量：置 TEMP_EN 与 DIE_TEMP_RDY_EN；DIE_TEMP_RDY 中断触发后 CPU 才去读温度数据寄存器，读走数据后中断清除",
+    "cite": {
+      "doc": "max30102-ds",
+      "page": 26,
+      "section": "Table 15. Events Sequence for Figure 4 in SpO2 Mode",
+      "quote": "Then to enable and initiate a single temperature measurement, set TEMP_EN and DIE_TEMP_RDY_EN."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MAX-009",
+    "kind": "device",
+    "scope": [
+      "max30102",
+      "i2c"
+    ],
+    "text": "本板 I2C0 上只有 0x57（MAX30102）和 0x68（MPU6050 模块）两个地址应答，扫描时不要期待其它地址",
+    "cite": {
+      "doc": "board-measured",
+      "page": null,
+      "section": "M-001 I2C 总线扫描",
+      "quote": "结果：I2C 总线上只有 0x57 和 0x68 两个地址应答。0x57 是 MAX30102，0x68 是 MPU6050 模块（AD0 接低）。"
+    },
+    "tier": "user",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MAX-010",
+    "kind": "register",
+    "scope": [
+      "max30102"
+    ],
+    "text": "中断状态读后清：A_FULL/PPG_RDY/ALC_OVF 靠读 Interrupt Status 1(0x00) 清除，DIE_TEMP_RDY 靠读 Interrupt Status 2(0x01) 或 TFRAC(0x20) 清除",
+    "cite": {
+      "doc": "max30102-ds",
+      "page": 12,
+      "section": "Interrupt Status (0x00–0x01)",
+      "quote": "The interrupt is cleared by reading the Interrupt Status 1 register (0x00)."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MPU-001",
+    "kind": "device",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "本模块读 WHO_AM_I(0x75) 得到 0x70（MPU-6500 的编号），不是 MPU6050 手册默认的 0x68",
+    "cite": {
+      "doc": "board-measured",
+      "page": null,
+      "section": "M-002",
+      "quote": "本模块 WHO_AM_I 读出 0x70，不是 MPU6050 手册写的 0x68"
+    },
+    "tier": "user",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MPU-002",
+    "kind": "device",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "温度必须按 原始值/333.87 + 21 换算（temp_lsb_per_c=333.87、temp_offset_c=21.0），不要用 MPU6050 手册的 /340+36.53",
+    "cite": {
+      "doc": "board-measured",
+      "page": null,
+      "section": "M-002",
+      "quote": "所以本模块温度应按 原始值/333.87+21 换算。"
+    },
+    "tier": "user",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MPU-003",
+    "kind": "device",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "MPU6050 模块地址 0x68（AD0 接低），与 MAX30102 的 0x57 同挂 i2c0；总线上应答的只有这两个地址",
+    "cite": {
+      "doc": "board-measured",
+      "page": null,
+      "section": "M-001",
+      "quote": "0x57 是 MAX30102，0x68 是 MPU6050 模块（AD0 接低）。"
+    },
+    "tier": "user",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MPU-004",
+    "kind": "register",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "PWR_MGMT_1(0x6B) 的 CLKSEL[2:0] 选时钟源（0=内部 8 MHz，1~3=陀螺仪 PLL，4/5=外部时钟）；手册强烈建议选陀螺仪或外部时钟",
+    "cite": {
+      "doc": "mpu6050-rm",
+      "page": 41,
+      "section": "4.30 Register 107 – Power Management 1",
+      "quote": "as the clock reference for improved stability"
+    },
+    "tier": "official_mirror",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MPU-005",
+    "kind": "register",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "采样率 = 陀螺仪输出率 /(1+SMPLRT_DIV(0x19))；DLPF 使能时陀螺输出率为 1 kHz，关闭时为 8 kHz，据此反推 SMPLRT_DIV",
+    "cite": {
+      "doc": "mpu6050-rm",
+      "page": 12,
+      "section": "4.2 Register 25 – Sample Rate Divider",
+      "quote": "Sample Rate = Gyroscope Output Rate / (1 + SMPLRT_DIV)"
+    },
+    "tier": "official_mirror",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MPU-006",
+    "kind": "register",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "要数据就绪中断，就把中断使能寄存器 INT_ENABLE(0x38, 十进制56) 的 DATA_RDY_EN 位置 1",
+    "cite": {
+      "doc": "mpu6050-rm",
+      "page": 28,
+      "section": "4.16 Register 56 – Interrupt Enable p.28",
+      "quote": "DATA_RDY_EN When set to 1, this bit enables the Data Ready interrupt"
+    },
+    "tier": "official_mirror",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MPU-007",
+    "kind": "device",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "加速度、角速度按 MPU6050 手册的寄存器与换算系数读即可（本模块读数正常：静止 ±2 g 量程 Z 轴原始值约 16524）",
+    "cite": {
+      "doc": "board-measured",
+      "page": null,
+      "section": "M-002",
+      "quote": "加速度、角速度按 MPU6050 手册的寄存器和换算系数读数正常，静止时 Z 轴加速度原始值 16524（±2 g 量程，约 1 g）。"
+    },
+    "tier": "user",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MPU-008",
+    "kind": "register",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "PWR_MGMT_1（0x6B，十进制 107）里有一个用于复位整个器件的位；读改写该寄存器其它位时不要误置这一位",
+    "cite": {
+      "doc": "mpu6050-rm",
+      "page": 41,
+      "section": "4.30 Register 107 – Power Management 1",
+      "quote": "It also provides a bit for resetting the entire device"
+    },
+    "tier": "official_mirror",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MPU-009",
+    "kind": "sequence",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "读数据按寄存器地图从 0x3B 起连续读：加速度 0x3B–0x40、温度 0x41–0x42、陀螺仪 0x43–0x48，地址连续",
+    "cite": {
+      "doc": "mpu6050-rm",
+      "page": 7,
+      "section": "3 Register Map (register addresses)",
+      "quote": "3B 59 ACCEL_XOUT_H R ACCEL_XOUT[15:8]"
+    },
+    "tier": "official_mirror",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-MPU-010",
+    "kind": "register",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "除 PWR_MGMT_1(0x6B) 复位值为 0x40、WHO_AM_I(0x75) 复位值为 0x68 外，MPU6050 其余寄存器复位值均为 0x00",
+    "cite": {
+      "doc": "mpu6050-rm",
+      "page": 8,
+      "section": "3 Register Map p.8",
+      "quote": "The reset value is 0x00 for all registers other than the registers below."
+    },
+    "tier": "official_mirror",
+    "status": "draft",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认",
+      "负责人驳回（2026-11-08，确认时漏按，事后在对话里要求驳回，由 Claude Code 代为执行）：写着 WHO_AM_I 复位值为 0x68，和 R-MPU-001 的实测 0x70 矛盾，会让编码 Agent 把本模块判成器件不对"
+    ]
+  },
+  {
+    "id": "R-MPU-012",
+    "kind": "register",
+    "scope": [
+      "mpu6050"
+    ],
+    "text": "中断状态寄存器 INT_STATUS(0x3A, 十进制58) 为只读，读一次后各位自动清零，不要靠它做持久状态保存",
+    "cite": {
+      "doc": "mpu6050-rm",
+      "page": 29,
+      "section": "4.17 Register 58 – Interrupt Status p.29",
+      "quote": "Each bit will clear after the register is read."
+    },
+    "tier": "official_mirror",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-RMT-001",
+    "kind": "api",
+    "scope": [
+      "rmt"
+    ],
+    "text": "RMT 接收通道用 rmt_new_rx_channel(&config, &chan) 创建，config 里填 gpio_num、clk_src、resolution_hz、mem_block_symbols",
+    "cite": {
+      "doc": "idf-driver-rmt-rx-h",
+      "page": null,
+      "section": "rmt_rx_channel_config_t",
+      "quote": "esp_err_t rmt_new_rx_channel(const rmt_rx_channel_config_t *config, rmt_channel_handle_t *ret_chan);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "rmt_new_rx_channel",
+      "header": "driver/rmt_rx.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-RMT-002",
+    "kind": "api",
+    "scope": [
+      "rmt"
+    ],
+    "text": "接收用非阻塞的 rmt_receive() 发起，函数立刻返回；收到的数据要在 rmt_rx_register_event_callbacks 注册的 on_recv_done 回调里取",
+    "cite": {
+      "doc": "idf-driver-rmt-rx-h",
+      "page": null,
+      "section": "rmt_receive",
+      "quote": "This function is non-blocking, it initiates a new receive job and then returns."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "rmt_receive",
+      "header": "driver/rmt_rx.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-RMT-003",
+    "kind": "api",
+    "scope": [
+      "rmt"
+    ],
+    "text": "RMT 通道用 rmt_enable() 使能、rmt_disable() 停用；通道未使能时发起接收（rmt_receive）会返回 ESP_ERR_INVALID_STATE，所以接收前先使能",
+    "cite": {
+      "doc": "idf-driver-rmt-common-h",
+      "page": null,
+      "section": "rmt_common.h",
+      "quote": "esp_err_t rmt_enable(rmt_channel_handle_t channel);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "rmt_enable",
+      "header": "driver/rmt_common.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-RMT-004",
+    "kind": "peripheral",
+    "scope": [
+      "rmt"
+    ],
+    "text": "ESP32-C3 的 RMT 只有 4 个通道：0~1 为 TX、2~3 为 RX，四通道共享 192×32-bit RAM；不要按更多通道规划",
+    "cite": {
+      "doc": "esp32c3-trm",
+      "page": 843,
+      "section": "33.2 Features",
+      "quote": "The RMT module has four channels, numbered from zero to three. Channels 0~1 (TX channels) are dedicated to transmit signals, and channels 2~3 (RX channels) to receive signals."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-RMT-005",
+    "kind": "peripheral",
+    "scope": [
+      "rmt"
+    ],
+    "text": "rmt_rx_channel_config_t.mem_block_symbols 的单位是 rmt_symbol_word_t 个数，必须取偶数；普通模式下它决定该通道占用几个 RMT 内存块",
+    "cite": {
+      "doc": "idf-driver-rmt-rx-h",
+      "page": null,
+      "section": "rmt_rx_channel_config_t",
+      "quote": "size_t mem_block_symbols;   /*!< Size of memory block, in number of `rmt_symbol_word_t`, must be an even."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-RMT-006",
+    "kind": "pin",
+    "scope": [
+      "rmt"
+    ],
+    "text": "RMT RX 通道的接收引脚填在 rmt_rx_channel_config_t.gpio_num 里，用 gpio_num_t 枚举；该通道不用引脚时填 -1",
+    "cite": {
+      "doc": "idf-driver-rmt-rx-h",
+      "page": null,
+      "section": "rmt_rx_channel_config_t",
+      "quote": "GPIO number used by RMT RX channel. Set to -1 if unused"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-RMT-007",
+    "kind": "api",
+    "scope": [
+      "rmt"
+    ],
+    "text": "RMT 通道用完用 rmt_disable() 停掉再用 rmt_del_channel() 删除；通道仍在工作时 rmt_del_channel 返回 ESP_ERR_INVALID_STATE",
+    "cite": {
+      "doc": "idf-driver-rmt-common-h",
+      "page": null,
+      "section": "rmt_del_channel",
+      "quote": "ESP_ERR_INVALID_STATE: Delete RMT channel failed because it is still in working"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "rmt_del_channel",
+      "header": "driver/rmt_common.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-RMT-009",
+    "kind": "peripheral",
+    "scope": [
+      "rmt"
+    ],
+    "text": "RMT RAM 分成 4 个 48×32-bit 块，默认通道 n 用块 n；单个通道要更多缓冲就配 RMT_MEM_SIZE_CHn，被占用的后续通道随之不可用",
+    "cite": {
+      "doc": "esp32c3-trm",
+      "page": 845,
+      "section": "33.3 Functional Description",
+      "quote": "The RAM is divided into four 48 x 32-bit blocks. By default, each channel uses one block, block zero for channel zero, block one for channel one, and so on."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  }
+]
