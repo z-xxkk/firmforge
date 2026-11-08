@@ -1003,8 +1003,15 @@ def cmd_rules(args) -> int:
     bus = EventBus(rd.run_id, rd.events_path)
     bus.subscribe(_print_rule_event)
     verifier = RuleVerifier(library, profile, idf=idf, svd=svd, semantic=semantic)
+    def human(pending, escalated):
+        # 先把要确认的规则原样存下来：事后能查当时给人看的是什么（也方便对照建议，不会和模型输出对不上）
+        rd.write_json("pending_rules.json", {"pending": [r.to_dict() for r in pending],
+                                             "escalated": [{"rule": x.rule.to_dict(), "reasons": x.reasons()}
+                                                           for x in escalated]})
+        return terminal_rules_human(pending, escalated)
+
     builder = RuleBuilder(complete, profile, library, verifier, store, emit=bus.emit,
-                          human=None if args.no_human else terminal_rules_human, max_rounds=args.rounds)
+                          human=None if args.no_human else human, max_rounds=args.rounds)
     try:
         out = builder.run([s.strip() for s in args.scopes.split(",") if s.strip()])
     finally:                                                        # 中途出错或中断，已入库的规则也保存

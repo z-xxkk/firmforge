@@ -103,10 +103,14 @@ class RuleBuilder:
         for rnd in range(1, self.max_rounds + 1 if todo else 1):
             out.rounds = rnd
             msgs = research_messages(self.profile, todo, self.library, trusted=self.store, feedback=feedback,
-                                     missing=missing)
+                                     missing=missing, accepted=sorted(checked.values(), key=lambda r: r.id))
             text = self._ask_agent(msgs, out)
             rules, parse_errors = parse_rules(text)
             rules = [r for r in rules if r.id not in escalated]
+            off = [r.id for r in rules if not ({"all"} | set(todo)) & set(r.scope)]
+            if off:                                         # 和这次要查的外设、器件无关的规则不收
+                self.emit("rules_proposed", "rules", round=rnd, count=0, parse_errors=[f"不在这次范围内，已丢弃：{'、'.join(off)}"])
+                rules = [r for r in rules if r.id not in off]
             rules = self._dedupe(rules, checked)
             self.emit("rules_proposed", "rules", round=rnd, count=len(rules), parse_errors=parse_errors[:5])
             report = self.verifier.run(RuleSet(rules), scopes=set(todo), already=list(checked.values()))

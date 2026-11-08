@@ -135,11 +135,11 @@ def library_listing(library: SourceLibrary) -> str:
 
 def research_messages(profile: HardwareProfile, scopes: list[str], library: SourceLibrary, *,
                       trusted: RuleSet | None = None, feedback: list[RuleResult] | None = None,
-                      missing: list[str] | None = None) -> list[dict]:
+                      missing: list[str] | None = None, accepted: list[Rule] | None = None) -> list[dict]:
     """scopes：这次要覆盖的外设和器件，如 ["i2c", "mpu6050"]。feedback：上一轮被退回的规则及原因。"""
     system = load_prompt("researcher.md").safe_substitute(kinds="、".join(f"{k}（{v}）" for k, v in KIND_NAMES.items()))
     intent = "为下面这些外设和器件提炼规则：" + "、".join(scopes)
-    if feedback:
+    if feedback or accepted:
         intent = "修正上一轮被退回的规则（改正或删除），并补齐缺少的类别"
     b = Brief(intent=intent, location="规则 › 查资料并提炼规则")
     b.constraints += ["只能引用已登记的资料；引用原文必须从 doc_page 读到的文字里逐字摘抄",
@@ -152,6 +152,10 @@ def research_messages(profile: HardwareProfile, scopes: list[str], library: Sour
     b.attach("已登记的资料", library_listing(library))
     if trusted is not None and len(trusted):
         b.attach("已有的可信规则（不要重复）", "\n".join(r.line() for r in trusted))
+    if accepted:
+        b.constraints.append("下面「本轮已通过核对的规则」已经通过，不要再输出它们（也不要换个说法再交一遍）；"
+                             "只输出被退回规则的改正版（沿用原编号）和补齐缺项的新规则（用没出现过的新编号）")
+        b.attach("本轮已通过核对的规则（不要再输出）", "\n".join(r.line() for r in accepted))
     if feedback:
         lines = []
         for res in feedback:

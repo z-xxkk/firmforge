@@ -68,6 +68,19 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("rule_renamed", self.types())
         self.assertEqual(checked.count(old["text"]), 1)                             # 已核对的规则不再重复核对
 
+    def test_second_round_sees_accepted_rules_and_offscope_dropped(self):
+        first = [g for g in GOOD if g["id"] != "R-IMU-002"] + [broken("R-IMU-002")]
+        offscope = {**next(g for g in GOOD if g["id"] == "R-I2C-002"), "id": "R-MAX-001", "scope": ["max30102"],
+                    "text": "不在这次范围内的规则"}
+        fixed = next(g for g in GOOD if g["id"] == "R-IMU-002")
+        b, llm = self.builder([reply(first), reply([fixed, offscope])],
+                              human=lambda pending, esc: {r.id: ("approve", "") for r in pending})
+        out = b.run(["i2c", "mpu6050"])
+        second = "\n".join(m["content"] or "" for m in llm.calls[1]["messages"])
+        self.assertIn("本轮已通过核对的规则（不要再输出）", second)
+        self.assertIn("R-I2C-001", second)
+        self.assertNotIn("不在这次范围内的规则", {r.text for r in out.trusted})
+
     def test_feedback_round_then_human(self):
         first = [g for g in GOOD if g["id"] != "R-IMU-002"] + [broken("R-IMU-002")]
         script = [
