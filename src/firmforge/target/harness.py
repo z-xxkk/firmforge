@@ -4,6 +4,8 @@
 - ff_test.h / ff_test.c：读寄存器、计时、打印调试信息；
 - ff_regs.h：规则里提到的寄存器的地址（从 SVD 算出），测试用 FF_REG_外设_寄存器 读，不靠被测代码自己报告；
 - ff_test_main.c：打印开始标记 → 每个用例单独开机跑（跑完一个软重启，失败不连累后面的用例）→ 打印汇总和结束标记，然后停住。
+  芯片软重启不会复位外接器件，所以每个用例开始前按硬件档案把外接 I2C 器件软复位（DECISIONS 第 96 条），
+  免得上一个用例留下的配置影响下一个用例。
 
 结果解析看串口输出：
 - 每个用例一行  <文件>:<行>:<用例名>:PASS / FAIL:<原因> / IGNORE
@@ -16,6 +18,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from ..grounding.profile import HardwareProfile
 from ..grounding.rules import RuleSet
 from ..grounding.svd import SvdDevice
 
@@ -55,8 +58,9 @@ void ff_log(const char *fmt, ...)
 }
 """
 
-FF_TEST_MAIN = f"""/* FirmForge 平台提供：每个 Unity 用例单独开机运行（DECISIONS 第 91 条），全部跑完打印汇总和结束标记后停住。
-   跑到第几个、累计失败数记在软重启后不清零的内存里；上电或硬复位时从头开始。 */
+_TEST_MAIN = """/* FirmForge 平台提供：每个 Unity 用例单独开机运行（DECISIONS 第 91 条），全部跑完打印汇总和结束标记后停住。
+   跑到第几个、累计失败数记在软重启后不清零的内存里；上电或硬复位时从头开始。
+   芯片软重启不会复位外接器件，硬件档案写了复位方法的器件在每个用例前软复位（DECISIONS 第 96 条）。 */
 #include <stdio.h>
 #include "esp_attr.h"
 #include "esp_system.h"
@@ -64,22 +68,22 @@ FF_TEST_MAIN = f"""/* FirmForge 平台提供：每个 Unity 用例单独开机�
 #include "freertos/task.h"
 #include "unity.h"
 #include "unity_test_runner.h"
-
+@RESET_DECL@
 #define FF_MAGIC 0x46465431u
 
 static RTC_NOINIT_ATTR uint32_t s_magic, s_next, s_tests, s_failures, s_ignores;
 
 void app_main(void)
-{{
-    if (esp_reset_reason() != ESP_RST_SW || s_magic != FF_MAGIC) {{
+{
+    if (esp_reset_reason() != ESP_RST_SW || s_magic != FF_MAGIC) {
         vTaskDelay(pdMS_TO_TICKS(2000));     /* 等电脑那边打开串口（烧录完自动复位后才开始读） */
-        printf("{BEGIN}\\n");
+        printf("@BEGIN@\\n");
         s_magic = FF_MAGIC;
         s_next = s_tests = s_failures = s_ignores = 0;
-    }}
+    }
     int total = unity_get_test_count();
-    if (s_next < (uint32_t)total) {{
-        UNITY_BEGIN();
+    if (s_next < (uint32_t)total) {
+        @RESET_CALL@UNITY_BEGIN();
         unity_run_test_by_index((int)s_next);
         s_tests += Unity.NumberOfTests;
         s_failures += Unity.TestFailures;
@@ -88,16 +92,74 @@ void app_main(void)
         fflush(stdout);
         vTaskDelay(pdMS_TO_TICKS(50));       /* 让串口发完再重启 */
         esp_restart();
-    }}
+    }
     s_magic = 0;
     printf("\\n-----------------------\\n%u Tests %u Failures %u Ignored\\n%s\\n",
            (unsigned)s_tests, (unsigned)s_failures, (unsigned)s_ignores, s_failures ? "FAIL" : "OK");
-    printf("{END}\\n");
-    while (1) {{
+    printf("@END@\\n");
+    while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
-    }}
-}}
+    }
+}
 """
+
+
+def _reset_code(profile: HardwareProfile | None) -> tuple[str, str]:
+    """外接 I2C 器件的软复位代码：（声明部分，调用语句）。档案里没有可复位的器件就都是空的。"""
+    devs = [d for d in (profile.devices if profile is not None else ())
+            if d.reset is not None and d.address is not None and d.bus.startswith("i2c")]
+    if not devs:
+        return "", ""
+    lines = ['#include "driver/i2c_master.h"', '#include "hw_config.h"', "",
+             "/* 写一个寄存器复位器件；器件没应答只打印一行，不让用例失败（缺器件时由用例自己报错）。 */",
+             "static void ff_reset_one(i2c_master_bus_handle_t bus, uint16_t addr, uint8_t reg, uint8_t val,"
+             " const char *name)",
+             "{",
+             "    i2c_device_config_t dc = {.dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = addr,"
+             " .scl_speed_hz = 100000};",
+             "    i2c_master_dev_handle_t dev;",
+             "    uint8_t buf[2] = {reg, val};",
+             "    if (i2c_master_bus_add_device(bus, &dc, &dev) != ESP_OK) {",
+             '        printf("FF_LOG: 用例前复位 %s 失败：加不进总线\\n", name);',
+             "        return;",
+             "    }",
+             "    if (i2c_master_transmit(dev, buf, 2, 50) != ESP_OK) {",
+             '        printf("FF_LOG: 用例前复位 %s 失败：器件没有应答\\n", name);',
+             "    }",
+             "    i2c_master_bus_rm_device(dev);",
+             "}",
+             "",
+             "/* 每个用例开始前把外接器件恢复到上电状态，用完把总线删掉，用例自己重新建。 */",
+             "static void ff_reset_devices(void)",
+             "{"]
+    for bus in sorted({d.bus for d in devs}):
+        port, sig = int(bus[3:]), re.sub(r"[^A-Za-z0-9]", "_", bus).upper()
+        lines += ["    {",
+                  f"        i2c_master_bus_config_t bc = {{.i2c_port = {port}, .sda_io_num = FF_PIN_{sig}_SDA,"
+                  f" .scl_io_num = FF_PIN_{sig}_SCL,",
+                  "                                     .clk_source = I2C_CLK_SRC_DEFAULT, .glitch_ignore_cnt = 7,",
+                  "                                     .flags.enable_internal_pullup = true};",
+                  "        i2c_master_bus_handle_t bus;",
+                  "        if (i2c_new_master_bus(&bc, &bus) == ESP_OK) {"]
+        for d in devs:
+            if d.bus == bus:
+                r = d.reset.value
+                lines.append(f"            ff_reset_one(bus, FF_{d.name.upper()}_ADDR, 0x{r['reg']:02X}, 0x{r['value']:02X},"
+                             f' "{d.name}");  /* {d.part}：{d.reset.note[:80].replace("*/", "")} */')
+        lines += ["            i2c_del_master_bus(bus);",
+                  "        } else {",
+                  f'            printf("FF_LOG: 用例前复位外接器件失败：建不了 {bus} 总线\\n");',
+                  "        }",
+                  "    }"]
+    wait = max(d.reset.value["wait_ms"] for d in devs)
+    lines += [f"    vTaskDelay(pdMS_TO_TICKS({wait}));     /* 等器件复位完成 */", "}", ""]
+    return "\n".join(lines) + "\n", "ff_reset_devices();\n        "
+
+
+def main_source(profile: HardwareProfile | None = None) -> str:
+    decl, call = _reset_code(profile)
+    return (_TEST_MAIN.replace("@BEGIN@", BEGIN).replace("@END@", END)
+            .replace("@RESET_DECL@", decl).replace("@RESET_CALL@", call))
 
 
 def regs_header(rules: RuleSet | None, svd: SvdDevice | None, scopes: set[str] | None = None) -> str:
@@ -119,9 +181,10 @@ def regs_header(rules: RuleSet | None, svd: SvdDevice | None, scopes: set[str] |
     return "\n".join(lines) + "\n"
 
 
-def harness_files(rules: RuleSet | None, svd: SvdDevice | None, scopes: set[str] | None = None) -> dict[str, str]:
-    """放进 main/ 的平台文件（相对 main/ 的路径）。"""
-    return {"ff_test_main.c": FF_TEST_MAIN, "ff_test.c": FF_TEST_C, "include/ff_test.h": FF_TEST_H,
+def harness_files(rules: RuleSet | None, svd: SvdDevice | None, scopes: set[str] | None = None,
+                  profile: HardwareProfile | None = None) -> dict[str, str]:
+    """放进 main/ 的平台文件（相对 main/ 的路径）。给了硬件档案时，每个用例前复位档案里可复位的外接器件。"""
+    return {"ff_test_main.c": main_source(profile), "ff_test.c": FF_TEST_C, "include/ff_test.h": FF_TEST_H,
             "include/ff_regs.h": regs_header(rules, svd, scopes)}
 
 

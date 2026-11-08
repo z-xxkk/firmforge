@@ -38,6 +38,9 @@ class Device:
     address: int | None = None  # I2C 地址
     pins: dict[str, int] = field(default_factory=dict)      # 例如 {"int": 5}
     params: dict[str, Fact] = field(default_factory=dict)   # 器件参数，例如实测的 WHO_AM_I、温度换算系数（DECISIONS 第 89 条）
+    # 软复位：{"reg": 寄存器, "value": 写入值, "wait_ms": 等待毫秒}。上板测试每个用例前用它复位器件（DECISIONS 第 96 条），
+    # 不写进 hw_config.h
+    reset: Fact | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,17 @@ class HardwareProfile:
             if gpio in used:
                 out.append(f"GPIO{gpio} 同时分给了 {used[gpio]} 和 {sig}")
             used.setdefault(gpio, sig)
+        for d in self.devices:
+            if d.reset is None:
+                continue
+            v = d.reset.value
+            if not (isinstance(v, dict) and all(isinstance(v.get(k), int) and not isinstance(v.get(k), bool)
+                                                for k in ("reg", "value", "wait_ms"))):
+                out.append(f"外接器件 {d.name} 的 reset 要写成 {{\"reg\": 整数, \"value\": 整数, \"wait_ms\": 整数}}")
+            elif d.address is None or not d.bus.startswith("i2c"):
+                out.append(f"外接器件 {d.name} 有 reset，但不是有地址的 I2C 器件，测试程序没法复位它")
+            elif not {f"{d.bus}.sda", f"{d.bus}.scl"} <= set(self.pins):
+                out.append(f"外接器件 {d.name} 有 reset，但档案里没有 {d.bus}.sda / {d.bus}.scl 引脚")
         names = [d.name for d in self.devices]
         for n in sorted({n for n in names if names.count(n) > 1}):
             out.append(f"外接器件重名：{n}")
@@ -115,7 +129,8 @@ class HardwareProfile:
                 framework=fact(d["framework"]), framework_version=fact(d["framework_version"]),
                 pins={k: fact(v) for k, v in d.get("pins", {}).items()},
                 reserved_pins={int(k): v for k, v in d.get("reserved_pins", {}).items()},
-                devices=tuple(Device(**{**x, "params": {k: fact(v) for k, v in x.get("params", {}).items()}})
+                devices=tuple(Device(**{**x, "params": {k: fact(v) for k, v in x.get("params", {}).items()},
+                                        "reset": fact(x["reset"]) if x.get("reset") is not None else None})
                               for x in d.get("devices", [])))
         except (KeyError, TypeError) as exc:
             raise ProfileError(f"硬件档案缺字段或字段不对：{exc}") from exc

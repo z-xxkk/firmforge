@@ -151,7 +151,7 @@ def run_single(task: BoardTask, ctx: EvalContext, name: str) -> tuple[FlowResult
         if proj is None:
             break
         # 带上平台的测试主程序（没有用例），否则缺 app_main 链接不过，Agent 会收到和它的代码无关的报错
-        proj.write(ctx.profile, {**task.public_files(), **files, **harness_files(None, None)})
+        proj.write(ctx.profile, {**task.public_files(), **files, **harness_files(None, None, profile=ctx.profile)})
         b = proj.build()
         bus.emit("verify_finished", m.id, attempt=attempt, scope="build", ok=b.ok, failed_layer=None if b.ok else "build")
         if b.ok:

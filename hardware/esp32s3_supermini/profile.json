@@ -113,6 +113,15 @@
           "origin": "document",
           "note": "mpu6050-rm p.31"
         }
+      },
+      "reset": {
+        "value": {
+          "reg": 107,
+          "value": 128,
+          "wait_ms": 100
+        },
+        "origin": "document",
+        "note": "mpu6050-rm p.42 PWR_MGMT_1 的 DEVICE_RESET：When set to 1, this bit resets all internal registers to their default values；等待 100 ms 是默认值"
       }
     },
     {
@@ -122,6 +131,15 @@
       "address": 87,
       "pins": {
         "int": 6
+      },
+      "reset": {
+        "value": {
+          "reg": 9,
+          "value": 64,
+          "wait_ms": 100
+        },
+        "origin": "document",
+        "note": "max30102-ds Mode Configuration(0x09) Bit 6 RESET：registers are reset to their power-on-state"
       }
     }
   ]

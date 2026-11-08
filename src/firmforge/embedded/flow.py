@@ -227,7 +227,7 @@ class EmbeddedFlow:
                           target=str(self.profile.chip.value),
                           requires=DEFAULT_REQUIRES + TEST_REQUIRES + self.extra_requires, whole_archive=True)
         svd = getattr(self.verifier, "svd", None)
-        proj.write(self.profile, {**self.locked, **deps, **mr.files, **mr.tests, **harness_files(rules, svd, scopes)})
+        proj.write(self.profile, {**self.locked, **deps, **mr.files, **mr.tests, **harness_files(rules, svd, scopes, profile=self.profile)})
         self.bus.emit("verify_started", m.id, attempt=attempt, scope="build")
         b = proj.build()
         self.bus.emit("verify_finished", m.id, attempt=attempt, scope="build", ok=b.ok,

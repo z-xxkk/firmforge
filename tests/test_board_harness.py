@@ -4,6 +4,9 @@ import unittest
 from pathlib import Path
 
 import helpers  # noqa: F401
+from dataclasses import replace
+
+from firmforge.grounding.profile import Device, Fact, HardwareProfile
 from firmforge.grounding.rules import Citation, Rule, RuleSet
 from firmforge.grounding.svd import SvdDevice
 from firmforge.target.board import BoardRunner, find_port
@@ -74,6 +77,31 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(r.summary, (2, 1, 0))
         self.assertFalse(r.crash or r.hang)
         self.assertIn("unity_get_test_count", harness_files(None, None)["ff_test_main.c"])
+
+    def test_reset_external_devices_before_each_case(self):
+        # 芯片软重启不复位外接器件，上一个用例的配置会留下来（DECISIONS 第 96 条）：每个用例前按档案软复位
+        prof = HardwareProfile.load(Path(__file__).resolve().parents[1] / "hardware" / "esp32c3_supermini" / "profile.json")
+        main = harness_files(None, None, profile=prof)["ff_test_main.c"]
+        self.assertIn("ff_reset_one(bus, FF_IMU_ADDR, 0x6B, 0x80", main)
+        self.assertIn("ff_reset_one(bus, FF_PPG_ADDR, 0x09, 0x40", main)
+        self.assertIn(".sda_io_num = FF_PIN_I2C0_SDA", main)
+        self.assertLess(main.index("ff_reset_devices();"), main.index("unity_run_test_by_index"))
+        self.assertIn("i2c_del_master_bus(bus);", main)                 # 复位完删掉总线，用例自己建
+        # 不给档案、或档案里没写复位方法：不生成复位代码
+        self.assertNotIn("ff_reset_devices", harness_files(None, None)["ff_test_main.c"])
+        bare = replace(prof, devices=tuple(replace(d, reset=None) for d in prof.devices))
+        self.assertNotIn("ff_reset_devices", harness_files(None, None, profile=bare)["ff_test_main.c"])
+
+    def test_reset_field_checked(self):
+        prof = HardwareProfile.load(Path(__file__).resolve().parents[1] / "hardware" / "esp32c3_supermini" / "profile.json")
+        self.assertEqual(prof.problems(), [])
+        back = HardwareProfile.from_dict(prof.to_dict())               # 存了再读，复位方法不丢
+        self.assertEqual(back.devices[0].reset, prof.devices[0].reset)
+        bad = replace(prof, devices=(Device("imu", "MPU6050", "i2c0", 0x68, reset=Fact({"reg": 0x6B})),))
+        self.assertTrue(any("reset" in p for p in bad.problems()))
+        no_addr = replace(prof, devices=(Device("led", "LED", "gpio", None,
+                                                reset=Fact({"reg": 1, "value": 1, "wait_ms": 1})),))
+        self.assertTrue(any("I2C" in p for p in no_addr.problems()))
 
     def test_unescape_chinese_names(self):
         raw = f"{BEGIN}\n./main/t.c:9:\\xE6\\xB8\\x85\\xE9\\x9B\\xB6 ok:PASS\n1 Tests 0 Failures 0 Ignored\n{END}"

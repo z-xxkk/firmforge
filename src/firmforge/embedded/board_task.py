@@ -175,7 +175,7 @@ def check_without_board(task: BoardTask, profile: HardwareProfile, rules: RuleSe
         if not comp.ok:
             v.problems.append(comp.summary())
         if proj is not None and comp.ok:
-            proj.write(profile, {**task.public_files(), **files, **task.hidden_files(), **harness_files(rules, None)})
+            proj.write(profile, {**task.public_files(), **files, **task.hidden_files(), **harness_files(rules, None, profile=profile)})
             b = proj.build()
             v.build_ok = b.ok
             if not b.ok:
@@ -231,7 +231,7 @@ def judge_on_board(task: BoardTask, profile: HardwareProfile, judge: RuleSet | N
         return JudgeResult("skipped", "skipped", 0, total, [], "ESP-IDF 不可用，没有编译")
     proj = IdfProject(Path(build_dir), idf, target=str(profile.chip.value),
                       requires=DEFAULT_REQUIRES + TEST_REQUIRES + task.requires, whole_archive=True)
-    proj.write(profile, {**task.public_files(), **files, **task.hidden_files(), **harness_files(judge, None)})
+    proj.write(profile, {**task.public_files(), **files, **task.hidden_files(), **harness_files(judge, None, profile=profile)})
     b = proj.build()
     if not b.ok:
         return JudgeResult("fail", "build", 0, total, ["编译失败"],
