@@ -10,7 +10,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QMenu
 
-from .layout import LAYERS, LAYER_NAMES, ModuleView, RunView, flow_positions, grid_positions
+from .layout import UNIT_NAMES, ModuleView, RunView, flow_positions, grid_positions, layer_names
 from .theme import MONO
 from .widgets import T
 
@@ -125,23 +125,27 @@ class ModuleCard(QGraphicsObject):
         p.setFont(f)
         p.setPen(QColor(c["ink3"] if waiting else c["ink2"]))
         status = {"pending": "等待", "running": "进行中", "done": "通过", "failed": "失败", "skipped": "跳过"}[mv.status]
-        sub = (f"{mv.agent}，" if mv.agent else "") + (f"第 {mv.attempt} 次" if mv.attempt and mv.status == "running" else status)
+        who = UNIT_NAMES.get(mv.unit) or mv.agent           # 新流程写"硬件层，上板"，旧流程写 Agent 名
+        sub = (f"{who}，" if who else "") + (f"第 {mv.attempt} 次" if mv.attempt and mv.status == "running" else status)
         if waiting and mv.deps:
             sub = f"等 {'、'.join(mv.deps)} 完成" if mv.status == "pending" else (mv.note or status)
         p.drawText(QRectF(16, 34, CARD_W - 28, 20), Qt.AlignLeft | Qt.AlignVCenter, sub)
-        for i, layer in enumerate(LAYERS):
+        keys = mv.layer_keys
+        seg = (5 * 30 - 4 - 4 * (len(keys) - 1)) / len(keys)   # 段数不同时总长一样
+        for i, layer in enumerate(keys):
             st = mv.layers.get(layer)
             col = {"pass": c["accent"], "fail": c["fail"], "running": c["run"]}.get(st, c["line"])
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(col))
-            p.drawRoundedRect(QRectF(16 + i * 30, 70, 26, 6), 3, 3)
+            p.drawRoundedRect(QRectF(16 + i * (seg + 4), 70, seg, 6), 3, 3)
 
     def mousePressEvent(self, ev):
         self.clicked.emit(self.mv.id)
 
     def hoverEnterEvent(self, ev):
-        names = "、".join(f"{LAYER_NAMES[l]} {'通过' if self.mv.layers.get(l) == 'pass' else ('失败' if self.mv.layers.get(l) == 'fail' else '未检查')}"
-                         for l in LAYERS)
+        ln = layer_names(self.mv.layer_keys)
+        state = {"pass": "通过", "fail": "失败", "skipped": "跳过", "running": "检查中"}
+        names = "、".join(f"{ln[l]} {state.get(self.mv.layers.get(l), '未检查')}" for l in self.mv.layer_keys)
         self.setToolTip(f"{self.mv.id}：{self.mv.title}\n{names}")
 
 

@@ -129,6 +129,7 @@ class EmbeddedFlow:
         self.rule_mode, self.human, self.idf, self.board, self.max_attempts = rule_mode, human, idf, board, max_attempts
         self.coder, self.fixed_design, self.locked = coder, design, dict(locked or {})
         self.extra_requires, self.build_rules = tuple(extra_requires), build_rules
+        self.on_builder: Callable | None = None
         self.rd = RunDir.create(runs_root, name)
         self.bus = EventBus(self.rd.run_id, self.rd.events_path)
         for s in subscribers:
@@ -155,6 +156,8 @@ class EmbeddedFlow:
                             for r in rules])
         builder = RuleBuilder(self._research_with_tools, self.profile, self.library, self.verifier, self.rules,
                               emit=self.bus.emit, human=self.human)
+        if self.on_builder is not None:          # 界面要拿到核对结果，确认规则时显示每一步
+            self.on_builder(builder)
         builder.run(scopes)
         return self.rules
 
@@ -389,5 +392,5 @@ class EmbeddedFlow:
                                         "cost": round(res.cost, 6),
                                         "seconds": round(time.time() - t0, 1)})
         self.bus.emit("run_finished", None, verdict=res.verdict, tokens=res.prompt_tokens + res.completion_tokens,
-                      error=res.error)
+                      cost=round(res.cost, 6), error=res.error)
         return res

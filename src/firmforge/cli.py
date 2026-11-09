@@ -903,34 +903,17 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------- 资料与规则（DECISIONS 第 66、67 条）
 
 def _hw_context(hw: str, *, need_sources: bool = True, rules: str | None = None):
-    """读硬件目录：profile.json、sources.toml、rules.json；原件在 .ff_sources/raw，取出的文字缓存在 .ff_sources/library。
+    """读硬件目录（embedded.workspace.load_hw）：profile.json、sources.toml、rules.json。
     rules 给了就改用这份规则库（例如做案例用的副本，正式规则库不动）。"""
-    from .grounding.idf import IdfTree
-    from .grounding.profile import HardwareProfile
-    from .grounding.rules import RuleSet
-    from .grounding.sources import SourceLibrary, load_manifest
-    from .grounding.svd import SvdDevice
+    from .embedded.workspace import WorkspaceError, load_hw
     from .target.esp_idf import idf_path
-    hwdir = Path(hw)
-    if not (hwdir / "profile.json").is_file():
-        raise UsageError(f"{hwdir} 下没有 profile.json（硬件档案）")
-    profile = HardwareProfile.load(hwdir / "profile.json")
-    raw, cache = Path(".ff_sources") / "raw", Path(".ff_sources") / "library"
-    library = load_manifest(hwdir / "sources.toml", raw, cache) if need_sources else SourceLibrary.load(cache)
-    rules_path = Path(rules) if rules else hwdir / "rules.json"
-    if rules and not rules_path.is_file():
-        raise UsageError(f"找不到规则库 {rules_path}")
-    store = RuleSet.load(rules_path)
     try:
-        idf = IdfTree(idf_path())
-    except FileNotFoundError:
-        idf = None
+        h = load_hw(hw, need_sources=need_sources, rules=rules)
+    except WorkspaceError as exc:
+        raise UsageError(str(exc)) from exc
+    if h.idf_tree is None:
         print(f"[SKIP] 没找到 ESP-IDF（{idf_path()}），接口类规则无法核对", file=sys.stderr)
-    svd = None
-    for d in library.docs.values():
-        if d.kind == "svd" and d.pages:
-            svd = SvdDevice.parse(d.pages[0])
-    return hwdir, profile, library, store, idf, svd
+    return h.hwdir, h.profile, h.library, h.store, h.idf_tree, h.svd
 
 
 def terminal_rules_human(pending, escalated):
@@ -983,42 +966,16 @@ def cmd_rules(args) -> int:
         return EXIT_PASS if not rep.rejected else EXIT_FAIL
     # build：调用真实模型
     from .agents.registry import default_registry
-    from .grounding.pipeline import RuleBuilder
-    from .grounding.research import llm_semantic_checker
-    from .orchestrator.events import EventBus
+    from .embedded.workspace import HwContext, make_rule_builder
     if not args.scopes:
         raise UsageError("rules build 需要 --scopes，例如 --scopes i2c,mpu6050")
-    from .llm import CallLogger, LoggedLLM, MeteredLLM
-    from .runs import RunDir
     settings = config.load_settings()
-    reg = default_registry().with_overrides(args.tier, args.think)
-    res_agent, chk_agent = reg.get("researcher"), reg.get("rule_checker")
+    res_agent = default_registry().with_overrides(args.tier, args.think).get("researcher")
     print(f"查资料 Agent：{settings.tier(res_agent.model_tier).name}，思考强度 {res_agent.thinking or '跟随档位'}")
-    res_tier, chk_tier = settings.tier(res_agent.model_tier), settings.tier(chk_agent.model_tier)
-    tiers = {t.name: t for t in (res_tier, chk_tier)}
-    meter = MeteredLLM(make_llm(settings), lambda model, pt, ct: tiers[model].cost(
-        pt, ct, ts=time.time(), schedule=settings.pricing) if model in tiers else 0.0)
-    rd = RunDir.create(Path(DEFAULT_RUNS_DIR), "rules")            # 每次调用都留底，事后可查（审计、排错不用再花钱）
-    logger = CallLogger(rd.path, _secrets(settings))
-    res_llm, chk_llm = LoggedLLM(meter, logger, "researcher"), LoggedLLM(meter, logger, "rule_checker")
-    complete = lambda m, tools: res_llm.complete(m, model=res_tier.name, tools=tools,      # noqa: E731
-                                                 temperature=res_agent.temperature,
-                                                 max_tokens=res_agent.max_tokens or res_tier.max_tokens or 8192,
-                                                 extra_body=res_tier.extra_body(res_agent.thinking) or None)
-    semantic = llm_semantic_checker(chk_llm, chk_tier.name, max_tokens=chk_agent.max_tokens or chk_tier.max_tokens or 8192,
-                                    extra_body=chk_tier.extra_body(chk_agent.thinking) or None)
-    bus = EventBus(rd.run_id, rd.events_path)
-    bus.subscribe(_print_rule_event)
-    verifier = RuleVerifier(library, profile, idf=idf, svd=svd, semantic=semantic)
-    def human(pending, escalated):
-        # 先把要确认的规则原样存下来：事后能查当时给人看的是什么（也方便对照建议，不会和模型输出对不上）
-        rd.write_json("pending_rules.json", {"pending": [r.to_dict() for r in pending],
-                                             "escalated": [{"rule": x.rule.to_dict(), "reasons": x.reasons()}
-                                                           for x in escalated]})
-        return terminal_rules_human(pending, escalated)
-
-    builder = RuleBuilder(complete, profile, library, verifier, store, emit=bus.emit,
-                          human=None if args.no_human else human, max_rounds=args.rounds)
+    hwc = HwContext(hwdir, profile, library, store, rules_path, idf, svd)
+    builder, meter, rd = make_rule_builder(hwc, llm=make_llm(settings), settings=settings, runs_root=Path(DEFAULT_RUNS_DIR),
+                                           human=None if args.no_human else terminal_rules_human, tier=args.tier,
+                                           think=args.think, max_rounds=args.rounds, subscribers=(_print_rule_event,))
     try:
         out = builder.run([s.strip() for s in args.scopes.split(",") if s.strip()])
     finally:                                                        # 中途出错或中断，已入库的规则也保存
@@ -1035,9 +992,7 @@ def cmd_rules(args) -> int:
 
 def cmd_firmware(args) -> int:
     """嵌入式新流程：规则 → 设计分层 → 编码、写测试 → 编译 → 合规 → 测试 → 诊断修正（DECISIONS 第 66 条）。"""
-    from .embedded.flow import EmbeddedFlow
-    from .grounding.research import llm_semantic_checker
-    from .grounding.verifier import RuleVerifier
+    from .embedded.workspace import HwContext, make_firmware_flow
     from .target.board import BoardRunner
     from .target.esp_idf import IdfEnv, IdfUnavailable
     spec_path = Path(args.spec)
@@ -1046,14 +1001,6 @@ def cmd_firmware(args) -> int:
     hwdir, profile, library, store, idf_tree, svd = _hw_context(args.hw, need_sources=args.rules != "none")
     settings = config.load_settings()
     llm = make_llm(settings)
-    verifier = None
-    if args.rules == "verified":
-        from .agents.registry import default_registry
-        chk = default_registry().get("rule_checker")
-        tier = settings.tier(chk.model_tier)
-        verifier = RuleVerifier(library, profile, idf=idf_tree, svd=svd,
-                                semantic=llm_semantic_checker(llm, tier.name, max_tokens=chk.max_tokens or tier.max_tokens or 8192,
-                                                              extra_body=tier.extra_body(chk.thinking) or None))
     try:
         idf = IdfEnv.load(want_version=str(profile.framework_version.value))
     except IdfUnavailable as exc:
@@ -1061,10 +1008,10 @@ def cmd_firmware(args) -> int:
         idf = None
     board = BoardRunner(idf, args.port) if (idf is not None and not args.no_board) else None
     printer = LivePrinter()
-    flow = EmbeddedFlow(llm=llm, settings=settings, profile=profile, spec=spec_path.read_text(encoding="utf-8"),
-                        rules=store, library=library, verifier=verifier, runs_root=Path(args.runs_dir),
-                        name=spec_path.stem, rule_mode=args.rules, human=terminal_rules_human, idf=idf, board=board,
-                        subscribers=(printer,), secrets=_secrets(settings))
+    hwc = HwContext(hwdir, profile, library, store, hwdir / "rules.json", idf_tree, svd)
+    flow = make_firmware_flow(hwc, spec_path.read_text(encoding="utf-8"), llm=llm, settings=settings,
+                              rule_mode=args.rules, idf=idf, board=board, runs_root=Path(args.runs_dir),
+                              name=spec_path.stem, human=terminal_rules_human, subscribers=(printer,))
     try:
         res = flow.run()
     finally:
@@ -1079,9 +1026,8 @@ def cmd_firmware(args) -> int:
 
 def cmd_board_eval(args) -> int:
     """上板评测（DECISIONS 第 69 条 B 方向）：同一批上板题在几种配置下各跑几次，用固定判定规则和隐藏测试打分。"""
-    from .agents.registry import default_registry
-    from .embedded.board_eval import EvalContext, evaluate, missing_scopes, parse_configs
-    from .embedded.board_task import discover_board_tasks, judge_rules, load_board_task
+    from .embedded.board_eval import evaluate, missing_scopes, parse_configs
+    from .embedded.board_task import discover_board_tasks, load_board_task
     from .target.board import BoardRunner
     from .target.esp_idf import IdfEnv, IdfUnavailable
     try:
@@ -1112,11 +1058,12 @@ def cmd_board_eval(args) -> int:
     board = None if args.no_board else BoardRunner(idf, args.port)
     if board is not None and board.port is None:
         raise UsageError("找不到板子的串口，请插上板子或用 --port 指定（只想编译就加 --no-board）")
+    from .embedded.workspace import HwContext, make_eval_context
     settings = config.load_settings()
-    ctx = EvalContext(llm=make_llm(settings), settings=settings, profile=profile, judge=judge_rules(root, profile),
-                      rules=store, library=library, idf=idf, board=board, runs_root=Path(DEFAULT_RUNS_DIR),
-                      build_root=Path(".ff_data") / "idf_build", max_attempts=args.max_attempts,
-                      registry=default_registry().with_overrides(args.tier, args.think), secrets=_secrets(settings))
+    hwc = HwContext(hwdir, profile, library, store, rules_path, None, None)
+    ctx = make_eval_context(hwc, root, llm=make_llm(settings), settings=settings, idf=idf, board=board,
+                            runs_root=Path(DEFAULT_RUNS_DIR), build_root=Path(".ff_data") / "idf_build",
+                            max_attempts=args.max_attempts, tier=args.tier, think=args.think)
     out = Path(args.out)
     evaluate(tasks, configs, args.runs, out, ctx, max_cost=args.max_cost)
     print(f"\n汇总：{out / 'summary.md'}\n明细：{out / 'runs.csv'}")

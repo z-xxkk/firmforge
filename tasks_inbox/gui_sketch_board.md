@@ -1,4 +1,4 @@
-# 桌面软件接入嵌入式新流程：界面草图（第 1 版，待负责人确认）
+# 桌面软件接入嵌入式新流程：界面草图（第 1 版，负责人 2026-11-09 确认，已实现）
 
 起草：Claude Code，2026-11-09。沿用第 4 版界面的视觉风格（浅色简约、松石绿是唯一强调色、圆角分档、每道缝都能拖），不另起一套。**确认后才开始写代码。**
 
@@ -47,7 +47,7 @@
 | 规则库列表按范围分组，顶部按状态筛选：等你确认、已确认、退回 | ★ |
 | 列表顶部可以发起"查资料提炼规则"：选范围，显示预计花费，再点开始 | ★（花费预估沿用 board-eval 的 `--plan`） |
 | 规则详情：规则原文、出处（资料、页码、等级）、引用的原文高亮、这一页的位标注（虚线框，写明"不是原文"）、7 步核对每一步的结果 | ★ |
-| **在界面上确认规则**：驳回时写一句理由，或点"通过"；可以只确认一部分，下次接着来 | GitHub 拉取请求的审查：写一段意见，再选"批准"或"要求修改"后提交（[文档](https://docs.github.com/en/enterprise-server@3.16/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/reviewing-proposed-changes-in-a-pull-request)） |
+| **在界面上确认规则**：驳回时写一句理由，或点"通过"；全部表态后点"提交"（实现时改动：规则流程只把通过的规则入库，没表态的不会留到下次，所以要一次表态完） | GitHub 拉取请求的审查：写一段意见，再选"批准"或"要求修改"后提交（[文档](https://docs.github.com/en/enterprise-server@3.16/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/reviewing-proposed-changes-in-a-pull-request)） |
 | 规则的出处只能证明一部分时，在详情里提示一句，例如"引用的原文只说默认全部关闭，bit1 来自位标注" | ★（来自 DIE_TEMP_RDY 案例发现的问题） |
 
 ## 三、评测页（[gui_eval.png](gui_eval.png)）

@@ -1,6 +1,7 @@
 """FirmForge 桌面软件主窗口（DECISIONS 第 62 条，界面草图第 4 版）。
 
-左边竖栏 4 个工作区：对话、工作流、团队、设置。所有面板之间都能拖动调整大小，关闭时记住布局。
+左边竖栏 6 个工作区：对话、硬件、评测、工作流、团队、设置（硬件、评测见 DECISIONS 第 100 条）。
+所有面板之间都能拖动调整大小，关闭时记住布局。
 启动：`firmforge gui`，或 `python -m firmforge.gui`。需要先 `pip install -e .[gui]`。
 """
 
@@ -34,6 +35,14 @@ def _icon(kind: str, color: str) -> QIcon:
         path.addRoundedRect(QRectF(3, 5, 18, 12), 3, 3)
         p.drawPath(path)
         p.drawLine(QPointF(8, 17), QPointF(6, 20))
+    elif kind == "hw":                      # 插头：最简单的"硬件"示意，不画电路板
+        p.drawRoundedRect(QRectF(4, 7, 16, 11), 3, 3)
+        p.drawLine(QPointF(9, 7), QPointF(9, 4.5))
+        p.drawLine(QPointF(15, 7), QPointF(15, 4.5))
+        p.drawLine(QPointF(8.5, 12.5), QPointF(15.5, 12.5))
+    elif kind == "eval":
+        for x, y in ((5, 11), (12, 5), (19, 13)):
+            p.drawLine(QPointF(x, 19), QPointF(x, y))
     elif kind == "flow":
         p.drawRoundedRect(QRectF(3, 3.5, 7, 5), 2, 2)
         p.drawRoundedRect(QRectF(14, 15.5, 7, 5), 2, 2)
@@ -72,6 +81,7 @@ class MainWindow(QMainWindow):
         outer.addLayout(body, 1)
         self.status = QLabel("")
         self.status.setObjectName("StatusBar")
+        self.status.setTextFormat(Qt.RichText)            # 状态栏里有板子连接的小圆点（富文本）
         outer.addWidget(self.status)
         self.setCentralWidget(root)
 
@@ -95,14 +105,19 @@ class MainWindow(QMainWindow):
         self.buttons = {}
         from .chat_page import ChatPage
         from .designer_page import DesignerPage
+        from .eval_page import EvalPage
+        from .hardware_page import HardwarePage
         from .settings_page import SettingsPage
         from .team_page import TeamPage
         self.chat = ChatPage(project)
+        self.hardware = HardwarePage(project)
+        self.evalp = EvalPage(project)
         self.designer = DesignerPage(project)
         self.team = TeamPage(project)
         self.settings = SettingsPage(project)
-        pages = [("chat", "对话", self.chat), ("flow", "工作流", self.designer), ("team", "团队", self.team),
-                 ("set", "设置", self.settings)]
+        pages = [("chat", "对话", self.chat), ("hw", "硬件", self.hardware), ("eval", "评测", self.evalp),
+                 ("flow", "工作流", self.designer), ("team", "团队", self.team), ("set", "设置", self.settings)]
+        self.page_keys = [k for k, _, _ in pages]
         for i, (key, text, page) in enumerate(pages):
             b = QToolButton()
             b.setObjectName("RailButton")
@@ -120,6 +135,9 @@ class MainWindow(QMainWindow):
         body.addWidget(rail)
         body.addWidget(self.stack, 1)
         self.chat.open_designer.connect(self._designer_ai)
+        self.chat.review_rules.connect(self._review_rules)
+        self.hardware.rules_changed.connect(lambda: self.chat.refresh_status(self.chat._run_text()))
+        self.evalp.open_run.connect(self._open_run)
         self.designer.try_run.connect(self._try_run)
         self.settings.theme_changed.connect(self.apply_theme)
         st = QSettings()
@@ -127,8 +145,10 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(st.value("window/geometry"))
         else:
             self.resize(1440, 900)
-        self.go(int(st.value("window/page", 0)))
+        key = st.value("window/page_key", "chat")          # 存名字不存序号：加了工作区以后不会错位
+        self.go(key if key in self.page_keys else "chat")
         self._paint_icons()
+        self.chat.refresh_status()
 
     def _paint_icons(self):
         t = th.current(self.dark)
@@ -153,21 +173,35 @@ class MainWindow(QMainWindow):
                 if view is not None:
                     view.viewport().update()
 
-    def go(self, i: int):
+    def go(self, i):
+        """i 可以是序号，也可以是工作区的名字（chat、hw、eval、flow、team、set）。"""
+        if isinstance(i, str):
+            i = self.page_keys.index(i)
+        i = i if 0 <= i < len(self.page_keys) else 0
         self.stack.setCurrentIndex(i)
         list(self.buttons.values())[i].setChecked(True)
+        if self.page_keys[i] == "chat" and hasattr(self, "chat"):
+            self.chat.refresh_status(self.chat._run_text())          # 板子可能刚插上或拔掉
         self._paint_icons()
 
     def set_status(self, text: str):
         self.status.setText(text)
 
     def reference_in_chat(self, sid: str):
-        self.go(0)
+        self.go("chat")
         self.chat.input.insertPlainText(f"@{sid} ")
         self.chat.input.setFocus()
 
+    def _review_rules(self, payload: dict, done):
+        self.go("hw")
+        self.hardware.begin_review(payload, done)
+
+    def _open_run(self, run_dir: str):
+        self.go("chat")
+        self.chat.start_replay(Path(run_dir))
+
     def _designer_ai(self, instruction: str):
-        self.go(1)
+        self.go("flow")
         self.designer.ask_ai(instruction or None)
 
     def _try_run(self, wf):
@@ -178,7 +212,7 @@ class MainWindow(QMainWindow):
             if not ok:
                 return
         from ..tasks import load_task
-        self.go(0)
+        self.go("chat")
         self.chat.workflow = wf
         self.chat.new_chat()
         self.chat.add_user(f"用工作流 {wf.name} {wf.version} 试运行评测题 {tid}")
@@ -187,8 +221,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, ev):
         st = QSettings()
         st.setValue("window/geometry", self.saveGeometry())
-        st.setValue("window/page", self.stack.currentIndex())
+        st.setValue("window/page_key", self.page_keys[self.stack.currentIndex()])
         self.chat.save_layout()
+        self.hardware.save_layout()
+        self.evalp.save_layout()
         self.designer.save_layout()
         super().closeEvent(ev)
 

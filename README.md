@@ -26,6 +26,11 @@
   - 详见 `docs/BOARD_EVAL_RESULTS.md`，原始数据在 `docs/eval_data/board_full_20261108/`。
 - 失败分析案例（2026-11-09，单独列出，不并入正式数据）：max30102_temp 的失败一路查到平台读手册时丢了表格列位置。平台改为另存按版面提取的文字，并按 PDF 坐标标出寄存器单个位在第几位（DECISIONS 第 98、99 条）。改完后 verified 两次都用对了位，1/2 通过（另一次错在温度小数换算）。详见 `docs/CASE_DIE_TEMP.md`。
 - 每个用例前软复位外接传感器（第 96 条）；冻结前试点 8 次，平台运行正常。
+- 桌面软件接入嵌入式新流程（2026-11-09，DECISIONS 第 100 条；截图 `docs/screenshots/gui_board_run.png`、`gui_hardware.png`、`gui_eval.png`）：
+  - 对话页可以选"上板"流程：写一句需求，或选一道上板评测题按某种配置跑；能看到每次尝试的合规、编译、上板测试，上板测试的用例和串口原文。
+  - 硬件页：硬件档案、实测记录、规则库；规则确认改在界面上逐条通过或驳回。
+  - 评测页：设置、预估花费、题目 × 配置结果表、运行记录，读的是和命令行同一份 runs.jsonl。
+  - 已验证：用假模型交标准答案，从界面发起一道上板评测题，在真板上编译、烧录、跑隐藏测试，6/6 通过；用真实运行记录回放、读第 1 轮评测结果，显示与 summary.md 一致。还没有用真实模型从界面跑过一次完整流程。
 
 **阶段 1（判定器 + 首批 3 个任务 + Docker）：已完成，在 Docker 镜像中验收通过（2026-10-23）。**
 
@@ -251,6 +256,8 @@ python3 -m unittest discover -s tests -v
 - 分时计价只区分工作日和周末，法定节假日按普通工作日处理。
 - 在 Linux 上用 `docker run -v` 运行时要加 `--user "$(id -u):$(id -g)"`，否则容器内生成的 `.ff_build/` 属于 root。
 - 国内网络下拉取基础镜像需要给 Docker 守护进程配置代理（`/etc/systemd/system/docker.service.d/http-proxy.conf`）。
+- 桌面软件里确认规则要一次表态完：没表态的规则不会留到下次（规则流程只把通过的规则入库）。
+- 自动找串口只认 Linux 的 `/dev/ttyACM*`、`/dev/serial/by-id/*` 等；Windows 上要用环境变量 `FF_SERIAL_PORT` 指定 COM 口。
 
 ## 开源组件
 

@@ -62,6 +62,7 @@ class RuleBuilder:
         self.complete, self.profile, self.library, self.verifier = complete, profile, library, verifier
         self.store, self.human, self.max_rounds, self.max_tool_rounds = store, human, max_rounds, max_tool_rounds
         self.emit = emit or (lambda *a, **k: None)
+        self.results: dict[str, RuleResult] = {}   # 每条规则最近一次的核对结果（界面上确认时显示每一步）
 
     def _dedupe(self, rules: list[Rule], checked: dict[str, Rule]) -> list[Rule]:
         """同一条规则（内容和出处都一样）已经核对过就不再核对；编号撞上但内容不同，给新规则换一个空编号，
@@ -116,6 +117,8 @@ class RuleBuilder:
             report = self.verifier.run(RuleSet(rules), scopes=set(todo), already=list(checked.values()))
             for r in report.checked_rules():
                 checked[r.id] = r
+            for res in report.results:
+                self.results[res.rule.id] = res
             feedback = []
             for res in report.rejected:
                 checked.pop(res.rule.id, None)

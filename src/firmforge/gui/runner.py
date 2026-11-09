@@ -179,6 +179,228 @@ class LocalBackend(Backend):
             self.worker.terminate()
 
 
+def rule_review_payload(pending, escalated, results: dict | None = None) -> dict:
+    """人工确认规则时交给界面的内容：每条规则的原文、出处和核对每一步的结果（DECISIONS 第 100 条）。"""
+    results = results or {}
+
+    def one(rule, steps):
+        return {**rule.to_dict(), "steps": [list(s) for s in steps]}
+    return {"pending": [one(r, results[r.id].steps if r.id in results else []) for r in pending],
+            "escalated": [{**one(x.rule, x.steps), "reasons": x.reasons()} for x in escalated]}
+
+
+class EmbeddedBackend(Backend):
+    """嵌入式新流程（只用本机，DECISIONS 第 100 条：要上板的运行不进 docker）。
+
+    两种跑法：
+    - spec：按你写的需求跑完整流程（规则 → 设计 → 编码、测试 → 上板 → 诊断修正）；
+    - task：拿一道上板评测题按评测的某种配置跑一次，最后用隐藏测试判定（和 board-eval 完全一样）。
+    规则需要人确认时发 ask("rules", 规则和核对结果)，回答是 {规则编号: ("approve"|"reject", 意见)}。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._answer = None
+        self._got = threading.Event()
+        self.worker: _Worker | None = None
+        self.row = None
+
+    def _wait(self, kind: str, payload: dict):
+        self._got.clear()
+        self.ask.emit(kind, payload)
+        self._got.wait()
+        return self._answer
+
+    def answer(self, value) -> None:
+        self._answer = value
+        self._got.set()
+
+    def start(self, *, project: Path, hw: str, runs_dir: Path, spec: str = "", name: str = "gui", rule_mode: str = "verified",
+              task_id: str = "", config_name: str = "verified", tier: str | None = None, thinking: str | None = None,
+              port: str | None = None) -> None:
+        from ..embedded.workspace import load_hw
+        from ..llm import OpenAICompatClient
+        from ..target.board import BoardRunner
+        from ..target.esp_idf import IdfEnv, IdfUnavailable
+        settings = config.load_settings()
+        llm = OpenAICompatClient.from_settings(settings)
+        hwc = load_hw(project / hw, need_sources=(rule_mode != "none") or config_name == "unverified", root=project)
+        try:
+            idf = IdfEnv.load(want_version=str(hwc.profile.framework_version.value))
+        except IdfUnavailable as exc:
+            self.log.emit(f"ESP-IDF 不可用：{exc}；硬件层只做合规检查")
+            idf = None
+        board = BoardRunner(idf, port) if idf is not None else None
+        if board is not None and board.port is None:
+            board = None
+            self.log.emit("没找到板子：硬件层只做到编译和合规检查")
+        sub = (self.event.emit,)
+
+        if task_id:
+            from ..embedded.board_eval import run_once
+            from ..embedded.board_task import load_board_task
+            from ..embedded.workspace import make_eval_context
+            task = load_board_task(project / "tasks_board" / task_id)
+            ctx = make_eval_context(hwc, project / "tasks_board", llm=llm, settings=settings, idf=idf, board=board,
+                                    runs_root=runs_dir, build_root=project / ".ff_data" / "idf_build",
+                                    tier=tier or "fast", think=thinking or "low", subscribers=sub)
+            ctx.rules_cache = project / ".ff_data" / "gui_unverified_rules"
+
+            def job():
+                self.row = run_once(task, config_name, 1, ctx)
+                return self.row
+        else:
+            from ..embedded.workspace import make_firmware_flow
+            holder = {}
+
+            def human(pending, escalated):
+                b = holder.get("builder")
+                results = getattr(b, "results", {}) if b is not None else {}
+                ans = self._wait("rules", rule_review_payload(pending, escalated, results))
+                return ans or {}
+            flow = make_firmware_flow(hwc, spec, llm=llm, settings=settings, rule_mode=rule_mode, idf=idf, board=board,
+                                      runs_root=runs_dir, name=name, human=human, tier=tier, think=thinking,
+                                      subscribers=sub)
+            flow.on_builder = lambda b: holder.__setitem__("builder", b)
+
+            def job():
+                res = flow.run()
+                if rule_mode == "verified":
+                    hwc.store.save(hwc.rules_path)
+                return res
+
+        self.worker = _Worker(job)
+        self.worker.finished.connect(self._done)
+        self.worker.start()
+
+    def _done(self):
+        r = self.worker.result
+        info = {"verdict": getattr(r, "verdict", "error"), "run_dir": str(getattr(r, "run_dir", "") or ""),
+                "error": self.worker.error or getattr(r, "error", "") or getattr(r, "note", "") or ""}
+        if self.row is not None:                       # 评测题：带上隐藏测试的判定
+            info.update(judge=self.row.to_dict())
+            info["error"] = ""
+        self.finished.emit(info)
+
+    def stop(self) -> None:
+        self.answer({})
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.terminate()
+
+
+class RulesBackend(Backend):
+    """在硬件页发起"查资料提炼规则"（DECISIONS 第 100 条）：本机后台线程跑规则流程，等人确认时发 ask("rules")。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._answer = None
+        self._got = threading.Event()
+        self.worker: _Worker | None = None
+        self.meter = None
+        self.rd = None
+
+    def answer(self, value) -> None:
+        self._answer = value
+        self._got.set()
+
+    def start(self, *, project: Path, hw: str, scopes: list[str], runs_dir: Path, tier: str | None = "fast",
+              thinking: str | None = "low") -> None:
+        from ..embedded.workspace import load_hw, make_rule_builder
+        from ..llm import OpenAICompatClient
+        settings = config.load_settings()
+        hwc = load_hw(project / hw, need_sources=True, root=project)
+        holder = {}
+
+        def human(pending, escalated):
+            b = holder.get("b")
+            self._got.clear()
+            self.ask.emit("rules", rule_review_payload(pending, escalated, getattr(b, "results", {})))
+            self._got.wait()
+            return self._answer or {}
+        builder, self.meter, self.rd = make_rule_builder(hwc, llm=OpenAICompatClient.from_settings(settings),
+                                                         settings=settings, runs_root=runs_dir, human=human, tier=tier,
+                                                         think=thinking, subscribers=(self.event.emit,))
+        holder["b"] = builder
+
+        def job():
+            try:
+                return builder.run(scopes)
+            finally:                              # 中途出错或中断，已入库的规则也保存
+                hwc.store.save(hwc.rules_path)
+
+        self.worker = _Worker(job)
+        self.worker.finished.connect(self._done)
+        self.worker.start()
+
+    def _done(self):
+        out = self.worker.result
+        self.finished.emit({"verdict": "pass" if out is not None and out.ok else "fail",
+                            "run_dir": str(self.rd.path) if self.rd else "", "error": self.worker.error,
+                            "cost": self.meter.cost if self.meter else 0.0,
+                            "trusted": len(out.trusted) if out else 0, "pending": len(out.pending) if out else 0,
+                            "missing": list(out.missing) if out else []})
+
+    def stop(self) -> None:
+        self.answer({})
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.terminate()
+
+
+class EvalBackend(Backend):
+    """评测页的上板评测（DECISIONS 第 92–94、100 条）：本机后台线程跑 board_eval.evaluate，每跑完一次发一行进度。"""
+    progress = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.worker: _Worker | None = None
+        self._stop = False
+
+    def start(self, *, project: Path, hw: str, task_ids: list[str], configs: list[str], runs: int, out_dir: Path,
+              max_cost: float, tier: str = "fast", thinking: str = "low", port: str | None = None) -> None:
+        from ..embedded.board_eval import evaluate
+        from ..embedded.board_task import load_board_task
+        from ..embedded.workspace import WorkspaceError, load_hw, make_eval_context
+        from ..llm import OpenAICompatClient
+        from ..target.board import BoardRunner
+        from ..target.esp_idf import IdfEnv, IdfUnavailable
+        if max_cost <= 0:
+            raise WorkspaceError("要先填花费上限（元）")
+        settings = config.load_settings()
+        hwc = load_hw(project / hw, need_sources="unverified" in configs, root=project)
+        try:
+            idf = IdfEnv.load(want_version=str(hwc.profile.framework_version.value))
+        except IdfUnavailable as exc:
+            raise WorkspaceError(f"上板评测需要 ESP-IDF：{exc}") from exc
+        board = BoardRunner(idf, port)
+        if board.port is None:
+            raise WorkspaceError("找不到板子的串口：请插上板子")
+        tasks = [load_board_task(project / "tasks_board" / i) for i in task_ids]
+        ctx = make_eval_context(hwc, project / "tasks_board", llm=OpenAICompatClient.from_settings(settings),
+                                settings=settings, idf=idf, board=board, runs_root=project / ".ff_runs",
+                                build_root=project / ".ff_data" / "idf_build", tier=tier, think=thinking,
+                                subscribers=(self.event.emit,))
+        self._stop = False
+
+        def job():
+            return evaluate(tasks, configs, runs, out_dir, ctx, progress=self.progress.emit, max_cost=max_cost,
+                            stop=lambda: self._stop)
+
+        self.worker = _Worker(job)
+        self.worker.finished.connect(lambda: self.finished.emit({"verdict": "done", "run_dir": str(out_dir),
+                                                                 "error": self.worker.error}))
+        self.worker.start()
+
+    def pause(self) -> None:
+        """正在跑的一次跑完后停下；同一个输出目录再开始会接着跑。"""
+        self._stop = True
+
+    def stop(self) -> None:
+        self.pause()
+
+    def answer(self, value) -> None:
+        pass
+
+
 class DockerBackend(Backend):
     """用 docker run 在容器里执行 `firmforge run`，运行目录挂载到本机；界面跟随 events.jsonl。"""
 

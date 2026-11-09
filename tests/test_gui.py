@@ -1,5 +1,6 @@
 """桌面软件：纯计算部分（不需要 Qt）和界面冒烟测试（需要 PySide6，在 firmforge-gui 镜像里以 offscreen 方式跑）。"""
 
+import json
 import os
 import tempfile
 import unittest
@@ -63,6 +64,43 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(v.agents_busy, {})
 
 
+    def test_run_view_embedded_flow(self):
+        # 新流程每次尝试三段：合规 → 编译 → 测试（DECISIONS 第 100 条）
+        v = RunView()
+        for e in [ev("run_started", task="r", config="embedded/verified"),
+                  ev("plan_ready", "design", modules=[{"id": "ppg", "layer": "hardware", "depends_on": []},
+                                                      {"id": "fmt", "layer": "logic", "depends_on": ["ppg"]}]),
+                  ev("node_ready", "ppg", title="", layer="hardware"),
+                  ev("verify_finished", "ppg", attempt=1, scope="compliance", ok=True, failed_layer=None),
+                  ev("verify_started", "ppg", attempt=1, scope="build"),
+                  ev("verify_finished", "ppg", attempt=1, scope="build", ok=True, failed_layer=None)]:
+            v.apply(e)
+        ppg = v.modules["ppg"]
+        self.assertTrue(v.embedded)
+        self.assertEqual(ppg.layer_keys, ("compliance", "build", "test"))
+        self.assertEqual(ppg.layers, {"compliance": "pass", "build": "pass", "test": "running"})
+        for e in [ev("verify_finished", "ppg", attempt=1, scope="board_test", ok=False, failed_layer="board_test"),
+                  ev("verify_finished", "ppg", attempt=2, scope="compliance", ok=True, failed_layer=None)]:
+            v.apply(e)
+        self.assertEqual((ppg.attempt, ppg.layers), (2, {"compliance": "pass", "build": "running"}))   # 新的一次从头算
+        for e in [ev("node_ready", "fmt", layer="logic"),
+                  ev("verify_finished", "fmt", attempt=1, scope="compliance", ok=True, failed_layer=None),
+                  ev("verify_finished", "fmt", attempt=1, scope="host_test", ok=True, failed_layer=None),
+                  ev("node_done", "fmt"), ev("run_finished", verdict="fail", tokens=9, cost=0.2)]:
+            v.apply(e)
+        fmt = v.modules["fmt"]
+        self.assertEqual((fmt.unit, fmt.layers), ("logic", {"compliance": "pass", "build": "skipped", "test": "pass"}))
+        self.assertEqual(ppg.status, "failed")            # 结束时还在进行中的模块按整次结论收尾
+        self.assertEqual(v.cost, 0.2)
+        # 单 Agent 基线只有编译，没有 node_ready / node_done
+        s = RunView()
+        for e in [ev("run_started", config="embedded/single"),
+                  ev("verify_finished", "m", attempt=1, scope="build", ok=True, failed_layer=None),
+                  ev("run_finished", verdict="pass")]:
+            s.apply(e)
+        self.assertEqual((s.modules["m"].status, s.modules["m"].layers), ("done", {"build": "pass"}))
+
+
 @unittest.skipUnless(HAS_QT, "需要 PySide6（在 firmforge-gui 镜像里跑）")
 class GuiSmokeTest(unittest.TestCase):
     @classmethod
@@ -82,10 +120,13 @@ class GuiSmokeTest(unittest.TestCase):
 
     def test_pages_build_and_switch(self):
         w = self.window()
-        for i in range(4):
+        for i in range(6):
             w.go(i)
             self.app.processEvents()
-        self.assertEqual(w.stack.count(), 4)
+        self.assertEqual(w.stack.count(), 6)
+        self.assertEqual(w.page_keys, ["chat", "hw", "eval", "flow", "team", "set"])
+        w.go("hw")
+        self.assertIs(w.stack.currentWidget(), w.hardware)
         self.assertGreater(w.team.table.rowCount(), 5)
         w.close()
 
@@ -107,6 +148,84 @@ class GuiSmokeTest(unittest.TestCase):
             self.assertGreater(page.msgs.count(), 5)
             page.select_module("a")
             self.assertIn("ringbuf", page.code_view.toPlainText())
+            w.close()
+
+    def test_hardware_page_reviews_rules(self):
+        # 在界面上确认规则（DECISIONS 第 100 条）：驳回必须写理由；全部表态后才能提交
+        w = self.window()
+        hp = w.hardware
+        self.assertGreater(hp.list.rowCount(), 10)                       # 读出了规则库
+        rule = {"id": "R-T-001", "kind": "register", "scope": ["max30102"], "text": "DIE_TEMP_RDY 在 bit1",
+                "cite": {"doc": "max30102-ds", "page": 12, "section": "", "quote": "Interrupt Status 2"},
+                "tier": "official_manual", "status": "checked", "check": None, "notes": [],
+                "steps": [[0, "ok", "资料已登记"], [2, "ok", "找到原文"]]}
+        got = {}
+        hp.begin_review({"pending": [rule, dict(rule, id="R-T-002")], "escalated": []}, got.update)
+        self.assertFalse(hp.submit_btn.isEnabled())
+        hp.current = dict(rule, status="pending")
+        hp.decide("reject")                                              # 没写理由：不算
+        self.assertNotIn("R-T-001", hp.decisions)
+        hp.comment.setText("位置写错了")
+        hp.decide("reject")
+        hp.current = dict(rule, id="R-T-002", status="pending")
+        hp.decide("approve")
+        self.assertTrue(hp.submit_btn.isEnabled())
+        hp.submit()
+        self.assertEqual(got, {"R-T-001": ("reject", "位置写错了"), "R-T-002": ("approve", "")})
+        self.assertEqual(hp.pending, [])
+        w.close()
+
+    def test_eval_page_reads_results(self):
+        w = self.window()
+        ep = w.evalp
+        base = Path(helpers.ROOT) / ".ff_data"
+        base.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=base) as d:
+            rows = [{"task": "ledc_pwm", "config": c, "run": 1, "verdict": v, "failed_layer": fl, "cases_passed": cp,
+                     "cases_total": 6, "failed_cases": [], "cost": 0.1, "run_dir": "", "note": ""}
+                    for c, v, fl, cp in (("single", "pass", "", 6), ("none", "fail", "board_test", 5))]
+            (Path(d) / "runs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+            ep.out_combo.setEditText(Path(d).relative_to(helpers.ROOT).as_posix())
+            ep.refresh()
+            last = ep.table.rowCount() - 1
+            texts = {ep.table.horizontalHeaderItem(j).text(): (ep.table.item(last, j).text() if ep.table.item(last, j) else "")
+                     for j in range(1, ep.table.columnCount())}
+            self.assertEqual((texts["single"], texts["none"]), ("1 / 1", "0 / 1"))
+            self.assertEqual(ep.layers.item(1, 3).text(), "1")              # none 有 1 次卡在上板测试
+        w.close()
+
+    def test_embedded_replay_shows_board_test(self):
+        # 回放一次新流程：模块卡片三段，点模块看到上板测试的用例和代码
+        from firmforge.target.harness import BEGIN, END
+        with tempfile.TemporaryDirectory() as d:
+            rd = Path(d) / "run1"
+            att = rd / "nodes" / "ppg" / "attempt_1"
+            (att / "main").mkdir(parents=True)
+            (att / "main" / "ppg.c").write_text("int ppg_ok;\n", encoding="utf-8")
+            (att / "report.txt").write_text("共 2 个用例，通过 1", encoding="utf-8")
+            (att / "serial.log").write_text(f"{BEGIN}\nt.c:3:读温度:PASS\nt.c:9:等完成标志:FAIL: Expected 0 Was 263\n"
+                                            f"2 Tests 1 Failures 0 Ignored\nFAIL\n{END}\n", encoding="utf-8")
+            evs = [ev("run_started", task="run1", config="embedded/verified", board="b"),
+                   ev("plan_ready", "design", modules=[{"id": "ppg", "layer": "hardware", "depends_on": []}]),
+                   ev("node_ready", "ppg", layer="hardware"),
+                   ev("verify_finished", "ppg", attempt=1, scope="compliance", ok=True, failed_layer=None),
+                   ev("verify_finished", "ppg", attempt=1, scope="build", ok=True, failed_layer=None),
+                   ev("verify_finished", "ppg", attempt=1, scope="board_test", ok=False, failed_layer="board_test"),
+                   ev("run_finished", verdict="fail", tokens=10, cost=0.01)]
+            for i, e in enumerate(evs):
+                e["ts"] = 1000.0 + i
+                e["run_id"] = "run1"
+            (rd / "events.jsonl").write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in evs), encoding="utf-8")
+            w = self.window()
+            page = w.chat
+            page.start_replay(rd)
+            page.replay.seek(len(page.replay.events))
+            self.app.processEvents()
+            self.assertTrue(page.view.embedded)
+            self.assertEqual(page.view.modules["ppg"].layers, {"compliance": "pass", "build": "pass", "test": "fail"})
+            page.select_module("ppg")
+            self.assertIn("2 个用例，通过 1", page.board_view.title.text())
+            self.assertIn("int ppg_ok", page.code_view.toPlainText())
             w.close()
 
     def test_designer_edits_flow_into_code(self):

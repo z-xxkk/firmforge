@@ -7,6 +7,15 @@ from dataclasses import dataclass, field
 LAYERS = ("host_compile", "cross_compile", "resources", "static_check", "unit_tests")
 LAYER_NAMES = {"host_compile": "主机编译", "cross_compile": "交叉编译", "resources": "资源",
                "static_check": "静态检查", "unit_tests": "单元测试", "hidden_tests": "隐藏测试"}
+# 嵌入式新流程每次尝试的三段检查（DECISIONS 第 100 条）：合规 → 编译 → 测试（硬件层上板，逻辑层在电脑上）
+EMB_LAYERS = ("compliance", "build", "test")
+EMB_LAYER_NAMES = {"compliance": "合规", "build": "编译", "test": "测试"}
+_EMB_SCOPE = {"compliance": "compliance", "build": "build", "board_test": "test", "host_test": "test"}
+UNIT_NAMES = {"hardware": "硬件层，上板", "logic": "逻辑层，电脑上测"}
+
+
+def layer_names(keys: tuple[str, ...]) -> dict[str, str]:
+    return EMB_LAYER_NAMES if keys == EMB_LAYERS else LAYER_NAMES
 
 
 def layer_depths(nodes: list[str], deps: dict[str, list[str]]) -> dict[str, int]:
@@ -51,6 +60,8 @@ class ModuleView:
     level: int = 0                   # 升级级别
     layers: dict[str, str] = field(default_factory=dict)   # 层 -> pass | fail | skipped | running
     note: str = ""
+    layer_keys: tuple[str, ...] = LAYERS                   # 这个模块要画的检查段（旧流程 5 层，新流程 3 段）
+    unit: str = ""                                         # 新流程：hardware（上板）或 logic（电脑上测）
 
 
 @dataclass
@@ -68,10 +79,15 @@ class RunView:
     agents_busy: dict[str, str] = field(default_factory=dict)    # Agent -> 正在做的模块
     agent_calls: dict[str, int] = field(default_factory=dict)
     assignments: dict[str, dict] = field(default_factory=dict)   # 模块 -> 最近一次 node_assigned 的数据
+    embedded: bool = False           # 嵌入式新流程（run_started 的配置以 embedded/ 开头）
+
+    @property
+    def layer_keys(self) -> tuple[str, ...]:
+        return EMB_LAYERS if self.embedded else LAYERS
 
     def module(self, mid: str) -> ModuleView:
         if mid not in self.modules:
-            self.modules[mid] = ModuleView(mid)
+            self.modules[mid] = ModuleView(mid, layer_keys=self.layer_keys)
         return self.modules[mid]
 
     def apply(self, e: dict) -> None:
@@ -80,6 +96,7 @@ class RunView:
         if t == "run_started":
             self.run_id, self.task, self.config = e.get("run_id", ""), d.get("task", ""), d.get("config", "")
             self.started = e.get("ts", 0.0)
+            self.embedded = str(self.config).startswith("embedded/")
         elif t == "plan_ready":
             keep = {m["id"] for m in d.get("modules", [])}
             for m in d.get("modules", []):
@@ -93,10 +110,13 @@ class RunView:
                 "node_ready", "node_assigned", "agent_started", "verify_started", "verify_finished",
                 "node_done", "node_failed", "escalated", "rollback"):
             mv = self.module(node)
-            if t == "node_ready":
+            if self.embedded and t in ("verify_started", "verify_finished"):
+                self._apply_embedded_check(mv, t, d)
+            elif t == "node_ready":
                 mv.status = "running"
                 mv.title = d.get("title", mv.title)
                 mv.deps = list(d.get("depends_on", mv.deps))
+                mv.unit = d.get("layer", mv.unit)
             elif t == "node_assigned" and d.get("role") in ("coder", None):
                 mv.agent = d.get("agent", mv.agent)
                 self.assignments[node] = d
@@ -123,6 +143,9 @@ class RunView:
                 mv.note = d.get("reason", "")
             elif t == "escalated":
                 mv.level = int(d.get("level") or 0)
+        if self.embedded and t == "plan_ready":
+            for m in d.get("modules", []):
+                self.module(m["id"]).unit = m.get("layer", "")
         if t == "agent_started":
             self.agents_busy[d.get("agent", "")] = node or ""
             self.agent_calls[d.get("agent", "")] = self.agent_calls.get(d.get("agent", ""), 0) + 1
@@ -134,6 +157,36 @@ class RunView:
             self.tokens = int(d.get("tokens") or self.tokens)
             self.cost = float(d.get("cost") or self.cost)
             self.agents_busy.clear()
+            if self.embedded:                    # 还在"进行中"的模块按整次结论收尾（单 Agent 基线没有 node_done）
+                for mv in self.modules.values():
+                    if mv.status == "running":
+                        mv.status = "done" if self.verdict == "pass" else "failed"
+                    mv.layers = {k: v for k, v in mv.layers.items() if v != "running"}
+
+
+    def _apply_embedded_check(self, mv: ModuleView, t: str, d: dict) -> None:
+        """新流程每次尝试：合规 → 编译 → 测试。合规是每次尝试的第一步，看到它就换成新的一次。"""
+        key = _EMB_SCOPE.get(d.get("scope", ""))
+        if key is None:
+            return
+        attempt = int(d.get("attempt") or mv.attempt or 1)
+        if mv.status == "pending":
+            mv.status = "running"                # 单 Agent 基线不发 node_ready，看到检查就算开始了
+        if key == "compliance" or attempt != mv.attempt:
+            mv.layers = {}
+            mv.attempt = attempt
+        if t == "verify_started":
+            mv.layers[key] = "running"
+            return
+        failed = d.get("failed_layer")
+        mv.layers[key] = "skipped" if failed == "skipped" else ("pass" if d.get("ok") else "fail")
+        if key == "test" or failed or self.config == "embedded/single":
+            return                               # 单 Agent 基线只编译，没有测试这一步
+        nxt = EMB_LAYERS[EMB_LAYERS.index(key) + 1]
+        if mv.unit == "logic" and key == "compliance":
+            nxt = "test"                         # 逻辑层不编译固件，合规之后直接在电脑上测
+            mv.layers["build"] = "skipped"
+        mv.layers.setdefault(nxt, "running")
 
 
 # ---------------------------------------------------------------- 流程图排布

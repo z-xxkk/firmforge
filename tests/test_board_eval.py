@@ -174,6 +174,24 @@ class EvaluateTest(unittest.TestCase):
             self.assertTrue(any("达到上限" in m for m in msgs))
             self.assertTrue((out / "summary.md").is_file())
 
+    def test_pause_stops_before_next_run(self):
+        # 界面上的"暂停"（DECISIONS 第 100 条）：不再开始新的运行，同一目录再跑会接着跑
+        team, calls, lines = FakeTeam(), [], []
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "out"
+            n = {"k": 0}
+
+            def stop():
+                n["k"] += 1
+                return n["k"] > 1                     # 第一次运行照常开始，之后暂停
+            rows = evaluate([TASK], ["single", "none"], 1, out, make_ctx(d, team, RuleSet(), calls),
+                            progress=lines.append, stop=stop)
+            self.assertEqual(len(rows), 1)
+            self.assertTrue(any("已暂停" in s for s in lines))
+            from firmforge.embedded.board_eval import load_rows, plan_todo
+            todo = plan_todo([TASK], ["single", "none"], 1, load_rows(out))
+            self.assertEqual([(t.id, c, k) for t, c, k in todo], [(TASK.id, "none", 1)])
+
     def test_measured_rules_are_disclosed(self):
         import dataclasses
         from firmforge.grounding.rules import Citation
@@ -237,3 +255,17 @@ class EvaluateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkspaceTest(unittest.TestCase):
+    def test_load_hw_and_errors(self):
+        # 命令行和桌面软件共用的读硬件目录入口（DECISIONS 第 100 条）
+        from firmforge.embedded.workspace import WorkspaceError, load_hw
+        h = load_hw(ROOT / "hardware" / "esp32c3_supermini", need_sources=False, root=ROOT)
+        self.assertEqual(h.profile.board.value, "esp32c3_supermini")
+        self.assertEqual(h.rules_path, ROOT / "hardware" / "esp32c3_supermini" / "rules.json")
+        self.assertGreater(len(list(h.store)), 10)
+        with self.assertRaises(WorkspaceError):
+            load_hw(ROOT / "no_such_hw", need_sources=False, root=ROOT)
+        with self.assertRaises(WorkspaceError):
+            load_hw(ROOT / "hardware" / "esp32c3_supermini", need_sources=False, rules=ROOT / "nope.json", root=ROOT)

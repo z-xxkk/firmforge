@@ -162,7 +162,8 @@ def run_single(task: BoardTask, ctx: EvalContext, name: str) -> tuple[FlowResult
             msgs = msgs + [{"role": "user", "content": coder_repair_message(attempt, ctx.max_attempts, "编译失败：\n" + errs)}]
     rd.write_json("run.json", {"verdict": res.verdict, "rule_mode": "single", "tokens": res.prompt_tokens +
                                res.completion_tokens, "cost": round(res.cost, 6), "attempts": attempt})
-    bus.emit("run_finished", None, verdict=res.verdict, tokens=res.prompt_tokens + res.completion_tokens, error="")
+    bus.emit("run_finished", None, verdict=res.verdict, tokens=res.prompt_tokens + res.completion_tokens,
+             cost=round(res.cost, 6), error="")
     return res, files, attempt
 
 
@@ -253,10 +254,18 @@ def load_rows(out_dir: Path) -> list[dict]:
     return [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def plan_todo(tasks: list[BoardTask], configs: list[str], runs: int, rows: list[dict]) -> list[tuple[BoardTask, str, int]]:
+    """还要跑的组合，顺序和 evaluate 一致：先把每个组合的第 1 次跑完，再跑第 2 次。"""
+    done = {(r["task"], r["config"], r["run"]) for r in rows if r["verdict"] != "skipped"}
+    return [(t, c, n) for n in range(1, runs + 1) for t in tasks for c in configs if (t.id, c, n) not in done]
+
+
 def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Path, ctx: EvalContext,
-             progress: Callable[[str], None] = print, max_cost: float = 0.0) -> list[dict]:
+             progress: Callable[[str], None] = print, max_cost: float = 0.0,
+             stop: Callable[[], bool] | None = None) -> list[dict]:
     """按 题目 × 配置 × 次数 跑；已经在 runs.jsonl 里的组合跳过（skipped 的会重跑）。
-    max_cost > 0：这次调用累计花费（元）达到就不再开始新的运行（正在跑的一次会跑完）。"""
+    max_cost > 0：这次调用累计花费（元）达到就不再开始新的运行（正在跑的一次会跑完）。
+    stop 返回 True：不再开始新的运行（界面上的"暂停"，正在跑的一次会跑完；同一输出目录再开始会接着跑）。"""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if ctx.rules_cache is None:
@@ -266,12 +275,15 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
     rows = [r for r in rows if r["verdict"] != "skipped"]
     (out_dir / "runs.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
                                         encoding="utf-8")         # 过期的 skipped 行去掉（会重跑）
-    todo = [(t, c, n) for n in range(1, runs + 1) for t in tasks for c in configs if (t.id, c, n) not in done]
+    todo = plan_todo(tasks, configs, runs, rows)
     progress(f"共 {len(todo)} 次运行要跑（已完成 {len(done)} 次）")
     spent = 0.0
     cache = Path(ctx.rules_cache)
     known = {f.name for f in cache.glob("*.json")}
     for k, (t, c, n) in enumerate(todo, 1):
+        if stop is not None and stop():
+            progress(f"已暂停；还剩 {len(todo) - k + 1} 次没跑，用同一个输出目录再开始会接着跑")
+            break
         if max_cost > 0 and spent >= max_cost:
             progress(f"已花 {spent:.2f} 元，达到上限 {max_cost:.2f} 元，停止；还剩 {len(todo) - k + 1} 次没跑，"
                      f"用同一个输出目录重跑会接着跑")
