@@ -1,0 +1,127 @@
+<style>
+body{flex-direction:column;padding:8px 8px 0 0}
+.main{flex:1;display:flex;min-height:0}
+.sess{width:208px;flex:none;padding:12px 10px}
+.sess .new{width:100%;margin-bottom:12px}
+.sess h4{font-size:11px;font-weight:400;color:var(--ink3);margin:12px 8px 4px}
+.sess .s{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:10px}
+.sess .s.on{background:var(--bg)}
+.sess .s span:first-child{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.chat{width:520px;flex:none;display:flex;flex-direction:column}
+.chead{display:flex;align-items:center;gap:8px;padding:14px 18px 10px}
+.msgs{flex:1;padding:6px 18px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.m{display:flex;gap:10px}
+.av{width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font:600 11px var(--code)}
+.who{font-size:12px;color:var(--ink2);display:flex;gap:8px;align-items:baseline}
+.who b{font:600 12px var(--code);color:var(--ink)}
+.who .raw{margin-left:auto;color:var(--accent);font-size:11px}
+.body{flex:1;min-width:0}
+.me{align-self:flex-end;max-width:400px;background:var(--accent-soft);border-radius:16px 16px 6px 16px;padding:9px 14px}
+.event{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink2);padding-left:36px}
+.seg{display:inline-flex;gap:3px}.seg i{width:18px;height:6px;border-radius:3px;background:var(--accent)}.seg i.f{background:var(--fail)}.seg i.o{background:var(--line)}
+.tool{margin-left:36px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2);background:var(--bg);border-radius:10px;padding:5px 10px}
+.tool code{color:var(--ink)}
+.rulechip{display:inline-flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.composer{margin:8px 14px 14px;border:1px solid var(--line);border-radius:16px;padding:10px 12px 8px;box-shadow:0 4px 18px rgba(28,32,38,.06)}
+.composer .txt{min-height:40px;color:var(--ink3)}
+.cbar{display:flex;align-items:center;gap:6px}
+.send{width:32px;height:32px;border-radius:50%;background:var(--ink);display:flex;align-items:center;justify-content:center}
+.send svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.graph{flex:1;background:radial-gradient(circle,#E3E6EA 1px,transparent 1.2px) 0 0/22px 22px,#FBFBFC}
+.gtop{position:absolute;left:16px;right:16px;top:12px;display:flex;align-items:center;gap:8px;z-index:2}
+.insp{height:380px;flex:none;display:flex;flex-direction:column}
+.itabs{display:flex;gap:18px;padding:12px 18px 0}
+.itabs span{padding-bottom:8px;color:var(--ink2)}.itabs span.on{color:var(--ink);border-bottom:2px solid var(--ink)}
+.cases{padding:10px 18px 0;display:flex;flex-direction:column;gap:2px}
+.case{display:flex;align-items:center;gap:10px;padding:5px 10px;border-radius:10px}
+.case .t{flex:1}
+.case.fail{background:var(--fail-soft)}
+.case .why{font:12px var(--code);color:var(--fail);padding:0 10px 6px 27px}
+.serial{margin:8px 18px 14px;flex:1;border-radius:12px;background:var(--bg);padding:8px 14px;font:11.5px/1.65 var(--code);white-space:pre;overflow:hidden;color:var(--ink2)}
+.serial .h{color:var(--ink);font-weight:600}.serial .f{color:var(--fail)}.serial .p{color:var(--pass)}
+.status{height:34px;flex:none;display:flex;align-items:center;gap:22px;padding:0 6px 0 76px;font-size:12px;color:var(--ink2)}
+.status b{color:var(--ink);font-weight:500}
+</style>
+<div class="main">
+{rail}
+<div class="panel sess">
+  <button class="btn primary new">新对话</button>
+  <h4>今天</h4>
+  <div class="s on"><span>MAX30102 片内温度</span><span class="dot" style="background:var(--run)"></span></div>
+  <div class="s"><span>MPU6050 数据就绪中断</span><span class="dot" style="background:var(--pass)"></span></div>
+  <h4>昨天</h4>
+  <div class="s"><span>RMT 测脉宽</span><span class="dot" style="background:var(--fail)"></span></div>
+  <div class="s"><span>LEDC 输出 PWM</span><span class="dot" style="background:var(--pass)"></span></div>
+</div>
+<div class="gut"><i></i></div>
+<div class="panel chat">
+  <div class="chead"><h2>MAX30102 片内温度</h2><span class="pill">上板</span><span class="pill">规则库</span><span class="sp"></span><button class="btn ghost">停止</button></div>
+  <div class="msgs">
+    <div class="me">给 ESP32-C3 写一个 MAX30102 片内温度读取函数，调用方传入 I2C 总线句柄，返回摄氏度，精度 1/16 °C。</div>
+    <div class="m"><div class="av" style="background:#E6F0EE">R</div><div class="body">
+      <div class="who"><b>rules</b>规则</div>
+      <div>规则库已覆盖这次要用的外设和器件，直接使用，不用再查资料。</div>
+      <div class="rulechip"><span class="pill">max30102 <b>23</b></span><span class="pill">i2c <b>9</b></span><span class="pill">实测 <b>4</b></span></div></div></div>
+    <div class="m"><div class="av" style="background:#E1ECF5">S</div><div class="body">
+      <div class="who"><b>designer</b>设计分层<span class="raw">发给 AI 的内容</span></div>
+      <div><code>ppg_temp</code>硬件层，上板测试；<code>temp_fmt</code>逻辑层，在电脑上测。</div></div></div>
+    <div class="event"><span class="seg"><i></i><i></i><i class="f"></i></span><code>ppg_temp</code>第 1 次：上板测试 3/5，等温度超时</div>
+    <div class="m"><div class="av" style="background:#F6E7E1">D</div><div class="body">
+      <div class="who"><b>diagnoser</b>诊断</div>
+      <div>代码在等中断状态 2 的 bit0，规则 R-MAX-012 和手册第 13 页的位标注都写的是 bit1，错在代码。交给 coder 改。</div></div></div>
+    <div class="tool"><span class="dot" style="background:var(--pass)"></span>coder 读了手册 <code>max30102-ds</code> 第 13 页<span class="faint">位标注 B1 = DIE_TEMP_RDY_EN</span></div>
+    <div class="event"><span class="seg"><i></i><i></i><i></i></span><code>ppg_temp</code>第 2 次：编译、合规、上板 5/5 通过</div>
+    <div class="event"><span class="seg"><i></i><i></i><i class="o"></i></span><code>temp_fmt</code>第 1 次：正在电脑上跑单元测试</div>
+  </div>
+  <div class="composer">
+    <div class="txt">运行结束后可以追问，例如"为什么第一次没过"</div>
+    <div class="cbar"><span class="pill">模型 <b>fast</b></span><span class="pill">思考 <b>低</b></span><span class="pill">规则 <b>规则库</b></span><span class="sp"></span><span class="send"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span></div>
+  </div>
+</div>
+<div class="gut"><i></i></div>
+<div class="col" style="flex:1">
+  <div class="panel graph">
+    <div class="gtop"><h3>模块</h3><span class="faint" style="font-size:12px">2 个，1 个通过</span><span class="sp"></span><span class="pill">编译，合规，测试</span></div>
+    <svg width="600" height="300" viewBox="0 0 600 300" style="position:absolute;left:0;top:0">
+      <path d="M230 150 C 290 150, 300 150, 360 150" stroke="var(--accent)" stroke-width="2" fill="none"/>
+      <g font-family="'Noto Sans CJK SC',sans-serif">
+        <g transform="translate(50,100)">
+          <rect width="180" height="100" rx="14" fill="#fff" stroke="var(--line)"/>
+          <text x="16" y="28" font-family="'JetBrains Mono',monospace" font-size="14" font-weight="600" fill="var(--ink)">ppg_temp</text>
+          <circle cx="162" cy="23" r="4.5" fill="var(--pass)"/>
+          <text x="16" y="50" font-size="11.5" fill="var(--ink2)">硬件层，上板，第 2 次通过</text>
+          <g transform="translate(16,70)" fill="var(--accent)"><rect width="44" height="6" rx="3"/><rect x="50" width="44" height="6" rx="3"/><rect x="100" width="48" height="6" rx="3"/></g>
+          <text x="16" y="92" font-size="10.5" fill="var(--ink3)">Agent 写的上板用例 5/5</text>
+        </g>
+        <g transform="translate(360,100)">
+          <rect x="-5" y="-5" width="190" height="110" rx="18" fill="var(--run-soft)"/>
+          <rect width="180" height="100" rx="14" fill="#fff" stroke="var(--run)"/>
+          <text x="16" y="28" font-family="'JetBrains Mono',monospace" font-size="14" font-weight="600" fill="var(--ink)">temp_fmt</text>
+          <circle cx="162" cy="23" r="4.5" fill="var(--run)"/>
+          <text x="16" y="50" font-size="11.5" fill="var(--ink2)">逻辑层，电脑上测，第 1 次</text>
+          <g transform="translate(16,70)"><g fill="var(--accent)"><rect width="44" height="6" rx="3"/><rect x="50" width="44" height="6" rx="3"/></g><rect x="100" width="48" height="6" rx="3" fill="var(--line)"/></g>
+        </g>
+      </g>
+    </svg>
+  </div>
+  <div class="gut h"><i></i></div>
+  <div class="panel insp">
+    <div class="itabs"><span>检查结果</span><span class="on">上板测试</span><span>代码</span><span>用到的规则</span><span>发给 AI 的内容</span><span class="sp"></span><span class="faint" style="font-size:12px">ppg_temp 第 1 次</span></div>
+    <div class="cases">
+      <div class="case"><span class="dot" style="background:var(--pass)"></span><span class="t">换算：零下与小数部分</span><span class="faint mono">0.4 秒</span></div>
+      <div class="case fail"><span class="dot" style="background:var(--fail)"></span><span class="t">板上读出的温度合理，且是 1/16 °C 的整数倍</span><span class="faint mono">0.2 秒</span></div>
+      <div class="case why">Expected 0 Was 263（ESP_ERR_TIMEOUT）  test_ppg_temp.c:34</div>
+      <div class="case fail"><span class="dot" style="background:var(--fail)"></span><span class="t">复位器件后第一次读数合理</span><span class="faint mono">0.2 秒</span></div>
+      <div class="case"><span class="dot" style="background:var(--pass)"></span><span class="t">参数非法</span><span class="faint mono">0.1 秒</span></div>
+    </div>
+<div class="serial"><span class="h">串口输出</span>  /dev/ttyACM0，每个用例单独开机，用例前复位外接器件
+I (312) main_task: Calling app_main()
+Running 板上读出的温度合理...
+FF_LOG: INT_STATUS_2 = 0x02  INT_ENABLE_2 = 0x02
+<span class="f">test_ppg_temp.c:34:板上读出的温度合理:FAIL: Expected 0 Was 263</span>
+ESP-ROM:esp32c3-api1-20210207   rst:0x3 (RTC_SW_SYS_RST)
+<span class="p">test_ppg_temp.c:52:参数非法:PASS</span></div>
+  </div>
+</div>
+</div>
+<div class="status"><span><span class="dot" style="background:var(--pass)"></span> 板子 <b>ESP32-C3 SuperMini</b>，/dev/ttyACM0 已连接</span><span>ESP-IDF <b>v6.1</b></span><span>规则库 <b>47</b> 条已确认</span><span class="sp"></span><span>用时 04:12</span><span>token 182,406</span><span>费用 <b>0.43</b> 元</span></div>

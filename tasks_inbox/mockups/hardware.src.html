@@ -1,0 +1,118 @@
+<style>
+.prof{width:300px;flex:none;padding:16px 16px;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.prof h2{display:flex;align-items:center;gap:8px}
+.kv{display:grid;grid-template-columns:auto 1fr auto;gap:5px 10px;align-items:baseline;font-size:12.5px}
+.kv .k{color:var(--ink2)}
+.org{font-size:11px;border-radius:999px;padding:0 7px;white-space:nowrap}
+.org.m{background:var(--accent-soft);color:var(--accent)}
+.org.d{background:var(--bg);color:var(--ink2)}
+.org.u{background:#EEF0F7;color:#4A5578}
+.dev{border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.dev .t{display:flex;gap:8px;align-items:baseline}
+.sec{font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:8px}
+.meas{display:flex;flex-direction:column;gap:4px;font-size:12.5px}
+.meas div{display:flex;gap:8px}.meas code{color:var(--ink2);white-space:nowrap;flex:none}
+.rules{width:470px;flex:none;display:flex;flex-direction:column}
+.rhead{padding:14px 16px 8px;display:flex;align-items:center;gap:8px}
+.filt{display:flex;gap:6px;padding:0 16px 8px}
+.filt span{padding:3px 12px;border-radius:999px;font-size:12px;color:var(--ink2);background:var(--bg)}
+.filt span.on{background:var(--ink);color:#fff}
+.build{margin:0 16px 10px;border-radius:12px;background:var(--bg);padding:9px 12px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)}
+.list{flex:1;overflow:hidden;padding:0 8px}
+.grp{font-size:11.5px;color:var(--ink3);padding:10px 10px 4px}
+.r{display:flex;gap:10px;align-items:flex-start;padding:7px 10px;border-radius:10px}
+.r.on{background:var(--accent-soft)}
+.r code{width:84px;flex:none;color:var(--ink2);padding-top:1px}
+.r .tx{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.st{font-size:11px;border-radius:999px;padding:0 8px;white-space:nowrap}
+.st.ok{background:var(--accent-soft);color:var(--accent)}
+.st.wait{background:var(--run-soft);color:var(--run)}
+.st.no{background:var(--fail-soft);color:var(--fail)}
+.det{flex:1;padding:18px 20px;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.det .big{font-size:15px;line-height:1.65}
+.cite{border-radius:12px;background:var(--bg);padding:10px 14px;font-size:12.5px;display:flex;flex-direction:column;gap:6px}
+.cite .src{display:flex;gap:8px;align-items:center;color:var(--ink2);font-size:12px}
+.quote{font-family:var(--code);font-size:12px;line-height:1.7;white-space:pre-wrap}
+.quote mark{background:#FBEFC9;color:var(--ink);border-radius:3px;padding:0 2px}
+.bits{border:1px dashed #CDD2D8;border-radius:12px;padding:8px 12px;font-size:12px;color:var(--ink2)}
+.bits code{color:var(--ink)}
+.steps{display:flex;flex-direction:column;gap:3px;font-size:12.5px}
+.steps div{display:flex;gap:8px;align-items:baseline}
+.steps .n{width:18px;color:var(--ink3);font-family:var(--code)}
+.steps .ok{color:var(--pass)}.steps .sk{color:var(--ink3)}
+.decide{margin-top:auto;display:flex;gap:8px;align-items:center}
+.decide .in{flex:1;border:1px solid var(--line);border-radius:10px;padding:6px 12px;color:var(--ink3)}
+</style>
+{rail}
+<div class="panel prof">
+  <h2>硬件档案<span class="sp"></span><span class="pill"><span class="dot" style="background:var(--pass)"></span>已连接</span></h2>
+  <div class="kv">
+    <span class="k">板子</span><span>ESP32-C3 SuperMini</span><span class="org u">你填的</span>
+    <span class="k">芯片</span><span>ESP32-C3 AZ rev v1.1</span><span class="org m">实测</span>
+    <span class="k">框架</span><span>ESP-IDF v6.1</span><span class="org u">你填的</span>
+    <span class="k">串口</span><span class="mono">/dev/ttyACM0</span><span class="org m">自动找到</span>
+  </div>
+  <div class="sec">引脚<span class="sp"></span><span class="faint">8 个，保留 13 个</span></div>
+  <div class="kv">
+    <span class="k mono">i2c0.sda</span><span>GPIO4</span><span class="org d">默认</span>
+    <span class="k mono">i2c0.scl</span><span>GPIO5</span><span class="org d">默认</span>
+    <span class="k mono">imu.int</span><span>GPIO3</span><span class="org d">默认</span>
+    <span class="k mono">pwm.out</span><span>GPIO6，接 pwm.in</span><span class="org d">默认</span>
+  </div>
+  <div class="sec">外接器件</div>
+  <div class="dev">
+    <div class="t"><b>imu</b><span class="muted">MPU6050，i2c0，0x68</span></div>
+    <div class="kv"><span class="k">WHO_AM_I</span><span>0x70，不是手册的 0x68</span><span class="org m">实测</span>
+    <span class="k">温度换算</span><span>原始值 / 333.87 + 21</span><span class="org d">资料</span></div>
+  </div>
+  <div class="dev">
+    <div class="t"><b>ppg</b><span class="muted">MAX30102，i2c0，0x57</span></div>
+    <div class="kv"><span class="k">用例前复位</span><span>0x09 写 0x40</span><span class="org d">资料</span></div>
+  </div>
+  <div class="sec">实测记录<span class="sp"></span><span class="faint">规则可以引用</span></div>
+  <div class="meas">
+    <div><code>M-001</code>总线上只有 0x57 和 0x68 应答</div>
+    <div><code>M-002</code>WHO_AM_I 读出 0x70，温度按 MPU-6500 公式</div>
+    <div><code>M-003</code>TEMP_EN 0.26 ms 清零，数据 27.5 ms 才出来</div>
+    <div><code>M-004</code>100 kHz、400 kHz 都读得对</div>
+  </div>
+</div>
+<div class="gut"><i></i></div>
+<div class="panel rules">
+  <div class="rhead"><h2>规则库</h2><span class="faint" style="font-size:12px">47 条已确认，3 条等你确认</span><span class="sp"></span><button class="btn">资料清单</button></div>
+  <div class="filt"><span>全部</span><span class="on">等你确认 3</span><span>已确认 47</span><span>退回 2</span></div>
+  <div class="build"><span>查资料提炼规则</span><span class="pill">max30102</span><span class="pill">+ 添加</span><span class="sp"></span><span>预计约 1 元</span><button class="btn primary">开始</button></div>
+  <div class="list">
+    <div class="grp">max30102</div>
+    <div class="r on"><code>R-MAX-012</code><span class="tx">要 DIE_TEMP_RDY 就置 Interrupt Enable 2(0x03) bit1</span><span class="st wait">等你确认</span></div>
+    <div class="r"><code>R-MAX-010</code><span class="tx">先置 DIE_TEMP_RDY_EN 再置 TEMP_EN，等 DIE_TEMP_RDY 置位后再读</span><span class="st wait">等你确认</span></div>
+    <div class="r"><code>R-MAX-021</code><span class="tx">温度 = TINT + TFRAC × 0.0625 °C，两个寄存器都要读</span><span class="st wait">等你确认</span></div>
+    <div class="grp">已确认（同一范围）</div>
+    <div class="r"><code>R-MAX-001</code><span class="tx">从机 ID 固定 0b1010111，写 0xAE、读 0xAF</span><span class="st ok">已确认</span></div>
+    <div class="r"><code>R-MAX-002</code><span class="tx">读 FIFO_DATA 地址不自增，一次事务连读 6 字节</span><span class="st ok">已确认</span></div>
+    <div class="r"><code>R-MAX-009</code><span class="tx">本板 I2C0 上只有 0x57 和 0x68 应答</span><span class="st ok">已确认</span></div>
+    <div class="grp">退回</div>
+    <div class="r"><code>R-MPU-010</code><span class="tx">其余寄存器复位值均为 0x00</span><span class="st no">你驳回了</span></div>
+  </div>
+</div>
+<div class="gut"><i></i></div>
+<div class="panel det">
+  <div class="sec"><code>R-MAX-012</code><span>寄存器</span><span>适用 max30102</span><span class="sp"></span><span class="st wait">等你确认</span></div>
+  <div class="big">中断默认全部关闭：要 PPG_RDY、A_FULL、ALC_OVF 就置 Interrupt Enable 1(0x02) 对应位，要 DIE_TEMP_RDY 就置 Interrupt Enable 2(0x03) bit1。</div>
+  <div class="cite">
+    <div class="src"><b style="color:var(--ink)">max30102-ds</b><span>第 13 页</span><span>官方手册</span><span class="sp"></span><span style="color:var(--accent)">打开这一页</span></div>
+    <div class="quote">Each source of hardware interrupt, with the exception of power ready, can be disabled in a software register within the MAX30102 IC. The power-ready interrupt cannot be disabled because <mark>the default condition is that all the interrupts are disabled</mark>.</div>
+  </div>
+  <div class="bits">这一页的寄存器位标注（平台按 PDF 坐标算出，不是原文）：<code>Interrupt Enable 2（0x03）：B1 = DIE_TEMP_RDY_EN</code></div>
+  <div class="steps">
+    <div><span class="n">0</span><span class="ok">●</span>资料已登记，官方手册</div>
+    <div><span class="n">1</span><span class="ok">●</span>格式合格</div>
+    <div><span class="n">2</span><span class="ok">●</span>第 13 页找到原文</div>
+    <div><span class="n">3</span><span class="sk">○</span>没有 SVD，程序核对不了，交给核对 Agent</div>
+    <div><span class="n">4</span><span class="ok">●</span>核对 Agent：与原文和位标注一致</div>
+    <div><span class="n">5</span><span class="ok">●</span>和已确认的规则不冲突</div>
+    <div><span class="n">6</span><span class="ok">●</span>和硬件档案不冲突</div>
+  </div>
+  <div class="muted" style="font-size:12px">注意：引用的原文只说"默认全部关闭"，bit1 来自位标注。</div>
+  <div class="decide"><span class="in">驳回时写一句理由</span><button class="btn">驳回</button><button class="btn primary">通过</button></div>
+</div>

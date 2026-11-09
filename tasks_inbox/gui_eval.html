@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>FirmForge 评测</title><style>:root{
+  --bg:#F3F4F6; --surface:#FFFFFF; --ink:#1C2026; --ink2:#6E7580; --ink3:#9AA0A8; --line:#E4E6EA;
+  --accent:#2F6F68; --accent-soft:#E6F0EE; --run:#C98A2B; --run-soft:#F7EEDD; --fail:#C8483D; --fail-soft:#F8E6E4; --pass:#3E8E63;
+  --code:"JetBrains Mono","Noto Sans Mono",monospace; --sans:"Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font:13px/1.6 var(--sans);display:flex;padding:8px 8px 8px 0}
+.rail{width:68px;flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;padding-top:6px}
+.rail .logo{width:34px;height:34px;border-radius:11px;background:var(--ink);color:#fff;font:700 12px var(--code);display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.rail a{width:54px;padding:8px 0 6px;border-radius:12px;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--ink2);font-size:11px}
+.rail a.on{background:var(--surface);color:var(--ink)}
+.rail svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.rail .sp{flex:1}
+.panel{background:var(--surface);border-radius:16px;overflow:hidden;min-width:0;position:relative}
+.gut{width:8px;flex:none;display:flex;align-items:center;justify-content:center}
+.gut i{width:3px;height:28px;border-radius:2px;background:#D3D7DC}
+.gut.h{width:auto;height:8px}.gut.h i{width:28px;height:3px}
+.col{display:flex;flex-direction:column;min-width:0}
+.sp{flex:1}.muted{color:var(--ink2)}.faint{color:var(--ink3)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:5px 14px;font:inherit;color:var(--ink);white-space:nowrap}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:500}
+.btn.ghost{border-color:transparent;background:var(--bg)}
+.pill{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;padding:1px 10px;font-size:12px;color:var(--ink2);white-space:nowrap;background:var(--surface)}
+.pill b{color:var(--ink);font-weight:500}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none}
+code,.mono{font-family:var(--code);font-size:12px}
+h1{font-size:20px;font-weight:600;letter-spacing:.01em}
+h2{font-size:15px;font-weight:600}
+h3{font-size:13px;font-weight:600}
+</style></head><body><style>
+.setup{width:290px;flex:none;padding:16px;display:flex;flex-direction:column;gap:14px}
+.sec{font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:8px}
+.chk{display:flex;flex-direction:column;gap:3px}
+.chk div{display:flex;align-items:center;gap:8px;padding:3px 0}
+.box{width:15px;height:15px;border-radius:5px;border:1.5px solid var(--ink3);flex:none}
+.box.on{background:var(--ink);border-color:var(--ink)}
+.cfgs{display:flex;flex-wrap:wrap;gap:6px}
+.cfg{border:1px solid var(--line);border-radius:12px;padding:6px 10px;width:122px}
+.cfg.on{border-color:var(--ink)}
+.cfg b{font-family:var(--code);font-size:12px}.cfg div{font-size:11px;color:var(--ink2);line-height:1.4}
+.num{display:flex;gap:8px;align-items:center}
+.num .in{border:1px solid var(--line);border-radius:10px;padding:4px 12px;width:72px}
+.plan{border-radius:12px;background:var(--bg);padding:10px 12px;font-size:12.5px;display:flex;flex-direction:column;gap:3px}
+.res{flex:1;display:flex;flex-direction:column;padding:16px 18px;gap:12px;overflow:hidden}
+.top{display:flex;align-items:center;gap:10px}
+.prog{height:6px;border-radius:3px;background:var(--line);flex:1;position:relative;overflow:hidden}
+.prog i{position:absolute;left:0;top:0;bottom:0;width:62%;background:var(--accent);border-radius:3px}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-weight:500;font-size:12px;color:var(--ink2);text-align:left;padding:6px 10px;border-bottom:1px solid var(--line)}
+td{padding:7px 10px;border-bottom:1px solid var(--line);font-size:12.5px}
+td code{font-size:12px}
+.cell{display:inline-flex;gap:4px;align-items:center}
+.cell i{width:12px;height:12px;border-radius:4px;background:var(--line)}
+.cell i.p{background:var(--accent)}.cell i.f{background:var(--fail)}.cell i.r{background:var(--run)}
+.sum td{font-weight:600;border-bottom:none}
+.note{font-size:12px;color:var(--ink2)}
+.feed{width:330px;flex:none;padding:16px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.ln{font-size:12px;display:flex;flex-direction:column;gap:1px;padding:7px 10px;border-radius:10px}
+.ln.on{background:var(--bg)}
+.ln .a{display:flex;gap:6px;align-items:center}.ln .b{color:var(--ink2);padding-left:13px}
+</style>
+<nav class="rail">
+  <div class="logo">FF</div>
+  <a class=""><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>对话</a>
+  <a class=""><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="11" rx="3"/><path d="M9 7V4.5M15 7V4.5M8.5 12.5h7"/></svg>硬件</a>
+  <a class="on"><svg viewBox="0 0 24 24"><path d="M5 19V11M12 19V5M19 19v-6"/></svg>评测</a>
+  <a class=""><svg viewBox="0 0 24 24"><rect x="3" y="3.5" width="7" height="5" rx="2"/><rect x="14" y="15.5" width="7" height="5" rx="2"/><path d="M6.5 8.5v3a3 3 0 0 0 3 3h5a3 3 0 0 1 3 1"/></svg>工作流</a>
+  <a class=""><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.2c2.3.2 3.9 1.8 4.5 4.3"/></svg>团队</a>
+  <span class="sp"></span>
+  <a class=""><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg>设置</a>
+</nav>
+
+<div class="panel setup">
+  <h2>上板评测</h2>
+  <div class="sec">题目<span class="sp"></span><span class="faint">6 / 11</span></div>
+  <div class="chk">
+    <div><span class="box on"></span><code>rmt_pulse_meter</code></div>
+    <div><span class="box on"></span><code>ledc_pwm</code></div>
+    <div><span class="box on"></span><code>mpu6050_drv_idf</code></div>
+    <div><span class="box on"></span><code>mpu6050_drdy</code></div>
+    <div><span class="box on"></span><code>max30102_fifo</code></div>
+    <div><span class="box on"></span><code>max30102_temp</code></div>
+    <div><span class="box"></span><code>uart_loopback</code></div>
+  </div>
+  <div class="sec">配置（每种只比上一种多一样东西）</div>
+  <div class="cfgs">
+    <div class="cfg on"><b>single</b><div>一个 Agent，只看编译错误</div></div>
+    <div class="cfg on"><b>none</b><div>多 Agent，上板测试，不给规则</div></div>
+    <div class="cfg on"><b>unverified</b><div>加未核对的规则</div></div>
+    <div class="cfg on"><b>verified</b><div>改用人工确认的规则库</div></div>
+  </div>
+  <div class="num"><span>每格跑</span><span class="in">2 次</span><span>上限</span><span class="in">15 元</span></div>
+  <div class="plan"><div>6 题 × 4 种配置 × 2 次 = <b>48</b> 次</div><div class="muted">按上一轮估计约 11 元，4 小时</div><div class="muted">verified 规则库已覆盖全部题目</div></div>
+  <span class="sp"></span>
+  <button class="btn primary">开始评测</button>
+</div>
+<div class="gut"><i></i></div>
+<div class="panel res">
+  <div class="top"><h2>正式轮</h2><span class="faint" style="font-size:12px">2026-11-12，30 / 48</span><div class="prog"><i></i></div><span class="mono">6.84 元</span><button class="btn ghost">暂停</button></div>
+  <table>
+    <tr><th>题目</th><th>single</th><th>none</th><th>unverified</th><th>verified</th></tr>
+    <tr><td><code>rmt_pulse_meter</code></td><td><span class="cell"><i class="f"></i><i class="f"></i></span></td><td><span class="cell"><i class="f"></i><i class="p"></i></span></td><td><span class="cell"><i class="p"></i><i class="f"></i></span></td><td><span class="cell"><i class="p"></i><i class="p"></i></span></td></tr>
+    <tr><td><code>ledc_pwm</code></td><td><span class="cell"><i class="p"></i><i class="p"></i></span></td><td><span class="cell"><i class="p"></i><i class="p"></i></span></td><td><span class="cell"><i class="p"></i><i class="p"></i></span></td><td><span class="cell"><i class="p"></i><i class="f"></i></span></td></tr>
+    <tr><td><code>mpu6050_drv_idf</code></td><td><span class="cell"><i class="p"></i><i class="f"></i></span></td><td><span class="cell"><i class="f"></i><i class="p"></i></span></td><td><span class="cell"><i class="f"></i><i class="r"></i></span></td><td><span class="cell"><i></i><i></i></span></td></tr>
+    <tr><td><code>mpu6050_drdy</code></td><td><span class="cell"><i class="p"></i><i class="f"></i></span></td><td><span class="cell"><i></i><i></i></span></td><td><span class="cell"><i></i><i></i></span></td><td><span class="cell"><i></i><i></i></span></td></tr>
+    <tr><td><code>max30102_fifo</code></td><td><span class="cell"><i class="p"></i><i class="f"></i></span></td><td><span class="cell"><i></i><i></i></span></td><td><span class="cell"><i></i><i></i></span></td><td><span class="cell"><i></i><i></i></span></td></tr>
+    <tr><td><code>max30102_temp</code></td><td><span class="cell"><i class="f"></i><i class="f"></i></span></td><td><span class="cell"><i></i><i></i></span></td><td><span class="cell"><i></i><i></i></span></td><td><span class="cell"><i></i><i></i></span></td></tr>
+    <tr class="sum"><td>通过</td><td>5 / 12</td><td>4 / 6</td><td>3 / 5</td><td>3 / 4</td></tr>
+  </table>
+  <div class="note">每个小方块是一次运行：绿色通过，红色没通过，琥珀色正在跑。点方块看那次运行的完整过程。数据是编的。</div>
+  <div class="sec">没通过的卡在哪一层</div>
+  <table>
+    <tr><th>配置</th><th>编译</th><th>合规</th><th>上板测试</th><th>隐藏用例通过率</th></tr>
+    <tr><td><code>single</code></td><td>0</td><td>0</td><td>7</td><td>69%</td></tr>
+    <tr><td><code>none</code></td><td>0</td><td>0</td><td>2</td><td>81%</td></tr>
+  </table>
+</div>
+<div class="gut"><i></i></div>
+<div class="panel feed">
+  <h3>运行记录</h3>
+  <div class="ln on"><div class="a"><span class="dot" style="background:var(--run)"></span><code>mpu6050_drv_idf</code><span class="muted">unverified，第 2 次</span></div><div class="b">coder 第 3 次修改，上板测试中</div></div>
+  <div class="ln"><div class="a"><span class="dot" style="background:var(--fail)"></span><code>mpu6050_drv_idf</code><span class="muted">unverified，第 1 次</span></div><div class="b">隐藏用例 3/4，0.42 元，318 秒</div></div>
+  <div class="ln"><div class="a"><span class="dot" style="background:var(--pass)"></span><code>mpu6050_drv_idf</code><span class="muted">none，第 2 次</span></div><div class="b">隐藏用例 4/4，0.23 元，290 秒</div></div>
+  <div class="ln"><div class="a"><span class="dot" style="background:var(--fail)"></span><code>mpu6050_drv_idf</code><span class="muted">none，第 1 次</span></div><div class="b">隐藏用例 3/4，0.24 元，330 秒</div></div>
+  <div class="ln"><div class="a"><span class="dot" style="background:var(--pass)"></span><code>ledc_pwm</code><span class="muted">verified，第 2 次</span></div><div class="b">隐藏用例 6/6，0.70 元，412 秒</div></div>
+  <span class="sp"></span>
+  <div class="note">来自实测记录的规则会在汇总里单独列出（第 95 条）。隐藏测试只给评测用，任何 Agent 都看不到。</div>
+</div>
+</body></html>
