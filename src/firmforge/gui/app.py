@@ -136,6 +136,7 @@ class MainWindow(QMainWindow):
         body.addWidget(self.stack, 1)
         self.chat.open_designer.connect(self._designer_ai)
         self.chat.review_rules.connect(self._review_rules)
+        self.chat.run_done.connect(lambda: self.hardware.pending or self.hardware.reload())
         self.hardware.rules_changed.connect(lambda: self.chat.refresh_status(self.chat._run_text()))
         self.evalp.open_run.connect(self._open_run)
         self.designer.try_run.connect(self._try_run)
@@ -168,6 +169,11 @@ class MainWindow(QMainWindow):
         set_theme(t)
         QApplication.instance().setStyleSheet(th.stylesheet(t))
         self._paint_icons()
+        if hasattr(self, "evalp"):                       # 新加的三页里有按主题算好的颜色，换主题时重画
+            self.evalp.restyle()
+            if not self.hardware.pending:
+                self.hardware.reload()
+            self.chat.refresh_status(self.chat._run_text())
         for page in (self.chat, self.designer):
             for view in (getattr(page, "graph", None), getattr(page, "flow", None), getattr(page, "canvas", None)):
                 if view is not None:

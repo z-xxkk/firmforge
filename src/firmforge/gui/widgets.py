@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
+from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayout, QLabel, QLayout, QPushButton,
                                QSizePolicy, QSplitter, QSplitterHandle, QVBoxLayout, QWidget)
 
 _theme = None
@@ -168,7 +168,7 @@ class Dot(QWidget):
 
 
 ROLE_TINTS = {"analyst": "#E9E4F3", "planner": "#E1ECF5", "coder": "#E3F0E8", "tester": "#F2EEDC",
-              "diagnoser": "#F6E7E1", "reviewer": "#EAEAEA"}
+              "diagnoser": "#F6E7E1", "reviewer": "#EAEAEA", "rules": "#E6F0EE", "designer": "#E1ECF5"}
 
 
 class Avatar(QLabel):
@@ -205,3 +205,63 @@ def hbox(*widgets, spacing: int = 8, margins=(0, 0, 0, 0)) -> QHBoxLayout:
 def expanding(w: QWidget) -> QWidget:
     w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     return w
+
+
+class FlowLayout(QLayout):
+    """放不下就换行的横排布局（Qt 官方 Flow Layout 示例的写法）：面板变窄时一排选项自动折到第二行，
+    不会把面板的最小宽度撑大。"""
+
+    def __init__(self, parent=None, spacing: int = 6):
+        super().__init__(parent)
+        self._items: list = []
+        self._space = spacing
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i):
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientations(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do(QRect(0, 0, width, 0), True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        s = QSize()
+        for it in self._items:
+            s = s.expandedTo(it.minimumSize())
+        return s
+
+    def _do(self, rect, test: bool) -> int:
+        x, y, line = rect.x(), rect.y(), 0
+        for it in self._items:
+            if it.widget() is not None and not it.widget().isVisible() and it.widget().parent() is not None \
+                    and it.widget().parent().isVisible():
+                continue                                  # 藏起来的选项不占位置
+            hint = it.sizeHint()
+            if x + hint.width() > rect.right() + 1 and line > 0:
+                x, y, line = rect.x(), y + line + self._space, 0
+            if not test:
+                it.setGeometry(QRect(QPoint(x, y), hint))
+            x += hint.width() + self._space
+            line = max(line, hint.height())
+        return y + line - rect.y()

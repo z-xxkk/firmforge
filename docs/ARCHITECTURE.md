@@ -362,7 +362,7 @@ role = "reviewer"
 - 运行级：`run_started`、`plan_ready`、`human_wait`、`human_done`、`run_finished`
 - 节点级：`node_ready`、`node_assigned`（含 agent、得分明细）、`node_done`、`node_failed`
 - Agent 调用：`agent_started`、`agent_finished`（含 token、耗时）
-- 判定与循环：`verify_started`、`verify_finished`、`diagnosis`、`escalated`（含升级级别）、`rollback`、`format_retry`（Agent 没按格式交文件，当场补要）
+- 判定与循环：`verify_started`、`verify_finished`、`diagnosis`、`escalated`（含升级级别）、`rollback`、`format_retry`（Agent 没按格式交文件，当场补要）、`design_rejected`（设计分层没通过检查，带着问题重做）
 - 经验库：`experience_saved`、`experience_used`
 - 工具（DECISIONS 第 63 条）：`tool_called`（调用前先记录）、`tool_result`（是否成功、耗时、摘要、是否截断）
 

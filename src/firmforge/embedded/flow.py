@@ -190,6 +190,7 @@ class EmbeddedFlow:
                 self.rd.write_json("design.json", design.to_dict())
                 self.bus.emit("plan_ready", "design", modules=[m.to_dict() for m in design.modules], app=design.app)
                 return design
+            self.bus.emit("design_rejected", "design", attempt=k, problems=problems[:10])
             msgs = msgs + [{"role": "assistant", "content": resp.text},
                            {"role": "user", "content": designer_retry_message(problems)}]
         return None

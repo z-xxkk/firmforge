@@ -97,7 +97,7 @@ class BoardTestView(QWidget):
         self.cases = QVBoxLayout(self.cases_box)
         self.cases.setContentsMargins(0, 0, 0, 0)
         self.cases.setSpacing(2)
-        scroll = QScrollArea()
+        scroll = self.scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(self.cases_box)
@@ -134,6 +134,8 @@ class BoardTestView(QWidget):
             head += "，芯片崩溃"
         if res.hang:
             head += "，没有看到结束标记（卡死或超时）"
+        if res.started and not res.cases and not res.crash:
+            head += "：一个用例都没有跑（测试文件里可能没有 TEST_CASE，或者没交测试文件）"
         if res.skipped:
             head = f"{title}：上板测试跳过（{res.skipped}）"
         self.title.setText(head)
@@ -153,6 +155,7 @@ class BoardTestView(QWidget):
                 why.setWordWrap(True)
                 self.cases.addWidget(why)
         self.cases.addStretch(1)
+        self.scroll.setVisible(bool(res.cases))           # 一个用例都没有就不显示空列表，只看串口原文
         self.serial.setHtml(_serial_html(text))
 
 

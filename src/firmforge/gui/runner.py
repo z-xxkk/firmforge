@@ -189,6 +189,19 @@ def rule_review_payload(pending, escalated, results: dict | None = None) -> dict
             "escalated": [{**one(x.rule, x.steps), "reasons": x.reasons()} for x in escalated]}
 
 
+BOARD_USERS: set = set()           # 正在用板子的后台运行（同一时间只能有一个，否则两边同时烧录同一个串口）
+
+
+def claim_board(owner, what: str) -> None:
+    """占用板子；已经有别的运行在用就报错，说明是谁在用。"""
+    from ..embedded.workspace import WorkspaceError
+    others = [o for o in BOARD_USERS if o is not owner]
+    if others:
+        raise WorkspaceError(f"板子正在被{getattr(others[0], 'what', '另一次运行')}使用，等它结束（或停止它）再开始{what}")
+    owner.what = what
+    BOARD_USERS.add(owner)
+
+
 class EmbeddedBackend(Backend):
     """嵌入式新流程（只用本机，DECISIONS 第 100 条：要上板的运行不进 docker）。
 
@@ -222,9 +235,14 @@ class EmbeddedBackend(Backend):
         from ..llm import OpenAICompatClient
         from ..target.board import BoardRunner
         from ..target.esp_idf import IdfEnv, IdfUnavailable
-        settings = config.load_settings()
-        llm = OpenAICompatClient.from_settings(settings)
-        hwc = load_hw(project / hw, need_sources=(rule_mode != "none") or config_name == "unverified", root=project)
+        claim_board(self, "对话页的上板运行")
+        try:
+            settings = config.load_settings()
+            llm = OpenAICompatClient.from_settings(settings)
+            hwc = load_hw(project / hw, need_sources=(rule_mode != "none") or config_name == "unverified", root=project)
+        except Exception:
+            BOARD_USERS.discard(self)
+            raise
         try:
             idf = IdfEnv.load(want_version=str(hwc.profile.framework_version.value))
         except IdfUnavailable as exc:
@@ -274,6 +292,7 @@ class EmbeddedBackend(Backend):
         self.worker.start()
 
     def _done(self):
+        BOARD_USERS.discard(self)
         r = self.worker.result
         info = {"verdict": getattr(r, "verdict", "error"), "run_dir": str(getattr(r, "run_dir", "") or ""),
                 "error": self.worker.error or getattr(r, "error", "") or getattr(r, "note", "") or ""}
@@ -357,14 +376,23 @@ class EvalBackend(Backend):
 
     def start(self, *, project: Path, hw: str, task_ids: list[str], configs: list[str], runs: int, out_dir: Path,
               max_cost: float, tier: str = "fast", thinking: str = "low", port: str | None = None) -> None:
+        from ..embedded.workspace import WorkspaceError
+        if max_cost <= 0:
+            raise WorkspaceError("要先填花费上限（元）")
+        claim_board(self, "评测")
+        try:
+            self._prepare(project, hw, task_ids, configs, runs, out_dir, max_cost, tier, thinking, port)
+        except Exception:
+            BOARD_USERS.discard(self)
+            raise
+
+    def _prepare(self, project, hw, task_ids, configs, runs, out_dir, max_cost, tier, thinking, port) -> None:
         from ..embedded.board_eval import evaluate
         from ..embedded.board_task import load_board_task
         from ..embedded.workspace import WorkspaceError, load_hw, make_eval_context
         from ..llm import OpenAICompatClient
         from ..target.board import BoardRunner
         from ..target.esp_idf import IdfEnv, IdfUnavailable
-        if max_cost <= 0:
-            raise WorkspaceError("要先填花费上限（元）")
         settings = config.load_settings()
         hwc = load_hw(project / hw, need_sources="unverified" in configs, root=project)
         try:
@@ -386,8 +414,9 @@ class EvalBackend(Backend):
                             stop=lambda: self._stop)
 
         self.worker = _Worker(job)
-        self.worker.finished.connect(lambda: self.finished.emit({"verdict": "done", "run_dir": str(out_dir),
-                                                                 "error": self.worker.error}))
+        self.worker.finished.connect(lambda: (BOARD_USERS.discard(self),
+                                              self.finished.emit({"verdict": "done", "run_dir": str(out_dir),
+                                                                  "error": self.worker.error})))
         self.worker.start()
 
     def pause(self) -> None:

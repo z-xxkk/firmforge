@@ -85,7 +85,7 @@ class HardwarePage(QWidget):
         self.prof.setSpacing(10)
         self.prof_scroll.setWidget(self.prof_box)
         self.prof_panel.lay.addWidget(self.prof_scroll)
-        self.prof_panel.setMinimumWidth(240)
+        self.prof_panel.setMinimumWidth(290)              # 器件参数名较长，再窄来源标记就挤不下
 
         # 中：规则库
         mid = Panel(margins=(16, 14, 16, 12))
@@ -131,7 +131,7 @@ class HardwarePage(QWidget):
         self.submit_btn.clicked.connect(self.submit)
         self.submit_btn.setVisible(False)
         mid.lay.addWidget(self.submit_btn)
-        mid.setMinimumWidth(360)
+        mid.setMinimumWidth(330)
 
         # 右：规则详情
         right = Panel(margins=(20, 18, 20, 16))
@@ -198,13 +198,16 @@ class HardwarePage(QWidget):
 
     def _kv(self, key: str, value: str, origin: str = "", mono: bool = False) -> QHBoxLayout:
         k = label(key, "Mono" if mono else "Muted")
-        k.setFixedWidth(118 if mono else 64)
+        k.setFixedWidth(104 if mono else 60)
+        k.setWordWrap(True)
         v = label(value, wrap=True)
-        v.setMinimumWidth(60)
+        v.setMinimumWidth(20)                           # 窄的时候换行，不把右边的来源标记挤出去
         row = hbox(k, v, spacing=10)
         row.setStretch(1, 1)
         if origin:
-            row.addWidget(origin_chip(origin))
+            chip = origin_chip(origin)
+            chip.setFixedHeight(18)
+            row.addWidget(chip, 0, Qt.AlignVCenter)
         return row
 
     def _fill_profile(self, hwdir: Path):
@@ -373,6 +376,13 @@ class HardwarePage(QWidget):
             v, note = self.decisions.get(r["id"], ("", ""))
             self.comment.setText(note)
 
+    def _clear_detail(self, text: str = "从中间选一条规则"):
+        self.d_head.setText("")
+        self.d_text.setText(text)
+        for w in (self.d_cite, self.d_bits, self.d_steps, self.d_notes):
+            w.setText("")
+        self.d_bits.setVisible(False)
+
     def decide(self, verdict: str):
         r = self.current
         if r is None or r["status"] != "pending":
@@ -405,6 +415,10 @@ class HardwarePage(QWidget):
             return
         decisions, cb = dict(self.decisions), self.on_submit
         self.pending, self.decisions, self.on_submit = [], {}, None
+        self.current = None
+        self.comment.clear()
+        self.decide_row.setVisible(False)
+        self._clear_detail("已提交。流程会把通过的规则入库，跑完后这里会重新读取规则库。")
         cb(decisions)
         self.build_status.setText(f"已提交：通过 {sum(1 for v, _ in decisions.values() if v == 'approve')} 条，"
                                   f"驳回 {sum(1 for v, _ in decisions.values() if v == 'reject')} 条。流程继续。")

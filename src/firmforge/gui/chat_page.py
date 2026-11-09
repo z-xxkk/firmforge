@@ -15,6 +15,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+                               QSizePolicy,
                                QPlainTextEdit, QPushButton, QScrollArea, QSlider, QStackedWidget, QTableWidget,
                                QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout, QWidget)
 
@@ -24,10 +25,10 @@ from .graph import FlowCanvas, ModuleGraph
 from . import board_view as bv
 from .layout import EMB_LAYER_NAMES, LAYER_NAMES, LAYERS, UNIT_NAMES, RunView, layer_names
 from .runner import DockerBackend, EmbeddedBackend, LocalBackend, ReplayPlayer, _Worker
-from .widgets import Avatar, Dot, GripSplitter, Panel, Segmented, T, Toggle, hbox, label
+from .widgets import Avatar, Dot, FlowLayout, GripSplitter, Panel, Segmented, T, Toggle, hbox, label
 
 ROLE_NAMES = {"analyst": "需求分析", "planner": "规划", "coder": "编码", "tester": "测试", "diagnoser": "诊断",
-              "reviewer": "审查"}
+              "reviewer": "审查", "rules": "规则", "designer": "设计分层"}
 VERDICT_NAMES = {"pass": "通过", "fail": "没通过", "error": "出错", "incomplete": "不完整", "interrupted": "被中断",
                  "rejected": "没有确认"}
 THINK = [("", "按 Agent"), ("off", "关"), ("low", "低"), ("high", "高"), ("max", "最高")]
@@ -166,8 +167,13 @@ def line_widget(*parts, indent: int = 36, bg: bool = False) -> QWidget:
     lay.setContentsMargins(indent, 2 if not bg else 5, 6, 2 if not bg else 5, )
     lay.setSpacing(8)
     for p in parts:
-        lay.addWidget(p if isinstance(p, QWidget) else label(str(p), "Muted"))
-    lay.addStretch(1)
+        if isinstance(p, QWidget):
+            lay.addWidget(p)
+        else:                                    # 长句换行，不把对话区撑出横向滚动条
+            lab = label(str(p), "Muted", wrap=True)
+            lab.setMinimumWidth(10)
+            lay.addWidget(lab, 1)
+    lay.addStretch(0)
     if bg:
         w.setStyleSheet(f"background: {T()['bg']}; border-radius: 10px;")
     return w
@@ -178,6 +184,7 @@ def line_widget(*parts, indent: int = 36, bg: bool = False) -> QWidget:
 class ChatPage(QWidget):
     open_designer = Signal(str)          # /workflow 指令转给设计器
     review_rules = Signal(dict, object)  # 规则等人确认：交给硬件页，确认完调用回调（DECISIONS 第 100 条）
+    run_done = Signal()                  # 一次运行结束（规则可能入库了，硬件页要重新读）
 
     def __init__(self, project: Path, parent=None):
         super().__init__(parent)
@@ -294,14 +301,18 @@ class ChatPage(QWidget):
         send.setObjectName("Send")
         send.setToolTip("发送（Ctrl+Enter）")
         send.clicked.connect(self.send)
-        cl.addLayout(hbox(self.flow_combo, self.task_combo, self.rule_combo, self.cfg_combo, self.tier_combo,
-                          self.think_combo, "stretch", send, spacing=6))
+        opts = QWidget()                                 # 选项放不下就换行，不撑大面板的最小宽度
+        flow = FlowLayout(opts, spacing=6)
+        for w in (self.flow_combo, self.task_combo, self.rule_combo, self.cfg_combo, self.tier_combo, self.think_combo):
+            flow.addWidget(w)
+        opts.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        cl.addLayout(hbox(opts, send, spacing=6))
         flow_pref = QSettings().value("chat/flow", "embedded")
         self.flow_combo.setCurrentIndex(max(0, self.flow_combo.findData(flow_pref)))
         self.flow_combo.currentIndexChanged.connect(self._flow_changed)
         mid.lay.addWidget(comp)
         # 固定最小宽度会盖过布局算出的最小值，窄了下拉框就压到发送按钮上；取两者较大的
-        mid.setMinimumWidth(max(380, mid.lay.minimumSize().width()))
+        mid.setMinimumWidth(380)
 
         # 右：模块图 + 详情
         right = GripSplitter(Qt.Vertical)
@@ -717,6 +728,8 @@ class ChatPage(QWidget):
             else:
                 self.backend.start(spec=spec, name="gui", rule_mode=mode, **kw)
         except Exception as exc:
+            from .runner import BOARD_USERS
+            BOARD_USERS.discard(self.backend)
             self.add_line(f"没能开始运行：{exc}", bg=True)
             self.backend = None
             self.stop_btn.setVisible(False)
@@ -752,6 +765,7 @@ class ChatPage(QWidget):
             text += "\n\n隐藏测试只给评测判定用，任何 Agent 都看不到。"
             self.add_agent("FirmForge", "reviewer", text)
         self.refresh_status(self._run_text())
+        self.run_done.emit()
         self.input.setPlaceholderText("点模块看每一次的检查结果、上板测试和代码；要换需求就点\"新对话\"" if self.embedded else
                                       "可以追问结果，例如\"为什么 pdu 第一次没过\"；也可以提新的修改要求")
         self.refresh_sessions()
@@ -851,7 +865,7 @@ class ChatPage(QWidget):
             cfg = str(d.get("config", "")).split("/", 1)[-1]
             self.add_line(f"开始运行，规则：{dict(RULE_MODES).get(cfg, cfg)}，板子 {d.get('board', '')}")
         elif t == "rules_started":
-            self.add_agent("rules", "analyst", f"规则库还缺这些范围的规则：{'、'.join(d.get('todo', []) or d.get('scopes', []))}，"
+            self.add_agent("rules", "rules", f"规则库还缺这些范围的规则：{'、'.join(d.get('todo', []) or d.get('scopes', []))}，"
                            "开始查资料提炼。")
         elif t == "rules_round_done":
             self.add_line(f"规则第 {d.get('round')} 轮：已核对 {d.get('checked')} 条，退回 {d.get('rejected')} 条"
@@ -863,7 +877,7 @@ class ChatPage(QWidget):
             rows = "\n".join(f"- `{m['id']}`　{UNIT_NAMES.get(m.get('layer'), m.get('layer', ''))}"
                              + (f"，依赖 {'、'.join(m['depends_on'])}" if m.get("depends_on") else "") for m in mods)
             what = "按题目的公共接口固定设计" if d.get("fixed") else f"拆成 {len(mods)} 个模块"
-            self.add_agent("designer", "planner", f"{what}：\n\n{rows}", brief=None if d.get("fixed") else ("call", "designer", node))
+            self.add_agent("designer", "designer", f"{what}：\n\n{rows}", brief=None if d.get("fixed") else ("call", "designer", node))
         elif t == "verify_finished":
             scope = d.get("scope")
             if scope not in ("compliance", "build", "board_test", "host_test"):
@@ -889,6 +903,8 @@ class ChatPage(QWidget):
             if d.get("rule"):
                 text += f"\n\n有争议的规则：`{d['rule']}`"
             self.add_agent("diagnoser", "diagnoser", text, brief=("call", "diagnoser", node))
+        elif t == "design_rejected":
+            self.add_line(f"设计第 {d.get('attempt')} 次没通过检查，带着问题重做：" + "；".join(d.get("problems", [])[:3]), bg=True)
         elif t == "format_retry":
             self.add_line(f"{d.get('agent')} 没按格式交文件（缺 {'、'.join(d.get('missing', []))}），再要一次", bg=True)
         elif t == "human_wait" and node != "rules":

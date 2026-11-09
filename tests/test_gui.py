@@ -175,6 +175,24 @@ class GuiSmokeTest(unittest.TestCase):
         self.assertEqual(hp.pending, [])
         w.close()
 
+    def test_board_is_used_by_one_run_at_a_time(self):
+        # 对话页的上板运行和评测页不能同时用板子（两边会同时烧录同一个串口）
+        from firmforge.embedded.workspace import WorkspaceError
+        from firmforge.gui.runner import BOARD_USERS, claim_board
+
+        class Owner:
+            pass
+        a, b = Owner(), Owner()
+        claim_board(a, "对话页的上板运行")
+        try:
+            with self.assertRaises(WorkspaceError) as cm:
+                claim_board(b, "评测")
+            self.assertIn("对话页的上板运行", str(cm.exception))
+        finally:
+            BOARD_USERS.discard(a)
+        claim_board(b, "评测")
+        BOARD_USERS.discard(b)
+
     def test_eval_page_reads_results(self):
         w = self.window()
         ep = w.evalp
@@ -192,6 +210,8 @@ class GuiSmokeTest(unittest.TestCase):
                      for j in range(1, ep.table.columnCount())}
             self.assertEqual((texts["single"], texts["none"]), ("1 / 1", "0 / 1"))
             self.assertEqual(ep.layers.item(1, 3).text(), "1")              # none 有 1 次卡在上板测试
+            ep._load_dirs()                                                  # 评测结束会重新列目录：自己填的目录不能被换掉
+            self.assertEqual(ep.out_combo.currentText(), Path(d).relative_to(helpers.ROOT).as_posix())
         w.close()
 
     def test_embedded_replay_shows_board_test(self):

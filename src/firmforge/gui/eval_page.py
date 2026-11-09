@@ -13,7 +13,8 @@ from pathlib import Path
 from PySide6.QtCore import QRectF, QSettings, Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QHBoxLayout, QHeaderView, QListWidget,
-                               QProgressBar, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QProgressBar, QPushButton, QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
+                               QWidget)
 
 from ..embedded.board_eval import CONFIGS, load_rows, missing_scopes, plan_todo
 from .runner import EvalBackend
@@ -68,7 +69,7 @@ class EvalPage(QWidget):
         self.tasks = discover_board_tasks(root) if root.is_dir() else []
         self._build()
         self._load_dirs()
-        self.refresh()
+        self.restyle()
 
     # ------------------------------------------------------------ 布局
 
@@ -79,6 +80,17 @@ class EvalPage(QWidget):
         root.addWidget(self.split)
 
         left = Panel(margins=(16, 16, 16, 16))
+        scroll = QScrollArea()                           # 窗口矮时设置区可以滚动，不把预估挤没
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inner = QWidget()
+        inner.setObjectName("ScrollInner")
+        form = QVBoxLayout(inner)
+        form.setContentsMargins(0, 0, 8, 0)
+        form.setSpacing(8)
+        scroll.setWidget(inner)
+        left.lay.addWidget(scroll, 1)
+        outer, left.lay = left.lay, form
         left.lay.addWidget(label("上板评测", "H2"))
         left.lay.addWidget(label("题目", "Faint"))
         self.task_boxes: dict[str, QCheckBox] = {}
@@ -93,11 +105,17 @@ class EvalPage(QWidget):
         left.lay.addWidget(label("配置（每种只比上一种多一样东西）", "Faint"))
         self.cfg_boxes: dict[str, QCheckBox] = {}
         for c in CONFIGS:
-            cb = QCheckBox(f"{c}　{CONFIG_NOTES[c]}")
+            cb = QCheckBox(c)
             cb.setChecked(True)
+            cb.setToolTip(CONFIG_NOTES[c])
             cb.toggled.connect(self.update_plan)
             self.cfg_boxes[c] = cb
-            left.lay.addWidget(cb)
+            note = label(CONFIG_NOTES[c], "Faint", wrap=True)
+            note.setMinimumWidth(20)                     # 说明换行，窄窗口下不被截断
+            row = QHBoxLayout()
+            row.addWidget(cb)
+            row.addWidget(note, 1)
+            left.lay.addLayout(row)
         self.runs = QSpinBox()
         self.runs.setRange(1, 10)
         self.runs.setValue(2)
@@ -114,14 +132,14 @@ class EvalPage(QWidget):
         self.out_combo.currentTextChanged.connect(lambda _: (self.refresh(), self.update_plan()))
         left.lay.addWidget(self.out_combo)
         self.plan = label("", "", wrap=True)
-        self.plan.setStyleSheet(f"background: {T()['bg']}; border-radius: 12px; padding: 10px 12px;")
         left.lay.addWidget(self.plan)
         left.lay.addStretch(1)
+        left.lay = outer
         self.start_btn = QPushButton("开始评测")
         self.start_btn.setObjectName("Primary")
         self.start_btn.clicked.connect(self.start)
         left.lay.addWidget(self.start_btn)
-        left.setMinimumWidth(260)
+        left.setMinimumWidth(300)                         # 再窄"每格跑、上限"那一行就挤不下
 
         mid = Panel(margins=(18, 16, 18, 14))
         self.res_title = label("", "H2")
@@ -129,6 +147,7 @@ class EvalPage(QWidget):
         self.bar = QProgressBar()
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(6)
+
         self.spent = label("", "Mono")
         self.pause_btn = QPushButton("暂停")
         self.pause_btn.setObjectName("Ghost")
@@ -149,7 +168,9 @@ class EvalPage(QWidget):
         mid.lay.addWidget(label("每个小方块是一次运行：绿色通过，红色没通过，灰色跳过，琥珀色正在跑。点方块回放那次运行。", "Faint", wrap=True))
         mid.lay.addWidget(label("没通过的卡在哪一层", "Faint"))
         self.layers = QTableWidget(0, 6)
-        self.layers.setHorizontalHeaderLabels(["配置", "合规", "编译", "上板测试", "隐藏用例通过率", "平均每次（元）"])
+        self.layers.setHorizontalHeaderLabels(["配置", "合规", "编译", "上板测试", "隐藏用例", "每次（元）"])
+        self.layers.horizontalHeaderItem(4).setToolTip("隐藏用例通过率")
+        self.layers.horizontalHeaderItem(5).setToolTip("平均每次运行的花费")
         self.layers.verticalHeader().setVisible(False)
         self.layers.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.layers.setShowGrid(False)
@@ -176,19 +197,32 @@ class EvalPage(QWidget):
     def save_layout(self):
         QSettings().setValue("eval/split", self.split.saveState())
 
+    def restyle(self):
+        """跟着深浅色主题换颜色（启动时和切换主题时调用）。"""
+        c = T()
+        self.bar.setStyleSheet(f"QProgressBar {{ background: {c['line']}; border: none; border-radius: 3px; }}"
+                               f"QProgressBar::chunk {{ background: {c['accent']}; border-radius: 3px; }}")
+        self.plan.setStyleSheet(f"background: {c['bg']}; border-radius: 12px; padding: 10px 12px;")
+        self.refresh()
+
     # ------------------------------------------------------------ 数据
 
     def _load_dirs(self):
+        """列出 results/ 下已有的评测目录；当前选的或自己填的目录保留，不会被换掉
+        （换掉的话"再开始接着跑"会跑到别的目录去）。"""
+        keep = self.out_combo.currentText().strip() if self.out_combo.count() else ""
         res = self.project / "results"
         dirs = sorted((p for p in res.iterdir() if (p / "runs.jsonl").is_file()), key=lambda p: p.stat().st_mtime,
                       reverse=True) if res.is_dir() else []
         new = f"results/board_{date.today():%Y%m%d}"
-        items = [str(p.relative_to(self.project)) for p in dirs]
-        if new not in items:
-            items.insert(0, new)
+        items = [p.relative_to(self.project).as_posix() for p in dirs]
+        for x in (new, keep):
+            if x and x not in items:
+                items.insert(0, x)
         self.out_combo.blockSignals(True)
         self.out_combo.clear()
         self.out_combo.addItems(items)
+        self.out_combo.setCurrentText(keep or items[0])
         self.out_combo.blockSignals(False)
 
     @property

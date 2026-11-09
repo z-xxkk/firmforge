@@ -21,6 +21,7 @@ EVENT_TYPES = {
     # 判定与循环
     "verify_started", "verify_finished", "diagnosis", "escalated", "rollback",
     "format_retry",                 # Agent 没按格式交文件，当场补要（嵌入式新流程）
+    "design_rejected",              # 设计分层没通过检查，带着问题重做（嵌入式新流程；界面显示理由）
     # 经验库
     "experience_saved", "experience_used",
     # 工具（DECISIONS 第 63 条）

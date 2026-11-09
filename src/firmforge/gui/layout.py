@@ -12,6 +12,8 @@ EMB_LAYERS = ("compliance", "build", "test")
 EMB_LAYER_NAMES = {"compliance": "合规", "build": "编译", "test": "测试"}
 _EMB_SCOPE = {"compliance": "compliance", "build": "build", "board_test": "test", "host_test": "test"}
 UNIT_NAMES = {"hardware": "硬件层，上板", "logic": "逻辑层，电脑上测"}
+# 这些事件的 node_id 是流程里的步骤，不是模块，不画进模块图
+NOT_MODULES = ("plan", "confirm_plan", "integrate", "design", "rules", "facts")
 
 
 def layer_names(keys: tuple[str, ...]) -> dict[str, str]:
@@ -106,7 +108,7 @@ class RunView:
                 for mid in list(self.modules):
                     if mid not in keep and self.modules[mid].status not in ("done",):
                         self.modules[mid].status = "skipped"
-        elif node and node not in ("plan", "confirm_plan", "integrate") and t in (
+        elif node and node not in NOT_MODULES and t in (
                 "node_ready", "node_assigned", "agent_started", "verify_started", "verify_finished",
                 "node_done", "node_failed", "escalated", "rollback"):
             mv = self.module(node)
