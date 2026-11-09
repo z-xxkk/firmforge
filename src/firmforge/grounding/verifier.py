@@ -136,7 +136,11 @@ class RuleVerifier:
         elif self.semantic is None:
             add(4, "unknown", "没有配置核对 Agent，交给人工确认时重点看")
         else:
-            ok, why = self.semantic(rule, doc.page(rule.cite.page))
+            page_text = doc.page(rule.cite.page)
+            layout = doc.page_layout(rule.cite.page)
+            if layout:                                   # 表格的列对齐只在按版面的文字里（DECISIONS 第 98 条）
+                page_text += "\n\n【同一页按版面排列，保留表格的列对齐】\n" + layout
+            ok, why = self.semantic(rule, page_text)
             add(4, "ok" if ok else "wrong", why)
         return res
 

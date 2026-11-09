@@ -94,6 +94,25 @@ class SourcesTest(unittest.TestCase):
         self.assertTrue(quote_found(table, 1, "GPIO18 USB_D-"))
         self.assertTrue(quote_found(table, 1, "GPIO18 USB_D- 26 GPIO19"))
 
+    def test_layout_text_keeps_table_columns(self):
+        # 逐字文本丢了表格的列位置（实测 max30102-ds p.12：看不出 DIE_TEMP_RDY 在 B1 列），按版面的文字保留（DECISIONS 第 98 条）
+        plain = "Interrupt \nStatus 2\nDIE_ \nTEMP_RDY 0x01 0x00 R"
+        layout = ("   REGISTER   B7   B6   B5   B4   B3   B2      B1        B0    REG\n"
+                  "     Interrupt                              DIE_               0x01\n"
+                  "     Status 2                            TEMP_RDY")
+        doc = Document("max", "MAX30102", "pdf", "official_manual", pages=(plain,), layout=(layout,))
+        self.assertEqual(doc.page_layout(1), layout)
+        self.assertEqual(doc.page_layout(None), "")
+        self.assertTrue(quote_found(doc, 1, "DIE_ TEMP_RDY 0x01 0x00 R"))           # 逐字文本里的原文照样认
+        self.assertTrue(quote_found(doc, 1, "B2 B1 B0 REG"))                        # 只在按版面文字里的原文也认
+        self.assertFalse(quote_found(Document("max", "M", "pdf", "official_manual", pages=(plain,)), 1, "B2 B1 B0 REG"))
+        with tempfile.TemporaryDirectory() as d:                                  # 存了再读不丢
+            lib = SourceLibrary(Path(d))
+            lib.add(doc)
+            lib.save()
+            self.assertTrue((Path(d) / "cache" / "max.layout.json").is_file())
+            self.assertEqual(SourceLibrary.load(Path(d)).get("max").layout, (layout,))
+
     def test_library_round_trip_and_load_text(self):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "i2c_master.h"

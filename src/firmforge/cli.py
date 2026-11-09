@@ -842,6 +842,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--tier", choices=["fast", "strong"], default="fast",
                    help="所有 Agent 用这一档（默认 fast；四种配置用同一个模型才能比较）")
     s.add_argument("--think", choices=["off", "low", "high", "max"], default="low", help="思考强度（默认 low）")
+    s.add_argument("--rules", help="verified 改用这份规则库（默认 硬件目录/rules.json），例如做案例用的副本")
     s.add_argument("--plan", action="store_true", help="只列出要跑多少次、verified 缺哪些规则，不调用模型")
     s.add_argument("--max-cost", type=float, required=True,
                    help="这次最多花多少元（按缓存未命中价估算）；累计达到就不再开始新的运行，已跑的结果照常保存")
@@ -855,6 +856,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--tier", choices=["fast", "strong"], help="查资料、核对 Agent 用这一档（默认按 Agent 的设置）；"
                    "给评测用的规则库要和 board-eval 用同一档")
     s.add_argument("--think", choices=["off", "low", "high", "max"], help="思考强度（默认按 Agent 的设置）")
+    s.add_argument("--rules", help="改用这份规则库（默认 硬件目录/rules.json），例如做案例用的副本")
     s.set_defaults(func=cmd_rules)
     s = sub.add_parser("agents", help="列出注册的 Agent：角色、版本、档位、技能、工具、记忆、历史表现")
     s.add_argument("--role", help="只看某个角色，如 coder")
@@ -900,8 +902,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 # ---------------------------------------------------------------- 资料与规则（DECISIONS 第 66、67 条）
 
-def _hw_context(hw: str, *, need_sources: bool = True):
-    """读硬件目录：profile.json、sources.toml、rules.json；原件在 .ff_sources/raw，取出的文字缓存在 .ff_sources/library。"""
+def _hw_context(hw: str, *, need_sources: bool = True, rules: str | None = None):
+    """读硬件目录：profile.json、sources.toml、rules.json；原件在 .ff_sources/raw，取出的文字缓存在 .ff_sources/library。
+    rules 给了就改用这份规则库（例如做案例用的副本，正式规则库不动）。"""
     from .grounding.idf import IdfTree
     from .grounding.profile import HardwareProfile
     from .grounding.rules import RuleSet
@@ -914,7 +917,10 @@ def _hw_context(hw: str, *, need_sources: bool = True):
     profile = HardwareProfile.load(hwdir / "profile.json")
     raw, cache = Path(".ff_sources") / "raw", Path(".ff_sources") / "library"
     library = load_manifest(hwdir / "sources.toml", raw, cache) if need_sources else SourceLibrary.load(cache)
-    store = RuleSet.load(hwdir / "rules.json")
+    rules_path = Path(rules) if rules else hwdir / "rules.json"
+    if rules and not rules_path.is_file():
+        raise UsageError(f"找不到规则库 {rules_path}")
+    store = RuleSet.load(rules_path)
     try:
         idf = IdfTree(idf_path())
     except FileNotFoundError:
@@ -963,7 +969,8 @@ def _print_rule_event(e: dict) -> None:
 
 def cmd_rules(args) -> int:
     from .grounding.verifier import RuleVerifier
-    hwdir, profile, library, store, idf, svd = _hw_context(args.hw, need_sources=args.action != "list")
+    hwdir, profile, library, store, idf, svd = _hw_context(args.hw, need_sources=args.action != "list", rules=args.rules)
+    rules_path = Path(args.rules) if args.rules else hwdir / "rules.json"
     if args.action == "list":
         rules = store.select(set(args.scopes.split(",")) if args.scopes else None)
         for r in rules:
@@ -1015,14 +1022,14 @@ def cmd_rules(args) -> int:
     try:
         out = builder.run([s.strip() for s in args.scopes.split(",") if s.strip()])
     finally:                                                        # 中途出错或中断，已入库的规则也保存
-        store.save(hwdir / "rules.json")
+        store.save(rules_path)
         print(f"\n调用模型 {meter.calls} 次，token {meter.prompt_tokens}+{meter.completion_tokens}，"
               f"约 {meter.cost:.2f} 元（按缓存未命中价估算）；调用日志：{rd.path}")
     print(f"新入库 {len(out.trusted)} 条，复用 {len(out.reused)} 条，待确认 {len(out.pending)} 条，"
           f"仍被退回 {len(out.rejected)} 条")
     for m in out.missing:
         print(f"缺项：{m}")
-    print(f"规则库：{hwdir / 'rules.json'}")
+    print(f"规则库：{rules_path}")
     return EXIT_PASS if out.ok else EXIT_FAIL
 
 
@@ -1086,7 +1093,8 @@ def cmd_board_eval(args) -> int:
     root = Path(args.tasks_dir)
     tasks = (discover_board_tasks(root) if args.tasks == "all"
              else [load_board_task(root / t.strip()) for t in args.tasks.split(",") if t.strip()])
-    hwdir, profile, library, store, _, _ = _hw_context(args.hw, need_sources="unverified" in configs)
+    hwdir, profile, library, store, _, _ = _hw_context(args.hw, need_sources="unverified" in configs, rules=args.rules)
+    rules_path = Path(args.rules) if args.rules else hwdir / "rules.json"
     print(f"{len(tasks)} 道题 × {len(configs)} 种配置 × {args.runs} 次 = {len(tasks) * len(configs) * args.runs} 次运行")
     print(f"花费上限 {args.max_cost:.2f} 元：累计达到后不再开始新的运行；所有 Agent 用 {args.tier} 档、思考强度 {args.think}、"
           f"最多尝试 {args.max_attempts} 次")
@@ -1094,7 +1102,7 @@ def cmd_board_eval(args) -> int:
         for t in tasks:
             miss = missing_scopes(store, t.scopes)
             if miss:
-                print(f"  verified 会跳过 {t.id}：{hwdir / 'rules.json'} 里没有 {'、'.join(miss)} 的已确认规则")
+                print(f"  verified 会跳过 {t.id}：{rules_path} 里没有 {'、'.join(miss)} 的已确认规则")
     if args.plan:
         return EXIT_PASS
     try:

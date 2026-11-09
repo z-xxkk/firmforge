@@ -3,6 +3,7 @@
 import gzip
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 import helpers  # noqa: F401
@@ -149,6 +150,18 @@ class VerifierTest(unittest.TestCase):
             cite = good_rules().rules[rid].cite
             self.assertEqual(page, lib.get(cite.doc).page(cite.page))
         self.assertTrue(all(r.status == "checked" for r in rep.checked_rules()))
+
+    def test_semantic_check_sees_layout_text(self):
+        # 核对 Agent 也要看到按版面的文字，否则核对不了"某一位在哪一列"（DECISIONS 第 98 条）
+        lib = make_library()
+        ps = lib.get("mpu6050-ps")
+        lib.docs["mpu6050-ps"] = replace(ps, layout=("", "SLEEP   B6   列对齐的版面文字"))
+        v = RuleVerifier(lib, make_profile(**{"i2c0.sda": 8, "i2c0.scl": 9}), idf=self.idf, svd=self.svd,
+                         semantic=self.semantic)
+        v.run(RuleSet([good_rules().rules["R-IMU-002"]]))
+        page = dict(self.seen_pages)["R-IMU-002"]
+        self.assertIn("The device will come up in sleep mode", page)
+        self.assertIn("列对齐的版面文字", page)
 
     def test_each_step_rejects(self):
         rules = RuleSet([

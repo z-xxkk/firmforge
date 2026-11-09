@@ -121,3 +121,20 @@ class CliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RulesCopyCliTest(unittest.TestCase):
+    def test_rules_option_uses_copy(self):
+        # --rules 改用规则库副本（做案例用，正式规则库不动；DECISIONS 第 98 条）
+        root = Path(__file__).resolve().parents[1]
+        hw = root / "hardware" / "esp32c3_supermini"
+        data = json.loads((hw / "rules.json").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as d:
+            copy = Path(d) / "rules.json"
+            copy.write_text(json.dumps(data[:1], ensure_ascii=False), encoding="utf-8")
+            code, out, _ = _run_cli("rules", "list", "--hw", str(hw), "--rules", str(copy))
+            self.assertEqual(code, 0)
+            self.assertIn("共 1 条", out)
+            code, _, err = _run_cli("rules", "list", "--hw", str(hw), "--rules", str(Path(d) / "nope.json"))
+            self.assertNotEqual(code, 0)
+            self.assertIn("找不到规则库", err)

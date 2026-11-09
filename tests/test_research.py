@@ -38,6 +38,19 @@ class PageIndexTest(unittest.TestCase):
             TOOLS["doc_search"].execute({"query": "x"}, ToolContext())
         self.assertIn("没有找到", TOOLS["doc_search"].execute({"query": "zzzqqq"}, ctx))
 
+    def test_doc_page_shows_layout_text(self):
+        # PDF 有按版面的文字时，doc_page 两段都给：逐字文本 + 保留列对齐的版面文字（DECISIONS 第 98 条）
+        from firmforge.grounding.sources import Document, SourceLibrary
+        lib = SourceLibrary(make_library().root)
+        lib.add(Document("max", "MAX30102", "pdf", "official_manual", pages=("Status 2 DIE_ TEMP_RDY 0x01",),
+                         layout=("B7  B6  B1  B0\n        DIE_\n      TEMP_RDY",)))
+        out = TOOLS["doc_page"].execute({"doc": "max", "page": 1}, ToolContext(library=lib))
+        self.assertIn("【逐字文本】", out)
+        self.assertIn("【按版面排列】", out)
+        self.assertLess(out.index("Status 2 DIE_"), out.index("B7  B6  B1  B0"))
+        plain = TOOLS["doc_page"].execute({"doc": "esp32s3-ds", "page": 2}, ToolContext(library=make_library()))
+        self.assertNotIn("按版面", plain)                                       # 没有版面文字就照旧
+
 
 class ResearchMessagesTest(unittest.TestCase):
     def test_first_round_and_feedback(self):

@@ -64,6 +64,8 @@ class Document:
     version: str = ""
     sha256: str = ""
     pages: tuple[str, ...] = field(default=(), repr=False)
+    # PDF 按版面提取的文字：保留表格的列对齐，寄存器表里某个位在哪一列（B7…B0）只有这样才看得出（DECISIONS 第 98 条）
+    layout: tuple[str, ...] = field(default=(), repr=False)
 
     def __post_init__(self):
         if self.kind not in KINDS:
@@ -80,6 +82,12 @@ class Document:
         if not 1 <= n <= len(self.pages):
             raise SourceError(f"{self.id} 没有第 {n} 页（共 {len(self.pages)} 页）")
         return self.pages[n - 1]
+
+    def page_layout(self, n: int | None) -> str:
+        """按版面提取的那一页；没有（不是 PDF，或旧缓存）就是空字符串。"""
+        if not self.layout or n is None or not 1 <= n <= len(self.layout):
+            return ""
+        return self.layout[n - 1]
 
 
 def file_sha256(path: Path) -> str:
@@ -101,17 +109,35 @@ def extract_pdf_pages(path: Path) -> tuple[str, ...]:
     return tuple((p.extract_text() or "") for p in reader.pages)
 
 
+def extract_pdf_layout(path: Path) -> tuple[str, ...]:
+    """按版面提取：用空格把文字摆回原来的列。旋转的文字会丢，所以只作补充，逐字文本照样保留。"""
+    from pypdf import PdfReader
+    import logging
+    logging.getLogger("pypdf").setLevel(logging.ERROR)
+    reader = PdfReader(str(path))
+    out = []
+    for p in reader.pages:
+        try:
+            text = p.extract_text(extraction_mode="layout") or ""
+        except Exception:                                   # noqa: BLE001  个别页排版取不出来就留空，不影响逐字文本
+            text = ""
+        out.append("\n".join(line.rstrip() for line in text.splitlines()))
+    return tuple(out)
+
+
 def load_document(path: Path, *, id: str, title: str, kind: str, tier: str, url: str = "",
                   version: str = "") -> Document:
     path = Path(path)
     if not path.is_file():
         raise SourceError(f"{id}：找不到文件 {path}")
+    layout: tuple[str, ...] = ()
     if kind == "pdf":
         pages = extract_pdf_pages(path)
+        layout = extract_pdf_layout(path)
     else:
         pages = (path.read_text(encoding="utf-8", errors="replace"),)
     return Document(id=id, title=title, kind=kind, tier=tier, url=url, version=version,
-                    sha256=file_sha256(path), pages=pages)
+                    sha256=file_sha256(path), pages=pages, layout=layout)
 
 
 # ---------------------------------------------------------------- 引用核对
@@ -137,9 +163,10 @@ def quote_found(doc: Document, page: int | None, quote: str) -> bool:
     segments = [s for s in re.split(r"…|\.\.\.", normalize(quote)) if s.strip()]
     if not segments:
         return False
-    text = doc.page(page)
-    # 两种都试：去掉断行连字符（regis-\nter）和保留原样（表格里行尾本来就有的连字符，例如 USB_D-）
-    return any(_in_order(_squash(normalize(text, j)), segments) for j in (True, False))
+    texts = [doc.page(page)] + ([doc.page_layout(page)] if doc.page_layout(page) else [])
+    # 两种都试：去掉断行连字符（regis-\nter）和保留原样（表格里行尾本来就有的连字符，例如 USB_D-）；
+    # 逐字文本和按版面的文字也都试（表格里的一行在两种提取里顺序不同）
+    return any(_in_order(_squash(normalize(text, j)), segments) for text in texts for j in (True, False))
 
 
 def _in_order(hay: str, segments: list[str]) -> bool:
@@ -177,9 +204,13 @@ class SourceLibrary:
         for d in self.docs.values():
             m = asdict(d)
             pages = m.pop("pages")
+            layout = m.pop("layout")
             meta.append(m)
             (self.root / "cache" / f"{d.id}.json").write_text(json.dumps(pages, ensure_ascii=False),
                                                               encoding="utf-8")
+            if layout:
+                (self.root / "cache" / f"{d.id}.layout.json").write_text(json.dumps(layout, ensure_ascii=False),
+                                                                         encoding="utf-8")
         (self.root / "sources.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n",
                                                 encoding="utf-8")
 
@@ -191,7 +222,9 @@ class SourceLibrary:
             for m in json.loads(meta_path.read_text(encoding="utf-8")):
                 cache = Path(root) / "cache" / f"{m['id']}.json"
                 pages = tuple(json.loads(cache.read_text(encoding="utf-8"))) if cache.is_file() else ()
-                lib.add(Document(**m, pages=pages))
+                lay = Path(root) / "cache" / f"{m['id']}.layout.json"
+                layout = tuple(json.loads(lay.read_text(encoding="utf-8"))) if lay.is_file() else ()
+                lib.add(Document(**m, pages=pages, layout=layout))
         return lib
 
 
@@ -208,7 +241,7 @@ def load_manifest(manifest: Path, raw_dir: Path, cache_root: Path) -> SourceLibr
         meta = {k: d.get(k, "") for k in ("id", "title", "kind", "tier", "url", "version")}
         want = d.get("sha256", "")
         old = cached.docs.get(meta["id"])
-        if old is not None and old.sha256 == want and old.pages:
+        if old is not None and old.sha256 == want and old.pages and (meta["kind"] != "pdf" or old.layout):
             lib.add(old)
             continue
         path = Path(raw_dir) / d["file"]
