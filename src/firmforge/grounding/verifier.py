@@ -140,6 +140,9 @@ class RuleVerifier:
             layout = doc.page_layout(rule.cite.page)
             if layout:                                   # 表格的列对齐只在按版面的文字里（DECISIONS 第 98 条）
                 page_text += "\n\n【同一页按版面排列，保留表格的列对齐】\n" + layout
+            bits = doc.page_bits(rule.cite.page)
+            if bits:                                     # 平台按坐标算的位标注，不是原文（DECISIONS 第 99 条）
+                page_text += "\n\n【同一页的寄存器位标注，平台按 PDF 坐标算出，不是原文】\n" + bits
             ok, why = self.semantic(rule, page_text)
             add(4, "ok" if ok else "wrong", why)
         return res

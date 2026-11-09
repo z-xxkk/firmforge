@@ -100,7 +100,7 @@ class SourcesTest(unittest.TestCase):
         layout = ("   REGISTER   B7   B6   B5   B4   B3   B2      B1        B0    REG\n"
                   "     Interrupt                              DIE_               0x01\n"
                   "     Status 2                            TEMP_RDY")
-        doc = Document("max", "MAX30102", "pdf", "official_manual", pages=(plain,), layout=(layout,))
+        doc = Document("max", "MAX30102", "pdf", "official_manual", pages=(plain,), layout=(layout,), bits=("B1",))
         self.assertEqual(doc.page_layout(1), layout)
         self.assertEqual(doc.page_layout(None), "")
         self.assertTrue(quote_found(doc, 1, "DIE_ TEMP_RDY 0x01 0x00 R"))           # 逐字文本里的原文照样认
@@ -112,6 +112,30 @@ class SourcesTest(unittest.TestCase):
             lib.save()
             self.assertTrue((Path(d) / "cache" / "max.layout.json").is_file())
             self.assertEqual(SourceLibrary.load(Path(d)).get("max").layout, (layout,))
+            self.assertEqual(SourceLibrary.load(Path(d)).get("max").bits, ("B1",))
+
+    def test_bit_notes_from_cell_coordinates(self):
+        # 按每格文字的坐标标出单个位在第几位（DECISIONS 第 99 条）；坐标取自 max30102-ds 第 12 页的寄存器表
+        from firmforge.grounding.sources import bit_notes
+        f = 8.07
+        head = [(66.5, 625.2, f, "REGISTER")] + [(x, 625.2, f, f" B{b}") for b, x in
+                                                  zip(range(7, -1, -1), (133.9, 175.9, 219.0, 262.0, 306.0, 350.0, 393.8, 440.4))]
+        status2 = [(72.1, 576.0, f, "Interrupt"), (390.0, 576.0, f, "DIE_"), (471.7, 570.5, f, " 0x01"),
+                   (506.1, 570.5, f, " 0x00"), (72.4, 565.0, f, "Status 2"), (377.0, 565.0, f, "TEMP_RDY")]
+        self.assertEqual(bit_notes(head + status2), ["Interrupt Status 2（0x01）：B1 = DIE_TEMP_RDY"])
+        # 一整行连成一段文字（MPU6050 寄存器表的样子）：格子没分开，不标
+        whole = [(48.0, 576.0, f, "3A 58 INT_STATUS  R - MOT_INT  -  FIFO_OFLOW_INT  I2C_MST_INT  -  -  DATA_RDY_INT"),
+                 (471.7, 576.0, f, " 0x3A")]
+        self.assertEqual(bit_notes(head + whole), [])
+        # 同一寄存器两个字段落到同一位：对不准，整行不标
+        clash = status2 + [(395.0, 576.0, f, "OTHER")]
+        self.assertNotIn("B1 = DIE_TEMP_RDY", "\n".join(bit_notes(head + clash)))
+        # 多位字段只列名字，不说占哪几位
+        multi = [(72.1, 540.0, f, "FIFO Write"), (300.0, 540.0, f, " FIFO_WR_PTR[4:0]"), (471.7, 540.0, f, " 0x04")]
+        self.assertIn("多位字段 FIFO_WR_PTR[4:0]", bit_notes(head + multi)[0])
+        # 位标注不是原文，不能当引用
+        doc = Document("max", "M", "pdf", "official_manual", pages=("x",), bits=("Interrupt Status 2（0x01）：B1 = DIE_TEMP_RDY",))
+        self.assertFalse(quote_found(doc, 1, "B1 = DIE_TEMP_RDY"))
 
     def test_library_round_trip_and_load_text(self):
         with tempfile.TemporaryDirectory() as d:

@@ -102,13 +102,17 @@ def _doc_page(args: dict, ctx: ToolContext) -> str:
     if len(text) > PAGE_CHARS:
         text = text[:PAGE_CHARS] + f"\n……（本页过长，只显示前 {PAGE_CHARS} 字）"
     layout = doc.page_layout(int(page)) if page not in (None, "") else ""
+    bits = doc.page_bits(int(page)) if page not in (None, "") else ""
+    # 寄存器位标注是平台按 PDF 坐标算的，不是原文（DECISIONS 第 99 条）
+    tail = (f"\n\n【寄存器位标注】（平台按 PDF 里每格文字的坐标算出，只标能对准的单个位；不是手册原文，"
+            f"不能当引用；与正文冲突时以正文为准）\n{bits}") if bits else ""
     if not layout:
-        return f"{head}\n\n{text}"
+        return f"{head}\n\n{text}{tail}"
     if len(layout) > PAGE_CHARS:
         layout = layout[:PAGE_CHARS] + f"\n……（本页过长，只显示前 {PAGE_CHARS} 字）"
     # 逐字文本丢了表格的列位置；按版面的文字保留列对齐，寄存器的位在哪一列（B7…B0）看这一段（DECISIONS 第 98 条）
     return (f"{head}\n\n【逐字文本】\n{text}\n\n【按版面排列】（保留表格的列对齐：寄存器某一位在哪一列看这一段；"
-            f"旋转的文字可能缺失。引用原文可以从任一段摘抄）\n{layout}")
+            f"旋转的文字可能缺失。引用原文可以从任一段摘抄）\n{layout}{tail}")
 
 
 SOURCE_TOOLS = (

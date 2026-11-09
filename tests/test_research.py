@@ -48,6 +48,12 @@ class PageIndexTest(unittest.TestCase):
         self.assertIn("【逐字文本】", out)
         self.assertIn("【按版面排列】", out)
         self.assertLess(out.index("Status 2 DIE_"), out.index("B7  B6  B1  B0"))
+        lib.add(Document("max2", "MAX30102", "pdf", "official_manual", pages=("p",), layout=("p",),
+                         bits=("Interrupt Status 2（0x01）：B1 = DIE_TEMP_RDY",)))
+        out = TOOLS["doc_page"].execute({"doc": "max2", "page": 1}, ToolContext(library=lib))
+        self.assertIn("【寄存器位标注】", out)                                  # 平台算的位标注，标明不是原文
+        self.assertIn("B1 = DIE_TEMP_RDY", out)
+        self.assertIn("不是手册原文", out)
         plain = TOOLS["doc_page"].execute({"doc": "esp32s3-ds", "page": 2}, ToolContext(library=make_library()))
         self.assertNotIn("按版面", plain)                                       # 没有版面文字就照旧
 

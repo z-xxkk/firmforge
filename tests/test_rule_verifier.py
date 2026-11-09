@@ -155,13 +155,14 @@ class VerifierTest(unittest.TestCase):
         # 核对 Agent 也要看到按版面的文字，否则核对不了"某一位在哪一列"（DECISIONS 第 98 条）
         lib = make_library()
         ps = lib.get("mpu6050-ps")
-        lib.docs["mpu6050-ps"] = replace(ps, layout=("", "SLEEP   B6   列对齐的版面文字"))
+        lib.docs["mpu6050-ps"] = replace(ps, layout=("", "SLEEP   B6   列对齐的版面文字"), bits=("", "PWR_MGMT_1（0x6B）：B6 = SLEEP"))
         v = RuleVerifier(lib, make_profile(**{"i2c0.sda": 8, "i2c0.scl": 9}), idf=self.idf, svd=self.svd,
                          semantic=self.semantic)
         v.run(RuleSet([good_rules().rules["R-IMU-002"]]))
         page = dict(self.seen_pages)["R-IMU-002"]
         self.assertIn("The device will come up in sleep mode", page)
         self.assertIn("列对齐的版面文字", page)
+        self.assertIn("B6 = SLEEP", page)                                   # 位标注也给核对 Agent
 
     def test_each_step_rejects(self):
         rules = RuleSet([

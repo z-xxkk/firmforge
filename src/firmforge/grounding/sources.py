@@ -66,6 +66,8 @@ class Document:
     pages: tuple[str, ...] = field(default=(), repr=False)
     # PDF 按版面提取的文字：保留表格的列对齐，寄存器表里某个位在哪一列（B7…B0）只有这样才看得出（DECISIONS 第 98 条）
     layout: tuple[str, ...] = field(default=(), repr=False)
+    # 每页的寄存器位标注："寄存器（地址）：B1 = DIE_TEMP_RDY"，平台按 PDF 里每格文字的坐标算出，不是原文，不能当引用
+    bits: tuple[str, ...] = field(default=(), repr=False)
 
     def __post_init__(self):
         if self.kind not in KINDS:
@@ -88,6 +90,11 @@ class Document:
         if not self.layout or n is None or not 1 <= n <= len(self.layout):
             return ""
         return self.layout[n - 1]
+
+    def page_bits(self, n: int | None) -> str:
+        if not self.bits or n is None or not 1 <= n <= len(self.bits):
+            return ""
+        return self.bits[n - 1]
 
 
 def file_sha256(path: Path) -> str:
@@ -125,19 +132,125 @@ def extract_pdf_layout(path: Path) -> tuple[str, ...]:
     return tuple(out)
 
 
+# ---------------------------------------------------------------- 寄存器位标注
+
+_BIT_HEAD = re.compile(r"^(?:B|Bit ?|BIT ?)([0-7])$")
+_IDENT = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*")
+_HEXADDR = re.compile(r"0[xX][0-9A-Fa-f]{1,4}")
+
+
+def _width(text: str, size: float) -> float:
+    """估算一段文字的宽度（点）：PDF 不直接给宽度，按常见无衬线字体的平均字宽估。"""
+    return sum(0.28 if ch == " " else 0.6 for ch in text) * size
+
+
+def bit_notes(runs: list[tuple[float, float, float, str]]) -> list[str]:
+    """runs：一页里每段文字的（x, y, 字号, 原样文字）。找出表头是 B7…B0 的寄存器表，
+    按每格文字的中心落在哪一列，标出单个位的字段在第几位（DECISIONS 第 99 条）。
+    只标有把握的：一整行连成一段文字（例如 MPU6050 的寄存器表）、同一寄存器两个字段落到同一位，都不标。"""
+    items = [(x + _width(s, f) / 2, x, x + _width(s, f), y, f, s.strip()) for x, y, f, s in runs if s.strip()]
+    out = []
+    by_y: dict[float, list] = {}
+    for it in items:
+        by_y.setdefault(round(it[3], 1), []).append(it)
+    for y0, row in sorted(by_y.items(), reverse=True):
+        heads = sorted((it for it in row if _BIT_HEAD.match(it[5])), key=lambda it: it[0])
+        if [int(_BIT_HEAD.match(h[5]).group(1)) for h in heads] != list(range(7, -1, -1)):
+            continue
+        cols = [(7 - i, h[0]) for i, h in enumerate(heads)]
+        step = (cols[-1][1] - cols[0][1]) / 7
+        left, right = cols[0][1] - step / 2, cols[-1][1] + step / 2
+        size = heads[0][4]
+        nxt = max((y for y, r in by_y.items() if y < y0 and any(_BIT_HEAD.match(i[5]) for i in r) and
+                   len([i for i in r if _BIT_HEAD.match(i[5])]) == 8), default=-1e9)
+        body = [it for it in items if nxt < it[3] < y0 - size * 0.5]
+        addrs = []                       # 每一行最左边的十六进制数是寄存器地址（右边那个是上电值）
+        for y in sorted({it[3] for it in body}, reverse=True):
+            hexes = sorted((it for it in body if it[3] == y and it[1] > right - step * 0.2 and _HEXADDR.fullmatch(it[5])),
+                           key=lambda it: it[1])
+            if hexes:
+                addrs.append((y, hexes[0][5].replace("X", "x")))
+        names = [it for it in body if it[0] < left]
+        # 从名字列一直伸进位列（或横跨到地址列）的整段文字：这一行的格子没有分开，对不准
+        spans = [it for it in body if (it[0] < left and it[2] > left + step * 0.5) or
+                 (it[1] < right - step and it[2] > right + step and not _HEXADDR.fullmatch(it[5]))]
+        cells = sorted((it for it in body if left <= it[0] <= right and it[2] <= right + step * 0.3),
+                       key=lambda it: -it[3])
+        fields: list[list] = []          # [中心, 左, 右, 最高 y, 最低 y, 文字]
+        for c, l, r, y, f, s in cells:
+            for fd in fields:
+                # 同一格里上下两行拼成一个字段名（DIE_ + TEMP_RDY、FIFO_ + ROLL + OVER_EN）
+                if abs(fd[0] - c) < step / 2 and 0 < fd[4] - y <= f * 1.6 and \
+                        (fd[5].endswith("_") or s.startswith(("_", "[")) or (_IDENT.fullmatch(fd[5]) and _IDENT.fullmatch(s))):
+                    fd[1], fd[2], fd[4], fd[5] = min(fd[1], l), max(fd[2], r), y, fd[5] + s
+                    fd[0] = (fd[1] + fd[2]) / 2
+                    break
+            else:
+                fields.append([c, l, r, y, y, s])
+        groups: dict[str, dict] = {}
+        for c, l, r, ytop, ybot, s in fields:
+            near = [(abs((ytop + ybot) / 2 - ay), a) for ay, a in addrs if ybot - size * 1.2 <= ay <= ytop + size * 1.2]
+            if not near:
+                continue
+            a = min(near)[1]
+            g = groups.setdefault(a, {"top": ytop, "bot": ybot, "single": [], "multi": []})
+            g["top"], g["bot"] = max(g["top"], ytop), min(g["bot"], ybot)
+            if "[" in s:
+                g["multi"].append(s)
+            elif _IDENT.fullmatch(s) and len(s) >= 3 and r - l < step * 1.2:     # 单个字母（如 R/W 表里的 W）不标
+                g["single"].append((min(cols, key=lambda col: abs(col[1] - c))[0], s))
+        for a, g in groups.items():
+            ay = next(y for y, x in addrs if x == a)
+            top, bot = max(g["top"], ay) + size * 0.6, min(g["bot"], ay) - size * 0.6
+            name = " ".join(it[5] for it in sorted(names, key=lambda it: -it[3]) if bot <= it[3] <= top)
+            if any(bot <= it[3] <= top for it in spans):
+                continue                                   # 这一行有跨列的整段文字，对不准
+            single = [(b, s) for b, s in g["single"] if s not in name.split()]
+            if len({b for b, _ in single}) < len(single):
+                single = []                                # 两个字段落到同一位：没对准，整行不标
+            parts = [f"B{b} = {s}" for b, s in sorted(single, reverse=True)]
+            if g["multi"]:
+                parts.append("多位字段 " + "、".join(g["multi"]) + "（跨几列，占哪几位以手册正文为准）")
+            if parts:
+                out.append(f"{name or '寄存器'}（{a}）：" + "；".join(parts))
+    return out
+
+
+def extract_pdf_bits(path: Path) -> tuple[str, ...]:
+    """每页的寄存器位标注（没有寄存器表的页是空字符串）。"""
+    from pypdf import PdfReader
+    import logging
+    logging.getLogger("pypdf").setLevel(logging.ERROR)
+    out = []
+    for p in PdfReader(str(path)).pages:
+        runs = []
+
+        def visit(text, cm, tm, font, size, runs=runs):
+            if text.strip():
+                runs.append((tm[4] * cm[0] + cm[4], tm[5] * cm[3] + cm[5], abs(size * tm[0] * cm[0]) or 1.0, text))
+        try:
+            p.extract_text(visitor_text=visit)
+            out.append("\n".join(bit_notes(runs)))
+        except Exception:                                   # noqa: BLE001  取不出来就不标，不影响原文
+            out.append("")
+    return tuple(out)
+
+
 def load_document(path: Path, *, id: str, title: str, kind: str, tier: str, url: str = "",
                   version: str = "") -> Document:
     path = Path(path)
     if not path.is_file():
         raise SourceError(f"{id}：找不到文件 {path}")
     layout: tuple[str, ...] = ()
+    bits: tuple[str, ...] = ()
     if kind == "pdf":
         pages = extract_pdf_pages(path)
         layout = extract_pdf_layout(path)
+        bits = extract_pdf_bits(path)
     else:
         pages = (path.read_text(encoding="utf-8", errors="replace"),)
     return Document(id=id, title=title, kind=kind, tier=tier, url=url, version=version,
-                    sha256=file_sha256(path), pages=pages, layout=layout)
+                    sha256=file_sha256(path), pages=pages, layout=layout, bits=bits)
 
 
 # ---------------------------------------------------------------- 引用核对
@@ -205,12 +318,16 @@ class SourceLibrary:
             m = asdict(d)
             pages = m.pop("pages")
             layout = m.pop("layout")
+            bits = m.pop("bits")
             meta.append(m)
             (self.root / "cache" / f"{d.id}.json").write_text(json.dumps(pages, ensure_ascii=False),
                                                               encoding="utf-8")
             if layout:
                 (self.root / "cache" / f"{d.id}.layout.json").write_text(json.dumps(layout, ensure_ascii=False),
                                                                          encoding="utf-8")
+            if bits:
+                (self.root / "cache" / f"{d.id}.bits.json").write_text(json.dumps(bits, ensure_ascii=False),
+                                                                       encoding="utf-8")
         (self.root / "sources.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n",
                                                 encoding="utf-8")
 
@@ -224,7 +341,9 @@ class SourceLibrary:
                 pages = tuple(json.loads(cache.read_text(encoding="utf-8"))) if cache.is_file() else ()
                 lay = Path(root) / "cache" / f"{m['id']}.layout.json"
                 layout = tuple(json.loads(lay.read_text(encoding="utf-8"))) if lay.is_file() else ()
-                lib.add(Document(**m, pages=pages, layout=layout))
+                bf = Path(root) / "cache" / f"{m['id']}.bits.json"
+                bits = tuple(json.loads(bf.read_text(encoding="utf-8"))) if bf.is_file() else ()
+                lib.add(Document(**m, pages=pages, layout=layout, bits=bits))
         return lib
 
 
@@ -241,7 +360,7 @@ def load_manifest(manifest: Path, raw_dir: Path, cache_root: Path) -> SourceLibr
         meta = {k: d.get(k, "") for k in ("id", "title", "kind", "tier", "url", "version")}
         want = d.get("sha256", "")
         old = cached.docs.get(meta["id"])
-        if old is not None and old.sha256 == want and old.pages and (meta["kind"] != "pdf" or old.layout):
+        if old is not None and old.sha256 == want and old.pages and (meta["kind"] != "pdf" or (old.layout and old.bits)):
             lib.add(old)
             continue
         path = Path(raw_dir) / d["file"]
