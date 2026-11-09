@@ -1,0 +1,9 @@
+task,config,run,verdict,failed_layer,cases_passed,cases_total,failed_cases,flow_verdict,attempts,tokens,cost,seconds,rules_used,run_dir,note
+mpu6050_drv_idf,single,1,pass,,4,4,,pass,1,12353,0.042131,90.1,0,.ff_runs/20261109-200819-eval-mpu6050_drv_idf-single-1,
+mpu6050_drv_idf,none,1,fail,board_test,3,4,静止时加速度约 1 g、角速度接近 0、温度合理,fail,4,86590,0.244243,330.0,0,.ff_runs/20261109-200949-eval-mpu6050_drv_idf-none-1,
+mpu6050_drv_idf,unverified,1,pass,,4,4,,fail,4,262783,0.423874,318.4,16,.ff_runs/20261109-201519-eval-mpu6050_drv_idf-unverified-1,
+mpu6050_drv_idf,verified,1,fail,board_test,3,4,静止时加速度约 1 g、角速度接近 0、温度合理,fail,4,440837,0.639335,407.2,47,.ff_runs/20261109-202037-eval-mpu6050_drv_idf-verified-1,
+max30102_temp,single,1,fail,board_test,3,5,板上读出的温度合理，且是 1/16 °C 的整数倍；复位器件后第一次读数合理（要等测量真正完成）,pass,1,6019,0.017902,56.8,0,.ff_runs/20261109-202724-eval-max30102_temp-single-1,
+max30102_temp,none,1,fail,board_test,3,5,板上读出的温度合理，且是 1/16 °C 的整数倍；复位器件后第一次读数合理（要等测量真正完成）,fail,4,117022,0.365305,596.6,0,.ff_runs/20261109-202821-eval-max30102_temp-none-1,
+max30102_temp,unverified,1,fail,board_test,2,5,板上读出的温度合理，且是 1/16 °C 的整数倍；复位器件后第一次读数合理（要等测量真正完成）；读温度不改动其他配置,fail,2,92965,0.180346,214.5,15,.ff_runs/20261109-203818-eval-max30102_temp-unverified-1,
+max30102_temp,verified,1,fail,board_test,2,5,板上读出的温度合理，且是 1/16 °C 的整数倍；复位器件后第一次读数合理（要等测量真正完成）；读温度不改动其他配置,fail,4,205314,0.32115,268.1,47,.ff_runs/20261109-204152-eval-max30102_temp-verified-1,

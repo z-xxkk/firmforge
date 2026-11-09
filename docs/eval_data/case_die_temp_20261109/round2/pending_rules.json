@@ -1,0 +1,470 @@
+{
+  "pending": [
+    {
+      "id": "R-MAX-001",
+      "kind": "device",
+      "scope": [
+        "max30102",
+        "i2c"
+      ],
+      "text": "MAX30102 的从机地址是 7 个固定位 0b1010111（0x57），总线上出现的写地址为 0xAE、读地址为 0xAF",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 29,
+        "section": "Table 17. Slave ID Description",
+        "quote": "The MAX30102 slave ID consists of seven fixed bits,"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": {
+        "type": "api_absent",
+        "symbol": "i2c_driver_install"
+      },
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-002",
+      "kind": "sequence",
+      "scope": [
+        "max30102",
+        "i2c"
+      ],
+      "text": "读 MAX30102 寄存器必须做两次 I2C 操作：先发从机地址+寄存器地址，再发 REPEAT START 和读地址；两次之间不能插入 STOP",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 30,
+        "section": "Read Data Format",
+        "quote": "For the read operation, two I2C operations must be performed."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-003",
+      "kind": "peripheral",
+      "scope": [
+        "max30102"
+      ],
+      "text": "FIFO_DATA（0x07）读操作不会自增寄存器地址：一次事务里连续读多个字节就是连续样本数据，不要再按“地址+1”去拼",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "Reading from the FIFO",
+        "quote": "Reading the FIFO_DATA register does not automatically increment the register address."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-004",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "FIFO 是深度 32 的循环缓冲：每个通道信号存 3 字节，SpO2 模式两通道共 6 字节一个样本；数据左对齐，MSB 恒在 bit17",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Structure",
+        "quote": "the MSB bit is always in the bit 17 data position"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-005",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "开始新的 SpO2/心率转换前，手册建议把 FIFO_WR_PTR、OVF_COUNTER、FIFO_RD_PTR 清为 0x00 让 FIFO 处于已知空状态；这是建议，不是硬性要求",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Register",
+        "quote": "it is recommended to first clear the FIFO_WR_PTR, OVF_COUNTER, and FIFO_RD_PTR"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-006",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "读 FIFO 事务成功后 FIFO_RD_PTR 已指向下一个样本，不需要再单独发一次写 FIFO_RD_PTR 的事务；只有读失败要重读样本时才回写",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 17,
+        "section": "Pseudo-Code Example of Reading Data from FIFO",
+        "quote": "and this third transaction is not necessary"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-007",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "MODE[2:0]（0x09 bit2:0）只允许 010=心率（仅 Red）、011=SpO2（Red+IR）、111=Multi-LED；000、001、100–110 手册标 Do not use，禁止写入",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 18,
+        "section": "Table 4. Mode Control",
+        "quote": "100–110 Do not use"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-008",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "0x09 的 RESET（bit6）写 1 触发整体软复位、完成后自清零；该位不会触发 PWR_RDY 中断，复位后不要靠等 PWR_RDY 判断复位完成",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 18,
+        "section": "Mode Configuration (0x09)",
+        "quote": "Note: Setting the RESET bit does not trigger a PWR_RDY interrupt event."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-009",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "0x09 的 SHDN（bit7）置 1 进入省电模式：寄存器保留、读写照常，但所有中断会被清 0；正常采集时该位必须为 0",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 18,
+        "section": "Mode Configuration (0x09)",
+        "quote": "While in power-save mode, all registers retain their values, and write/read operations function as normal. All interrupts are cleared to zero in this mode."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-010",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "测温先置 DIE_TEMP_RDY_EN 再置 TEMP_EN，等 DIE_TEMP_RDY 置位后才读 TINT/TFRAC；TEMP_EN 自清零发生在数据出来之前，不能当完成标志",
+      "cite": {
+        "doc": "board-measured",
+        "page": null,
+        "section": "M-003 MAX30102 片内测温的完成时刻",
+        "quote": "结论：测温要等 DIE_TEMP_RDY（需先置 DIE_TEMP_RDY_EN），不能以 TEMP_EN 自动清零作为测完的标志。"
+      },
+      "tier": "user",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-011",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "温度值 = TINT(0x1F，2 的补码，1 bit=1 °C) + TFRAC(0x20，每步 0.0625 °C)；两个寄存器都要读，小数部分即使配负整数也按正值相加",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 22,
+        "section": "Temperature Data (0x1F–0x21)",
+        "quote": "This register stores the fractional temperature data in increments of 0.0625°C."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-012",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "中断默认全部关闭：要 PPG_RDY/A_FULL/ALC_OVF 就置 Interrupt Enable 1(0x02) 对应位，要 DIE_TEMP_RDY 就置 Interrupt Enable 2(0x03) bit1",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 13,
+        "section": "Interrupt Enable (0x02-0x03)",
+        "quote": "the default condition is that all the interrupts are disabled"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-013",
+      "kind": "peripheral",
+      "scope": [
+        "max30102"
+      ],
+      "text": "中断是读清的：读中断状态寄存器、或读触发该中断的那个寄存器，就会释放中断脚并把状态位清 0；不要把它当持久状态保存",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 13,
+        "section": "Interrupt Enable (0x02-0x03)",
+        "quote": "The interrupts are cleared whenever the interrupt status register is read, or when the register that triggered the interrupt"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-014",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "INT 是低有效开漏输出，必须经上拉电阻（手册建议取大值，如 4.7 kΩ）接到外部电源，最多 +5 V；它不能直连不带上拉",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 24,
+        "section": "Interrupt Pin Functionality",
+        "quote": "The pin is open-drain, which means it normally requires a pullup resistor or current source to an external"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-015",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "PART_ID(0xFF) 的 POR 值为 0x15；REV_ID(0xFE) 是零件修订编号，具体值手册让联系 Maxim 取得，不要假设它的具体数值",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 11,
+        "section": "PART ID",
+        "quote": "for part revision identification"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-016",
+      "kind": "peripheral",
+      "scope": [
+        "max30102"
+      ],
+      "text": "LED 驱动电流由 LED1_PA(0x0C，Red)、LED2_PA(0x0D，IR) 设定：0x00=0.0 mA、0x1F=6.2 mA、0x3F=12.6 mA、0xFF=51.0 mA",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 20,
+        "section": "Table 8. LED Current Control",
+        "quote": "These bits set the current level of each LED as shown in Table 8."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-017",
+      "kind": "timing",
+      "scope": [
+        "max30102"
+      ],
+      "text": "采样率 SPO2_SR[2:0] 与脉宽 LED_PW[1:0] 必须选手册 Table 11 允许的组合；若选的采样率对当前脉宽过高，芯片会自动改成该脉宽下最高可用采样率，别以为写入值生效了",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 19,
+        "section": "Bits 4:2: SpO2 Sample Rate Control",
+        "quote": "If the user selects a sample rate that is too high for the selected LED_PW setting, the highest possible sample rate is programmed instead into the register."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-018",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "Multi-LED 模式的时隙必须按顺序使能：SLOT2 使能时不能把 SLOT1 设为 000（禁用），禁止跳着开时隙",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 21,
+        "section": "Multi-LED Mode Control Registers (0x11–0x12)",
+        "quote": "The slots should be enabled in order (i.e., SLOT1 should not be disabled if SLOT2 is enabled)."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-020",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "FIFO 寄存器组占 0x04–0x07（写指针、溢出计数、读指针、FIFO_DATA）；四个都可读写，但实际运行中只应写 FIFO_RD_PTR，其余由芯片自动维护",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Register",
+        "quote": "in practice only the FIFO_RD_PTR register should be"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-021",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "SpO2 模式启动顺序：先写 MODE[2:0]=0x03 并置 A_FULL_EN，再置 TEMP_EN 和 DIE_TEMP_RDY_EN 发起一次测温，等 DIE_TEMP_RDY 后读温度数据",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 26,
+        "section": "Table 15. Events Sequence for Figure 4 in SpO2 Mode",
+        "quote": "I2C Write Command sets MODE[2:0] = 0x03 and A_FULL_EN."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-022",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "取 FIFO 数据的顺序：先读 FIFO_WR_PTR 和 FIFO_RD_PTR 算出可读样本数（注意指针回绕），再突发读 FIFO_DATA 取满样本，最后按需回写 FIFO_RD_PTR",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 16,
+        "section": "Pseudo-Code Example of Reading Data from FIFO",
+        "quote": "Note: pointer wrap around should be taken into account"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-023",
+      "kind": "peripheral",
+      "scope": [
+        "max30102"
+      ],
+      "text": "FIFO 满后新样本被丢弃、不再写入；OVF_COUNTER 记录丢失样本数并在 0x1F 饱和，样本被弹出（读指针前进）时它自动清 0",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 13,
+        "section": "FIFO Overflow Counter",
+        "quote": "It saturates at 0x1F."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-024",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "片内温度不需要频繁测量：手册称每秒或每几秒测一次就足够，不必每个样本都触发测温",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 26,
+        "section": "Timing in SpO2 Mode",
+        "quote": "The temperature does not need to be sampled very often–once a second or every few seconds"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    }
+  ],
+  "escalated": []
+}

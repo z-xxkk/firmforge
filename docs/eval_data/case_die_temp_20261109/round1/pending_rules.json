@@ -1,0 +1,682 @@
+{
+  "pending": [
+    {
+      "id": "R-GPIO-006",
+      "kind": "pin",
+      "scope": [
+        "gpio",
+        "all"
+      ],
+      "text": "GPIO18/GPIO19 是 USB_D-/USB_D+（USB Serial/JTAG），不要分配给任何外设，板子靠它烧录和通信",
+      "cite": {
+        "doc": "esp32c3-ds",
+        "page": 67,
+        "section": "ESP32-C3 Consolidated Pin Overview",
+        "quote": "25 GPIO18 IO VDD3P3_CPU USB_D- GPIO18 I/O/T GPIO18 I/O/T"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": {
+        "type": "pin_forbidden",
+        "gpio": [
+          18,
+          19
+        ]
+      },
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-GPIO-007",
+      "kind": "pin",
+      "scope": [
+        "gpio",
+        "all"
+      ],
+      "text": "GPIO20/GPIO21 是 U0RXD/U0TXD（芯片启动时输出日志的串口），不要分配给任何外设",
+      "cite": {
+        "doc": "esp32c3-ds",
+        "page": 67,
+        "section": "ESP32-C3 Consolidated Pin Overview",
+        "quote": "27 U0RXD IO VDD3P3_CPU IE, WPU U0RXD I1 GPIO20 I/O/T"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": {
+        "type": "pin_forbidden",
+        "gpio": [
+          20,
+          21
+        ]
+      },
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-001",
+      "kind": "device",
+      "scope": [
+        "max30102",
+        "i2c"
+      ],
+      "text": "MAX30102 的从机 ID 是七个固定位 0b1010111（7 位地址 0x57）；加 R/W 位后的 8 位写地址是 0xAE、读地址是 0xAF",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 29,
+        "section": "Slave Address / Table 17. Slave ID Description",
+        "quote": "The MAX30102 slave ID consists of seven fixed bits, B7–B1 (set to 0b1010111)."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-002",
+      "kind": "sequence",
+      "scope": [
+        "max30102",
+        "i2c"
+      ],
+      "text": "读 MAX30102 寄存器是两次 I2C 操作：先发从机 ID 和要读的寄存器地址，再发 REPEAT START 和读 ID 后取数据",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 30,
+        "section": "Read Data Format",
+        "quote": "For the read operation, two I 2C operations must be performed. First, the slave ID byte is sent followed by the I2C register that you wish to read. Then a REPEAT START (Sr) condition is sent, followed by the read slave ID."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-003",
+      "kind": "peripheral",
+      "scope": [
+        "max30102"
+      ],
+      "text": "读取 FIFO_DATA(0x07) 时寄存器地址指针不自增，在同一事务里连续读就是连续 FIFO 字节，一次读够 3/6 字节组成一个样本",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Register",
+        "quote": "Reading the FIFO_DATA register does not automatically increment the register address."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-004",
+      "kind": "forbidden",
+      "scope": [
+        "max30102"
+      ],
+      "text": "不要在读到 0xFF 之后继续读：地址指针不会回绕到 0x00，后续数据无意义",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "Reading from the FIFO",
+        "quote": "Reading more bytes after the 0xFF register does not advance the address pointer back to 0x00, and the data read is not meaningful."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-005",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "Part ID 寄存器地址 0xFF、复位值 0x15、只读；随批次变化的修订号在 REV_ID(0xFE) 里，不要把 0xFF 当修订号",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 11,
+        "section": "Register Maps and Descriptions (PART ID)",
+        "quote": "Part ID PART_ID[7] 0xFF 0x15 R"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-008",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "Mode Configuration(0x09) 的 MODE[2:0] 只允许 010（心率，仅红光）、011（SpO2，红+IR）、111（多 LED）；000/001/100–110 禁止使用",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 18,
+        "section": "Table 4. Mode Control",
+        "quote": "000 Do not use"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-009",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "写 Mode Configuration(0x09) 的 RESET 位为 1 会把配置、阈值、数据寄存器全部恢复成上电态；该位在复位序列完成后由硬件自动清回 0",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 18,
+        "section": "Bit 6: Reset Control (RESET)",
+        "quote": "The RESET bit is cleared automatically back to zero after the reset sequence is completed."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-010",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "Mode Configuration(0x09) 的 SHDN 置 1 进入省电模式：寄存器值保留、读写仍正常，但所有中断被清零，正常采数时保持为 0",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 18,
+        "section": "Bit 7: Shutdown Control (SHDN)",
+        "quote": "The part can be put into a power-save mode by setting this bit to one. While in power-save mode, all registers retain their values, and write/read operations function as normal. All interrupts are cleared to zero in this mode."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-011",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "进入 SpO2 或心率模式前，先把 FIFO_WR_PTR(0x04)、OVF_COUNTER(0x05)、FIFO_RD_PTR(0x06) 全写 0x00",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Register",
+        "quote": "it is recommended to first clear the FIFO_WR_PTR, OVF_COUNTER, and FIFO_RD_PTR registers to all zeroes (0x00) to ensure the FIFO is empty and in a known state."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-012",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "FIFO 深 32 个样本、共 192 字节，每通道每样本 3 字节；SpO2 模式一个样本 6 字节（RED 3 + IR 3），一次连续读 6 字节",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Structure",
+        "quote": "Since each sample consists of two channels of data, there are 6 bytes of data for each sample, and therefore 192 total bytes of data can be stored in the FIFO."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-013",
+      "kind": "peripheral",
+      "scope": [
+        "max30102"
+      ],
+      "text": "本次可读样本数按 FIFO_WR_PTR 减 FIFO_RD_PTR 计算（要处理指针回绕），再决定读多少样本",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 16,
+        "section": "Pseudo-Code Example of Reading Data from FIFO",
+        "quote": "NUM_AVAILABLE_SAMPLES = FIFO_WR_PTR – FIFO_RD_PTR"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-014",
+      "kind": "peripheral",
+      "scope": [
+        "max30102"
+      ],
+      "text": "读 FIFO 成功后读指针已自动前进，不用再回写 FIFO_RD_PTR；只有通信出错要重读样本时才写它",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 17,
+        "section": "Third transaction",
+        "quote": "If the second transaction was successful, FIFO_RD_PTR points to the next sample in the FIFO, and this third transaction is not necessary."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-015",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "FIFO Configuration(0x08) 的 FIFO_ROLLOVER_EN（bit4）置 1 时 FIFO 满后回绕继续写；清 0 时满后停止更新直到读 FIFO 或改指针",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 17,
+        "section": "Bit 4: FIFO Rolls on Full",
+        "quote": "If FIFO_ROLLOVER_EN is set (1), the FIFO address rolls over to zero and the FIFO continues to fill with new data."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-016",
+      "kind": "timing",
+      "scope": [
+        "max30102",
+        "i2c"
+      ],
+      "text": "MAX30102 的 I2C SCL 时钟最高 400 kHz，scl_speed_hz 不要超过 400000",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 5,
+        "section": "I2C TIMING CHARACTERISTICS",
+        "quote": "Serial Clock Frequency fSCL 0 400 kHz"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-017",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "采样率由 SpO2 Configuration(0x0A) 的 SPO2_SR[2:0] 设定（000=50 … 111=3200 sps）；选得过快时芯片会自动改成该 LED_PW 下可实现的最高速率",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 19,
+        "section": "Bits 4:2: SpO2 Sample Rate Control",
+        "quote": "If the user selects a sample rate that is too high for the selected LED_PW setting, the highest possible sample rate is programmed instead into the register."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-018",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "LED_PW[1:0] 同时决定 LED 脉宽和 ADC 分辨率：00=69 µs/15 bit、01=118 µs/16 bit、10=215 µs/17 bit、11=411 µs/18 bit",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 19,
+        "section": "Table 7. LED Pulse Width Control",
+        "quote": "LED_PW[1:0] PULSE WIDTH (µs) ADC RESOLUTION (bits)"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-019",
+      "kind": "register",
+      "scope": [
+        "max30102"
+      ],
+      "text": "LED 驱动电流用 LED1_PA(0x0C)/LED2_PA(0x0D) 设置，0x00 为 0 mA、0x1F 约 6.2 mA、0xFF 约 51.0 mA",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 20,
+        "section": "Table 8. LED Current Control",
+        "quote": "0xFFh 51.0"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-020",
+      "kind": "sequence",
+      "scope": [
+        "max30102"
+      ],
+      "text": "测片内温度时先写 Temperature Config(0x21) 的 TEMP_EN 置 1 启动一次转换（该位自清），转换完成后再读 TINT(0x1F)/TFRAC(0x20)",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 22,
+        "section": "Temperature Enable (TEMP_EN)",
+        "quote": "This is a self-clearing bit which, when set, initiates a single temperature reading from the temperature sensor."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-021",
+      "kind": "peripheral",
+      "scope": [
+        "max30102"
+      ],
+      "text": "温度 = TINT + TFRAC：TINT 为 1 °C/LSB 的二进制补码整数，TFRAC 每 LSB 为 0.0625 °C；两个寄存器必须都读",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 22,
+        "section": "Temperature Fraction",
+        "quote": "This register stores the fractional temperature data in increments of 0.0625°C."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-022",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "Interrupt Enable 1/2(0x02/0x03) 的未用位在正常操作下应写 0；PWR_RDY 中断无法屏蔽（欠压后模块数字状态被复位，默认全部中断关闭）",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 13,
+        "section": "Interrupt Enable (0x02-0x03)",
+        "quote": "The power-ready interrupt cannot be disabled because the digital state of the module is reset upon a brownout condition (low power supply voltage), and the default condition is that all the interrupts are disabled."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-023",
+      "kind": "forbidden",
+      "scope": [
+        "max30102"
+      ],
+      "text": "多 LED 模式下 SLOT 必须按顺序使能：不要禁用 SLOT1 却使能 SLOT2（0x11/0x12 的 SLOT1–SLOT4）",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 21,
+        "section": "Multi-LED Mode Control Registers (0x11–0x12)",
+        "quote": "The slots should be enabled in order (i.e., SLOT1 should not be disabled if SLOT2 is enabled)."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-024",
+      "kind": "device",
+      "scope": [
+        "max30102",
+        "ppg"
+      ],
+      "text": "FIFO 数据左对齐：无论 ADC 分辨率设成多少位，MSB 总在 bit17，解析样本时按 18 位对齐拼装 3 字节，不要按所选分辨率右对齐解读",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 14,
+        "section": "FIFO Data Structure",
+        "quote": "the MSB bit is always in the bit 17 data position regardless"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-025",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "MAX30102 的 INT 是低电平有效开漏输出，触发时拉低；正常需经上拉电阻或电流源接到不高于 +5 V（相对 GND）的外部电源，电阻取大值如 4.7 kΩ，因该脚不能灌大电流",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 24,
+        "section": "Interrupt Pin Functionality",
+        "quote": "The pin is open-drain, which means it normally requires a pullup resistor or current source to an external voltage supply (up to +5V from GND). The interrupt pin is not designed to sink large currents, so the pullup resistor value should be large, such as 4.7kΩ."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-026",
+      "kind": "pin",
+      "scope": [
+        "max30102",
+        "ppg",
+        "i2c"
+      ],
+      "text": "SDA 必须接上拉（典型值大于 500 Ω）；SCL 只在总线上有多个主机、或单主机的 SCL 是开漏输出时才需要上拉，不要把它当无条件要求",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 28,
+        "section": "I2C Interface",
+        "quote": "is required on SCL if there are"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-027",
+      "kind": "sequence",
+      "scope": [
+        "max30102",
+        "ppg"
+      ],
+      "text": "上电时按手册推荐先给 VDD 再给 LED 电源 VLED+；关电顺序芯片能容忍任意次序，不用额外控制",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 28,
+        "section": "Power-Up Sequencing",
+        "quote": "It is recommended to power the VDD supply first, before"
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-028",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "片内测温要等 DIE_TEMP_RDY（先把中断使能 2 的 DIE_TEMP_RDY_EN 置位）；TEMP_EN 自动清零不代表温度已就绪，约 27.5 ms 后数据才有效",
+      "cite": {
+        "doc": "board-measured",
+        "page": null,
+        "section": "M-003 MAX30102 片内测温的完成时刻",
+        "quote": "结论：测温要等 DIE_TEMP_RDY（需先置 DIE_TEMP_RDY_EN），不能以 TEMP_EN 自动清零作为测完的标志。"
+      },
+      "tier": "user",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-029",
+      "kind": "device",
+      "scope": [
+        "max30102"
+      ],
+      "text": "心率模式解释数据不需要温度信息（只有 SpO2 模式需要），做心率测量时不要为此外循环读片内温度",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 27,
+        "section": "Timing in HR Mode",
+        "quote": "In HR mode (Figure 5), unlike in SpO2 mode, temperature information is not necessary to interpret the data."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    },
+    {
+      "id": "R-MAX-030",
+      "kind": "register",
+      "scope": [
+        "max30102",
+        "ppg"
+      ],
+      "text": "各中断的清除来源：PPG_RDY 读 0x00 或读 FIFO_DATA；A_FULL、ALC_OVF 读 0x00；DIE_TEMP_RDY 读 0x01 或读 TFRAC(0x20)",
+      "cite": {
+        "doc": "max30102-ds",
+        "page": 12,
+        "section": "PPG_RDY: New FIFO Data Ready",
+        "quote": "or by reading the FIFO_DATA register."
+      },
+      "tier": "official_manual",
+      "status": "checked",
+      "check": null,
+      "notes": [
+        "规则判定器通过"
+      ]
+    }
+  ],
+  "escalated": [
+    {
+      "rule": {
+        "id": "R-MAX-006",
+        "kind": "peripheral",
+        "scope": [
+          "max30102",
+          "ppg"
+        ],
+        "text": "上电或欠压恢复时 VDD 从 UVLO 以下升到以上会触发 PWR_RDY（中断状态 1 的 PWR_RDY 位），表示模块已上电可采数；它不是可屏蔽的普通中断",
+        "cite": {
+          "doc": "max30102-ds",
+          "page": 12,
+          "section": "PWR_RDY: Power Ready Flag",
+          "quote": "a power-ready interrupt is triggered to signal that the module is powered-up"
+        },
+        "tier": "official_manual",
+        "status": "draft",
+        "check": {
+          "type": "register_value",
+          "peripheral": "MAX30102",
+          "register": "Interrupt Status 1",
+          "field": "PWR_RDY",
+          "value": 1
+        },
+        "notes": []
+      },
+      "reasons": [
+        "第 4 步：原文只说上电/欠压恢复时VDD跨越UVLO会触发power-ready中断并置中断状态1的PWR_RDY位，但全页未提及该中断是否可屏蔽，规则末句\"它不是可屏蔽的普通中断\"超出原文。"
+      ]
+    },
+    {
+      "rule": {
+        "id": "R-MAX-007",
+        "kind": "register",
+        "scope": [
+          "max30102",
+          "ppg"
+        ],
+        "text": "中断状态 1(0x00) 含 A_FULL/PPG_RDY/ALC_OVF/PWR_RDY，中断状态 2(0x01) 含 DIE_TEMP_RDY；读中断状态寄存器会把状态位全部清 0，不要把它当持久状态保存",
+        "cite": {
+          "doc": "max30102-ds",
+          "page": 13,
+          "section": "Interrupt Status (0x00–0x01)",
+          "quote": "This also clears all the bits in the interrupt status register to zero."
+        },
+        "tier": "official_manual",
+        "status": "draft",
+        "check": null,
+        "notes": []
+      },
+      "reasons": [
+        "第 4 步：本页只给出中断使能寄存器 0x02/0x03 的位（A_FULL_EN、PPG_RDY_EN、ALC_OVF_EN、DIE_TEMP_RDY_EN），并无中断状态寄存器 0x00/0x01 的位定义，也未列出 PWR_RDY 位；规则把使能寄存器当成状态寄存器并附加了本页没有的地址和位组成。"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+task,config,run,verdict,failed_layer,cases_passed,cases_total,failed_cases,flow_verdict,attempts,tokens,cost,seconds,rules_used,run_dir,note
+max30102_temp,verified,1,pass,,5,5,,fail,4,301732,0.427672,314.3,61,.ff_runs/20261109-210936-eval-max30102_temp-verified-1,
+max30102_temp,verified,2,fail,board_test,4,5,换算：零下与小数部分,pass,4,265635,0.489978,580.8,61,.ff_runs/20261109-211451-eval-max30102_temp-verified-2,
