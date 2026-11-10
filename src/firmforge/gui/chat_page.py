@@ -351,6 +351,19 @@ class ChatPage(QWidget):
         self.code_view = QTextEdit()
         self.code_view.setObjectName("Code")
         self.code_view.setReadOnly(True)
+        # 拿到 Agent 写的代码：导出到你选的文件夹，或者打开运行目录里的那一份
+        code_box = QWidget()
+        cbl = QVBoxLayout(code_box)
+        cbl.setContentsMargins(0, 8, 0, 0)
+        self.export_btn = QPushButton("导出代码…")
+        self.export_btn.setToolTip("把这次运行每个模块最后交的代码复制到你选的文件夹")
+        self.export_btn.clicked.connect(self.export_code)
+        self.open_btn = QPushButton("打开所在文件夹")
+        self.open_btn.setObjectName("Ghost")
+        self.open_btn.setToolTip("在文件管理器里打开这次运行的目录")
+        self.open_btn.clicked.connect(self.open_run_folder)
+        cbl.addLayout(hbox(self.export_btn, self.open_btn, "stretch"))
+        cbl.addWidget(self.code_view, 1)
         self.why = QTableWidget(0, 6)
         self.why.setHorizontalHeaderLabels(["候选", "成功率", "成本", "负载", "探索", "得分"])
         self.why.verticalHeader().setVisible(False)
@@ -370,7 +383,7 @@ class ChatPage(QWidget):
         self.tabs.tabBar().setUsesScrollButtons(False)
         self.tabs.tabBar().setElideMode(Qt.ElideRight)
         for w, name, tip in ((self.layer_box, "检查", "检查结果"), (self.board_view, "上板", "上板测试的用例和串口输出"),
-                             (self.code_view, "代码", "这一次交上来的代码"), (self.rules_view, "规则", "这次用到的规则"),
+                             (code_box, "代码", "这一次交上来的代码；可以导出"), (self.rules_view, "规则", "这次用到的规则"),
                              (why_box, "调度", "为什么交给这个 Agent"), (self.brief_view, "发给 AI", "发给 AI 的内容")):
             self.tabs.setTabToolTip(self.tabs.addTab(w, name), tip)
         self.why_box = why_box
@@ -1036,6 +1049,30 @@ class ChatPage(QWidget):
                                  f"{mid} 第 {log_dir.name.split('_')[-1]} 次" if log_dir is not None else mid)
         self.rules_view.setPlainText(bv.rules_used_text(self.run_dir, self.project / self.hw / "rules.json"))
         self.show_brief(("call", None, mid), switch=False)
+
+    def export_code(self):
+        """导出这次运行的代码（每个模块最后一次交的那份）到你选的文件夹。"""
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        if self.run_dir is None or not bv.final_attempts(self.run_dir):
+            QMessageBox.information(self, "还没有代码", "这次运行还没有交出代码。运行结束后，或者在会话列表里点开一次运行，再导出。")
+            return
+        dest = QFileDialog.getExistingDirectory(self, "把代码导出到哪个文件夹", str(Path.home()))
+        if not dest:
+            return
+        files = bv.export_run(self.run_dir, Path(dest))
+        target = Path(dest) / self.run_dir.name
+        QMessageBox.information(self, "已导出", f"导出了 {len(files)} 个文件到：\n{target}\n\n每个模块一个子文件夹；"
+                                "test/ 或 test_host/ 里是 Agent 自己写的测试。")
+        self._open_folder(target)
+
+    def open_run_folder(self):
+        if self.run_dir is not None and self.run_dir.is_dir():
+            self._open_folder(self.run_dir)
+
+    def _open_folder(self, path: Path):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def show_brief(self, brief, switch: bool = True):
         """brief 是任务单原文，或 ("call", Agent, 模块)：从运行目录的调用记录里找最近一次。"""

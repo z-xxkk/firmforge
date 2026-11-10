@@ -245,6 +245,13 @@ class GuiSmokeTest(unittest.TestCase):
             self.assertEqual(page.view.modules["ppg"].layers, {"compliance": "pass", "build": "pass", "test": "fail"})
             page.select_module("ppg")
             self.assertIn("2 个用例，通过 1", page.board_view.title.text())
+            # 导出代码：每个模块最后一次交的代码复制到 <目标>/<运行编号>/<模块>/
+            from firmforge.gui.board_view import export_run, final_attempts
+            self.assertEqual(final_attempts(rd), {"ppg": att / "main"})
+            out = Path(d) / "out"
+            files = export_run(rd, out)
+            self.assertEqual(files, [out / "run1" / "ppg" / "ppg.c"])
+            self.assertEqual(files[0].read_text(encoding="utf-8"), "int ppg_ok;\n")
             self.assertIn("int ppg_ok", page.code_view.toPlainText())
             w.close()
 
@@ -311,6 +318,39 @@ class GuiSmokeTest(unittest.TestCase):
             self.assertGreater(icon.stat().st_size, 1000)
             self.assertEqual(len(de.uninstall()), 2)
             self.assertFalse(dp.exists())
+
+    def test_designer_line_connects_detached_steps(self):
+        # 负责人发现的 bug：拉线连上以后还显示"没连上"。用真实鼠标事件：拖远断开，再从小圆点拉线连回
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtTest import QTest
+        from firmforge.gui.graph import STEP_H, STEP_W
+        w = self.window()
+        w.resize(1440, 900)
+        w.show()
+        w.go("flow")
+        d, cv = w.designer, w.designer.canvas
+        vp = cv.viewport()
+
+        def drag(a, b):
+            QTest.mousePress(vp, Qt.LeftButton, Qt.NoModifier, a)
+            for k in range(1, 9):
+                QTest.mouseMove(vp, a + (b - a) * k / 8)
+            QTest.mouseRelease(vp, Qt.LeftButton, Qt.NoModifier, b)
+        pt = lambda sid, x, y: cv.mapFromScene(cv.items_by_id[sid].pos() + QPointF(x, y))     # noqa: E731
+        detached = lambda sid: d._get(sid).detached                                            # noqa: E731
+        a = pt("review", 30, 12)
+        drag(a, a + QPoint(0, 260))
+        self.assertTrue(detached("review"))
+        drag(pt("review_gate", STEP_W / 2, STEP_H + 6), pt("review", STEP_W / 2, STEP_H / 2))
+        self.assertFalse(detached("review"))
+        self.assertIn("review", d._get("review_gate").then)
+        a = pt("check", 30, 12)                                               # 从没连上的步骤往外拉线
+        drag(a, a + QPoint(-40, 320))                                         # 拖到下方空白处（靠近别的步骤会被吸附过去）
+        self.assertTrue(detached("check"))
+        drag(pt("check", STEP_W / 2, STEP_H + 6), pt("repair", STEP_W / 2, STEP_H / 2))
+        self.assertFalse(detached("check") or detached("repair"))
+        self.assertFalse([p for p in d.check(quiet=True) if "没连上" in p])
+        w.close()
 
     def test_designer_edits_flow_into_code(self):
         w = self.window()

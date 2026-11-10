@@ -200,3 +200,34 @@ def rules_used_text(run_dir: Path | None, store_path: Path) -> str:
         out.append(f"{rid}　{r.get('text', '')}\n　　出处：{where}")
     return "\n".join(out)
 
+
+
+def final_attempts(run_dir: Path | None) -> dict[str, Path]:
+    """每个模块最后一次交上来的代码所在目录（新流程是 main/，旧流程是 src/）。"""
+    out: dict[str, Path] = {}
+    nodes = Path(run_dir) / "nodes" if run_dir else None
+    if nodes is None or not nodes.is_dir():
+        return out
+    for mod in sorted(p for p in nodes.iterdir() if p.is_dir()):
+        tries = sorted((p for p in mod.glob("attempt_*") if p.is_dir()), key=lambda p: int(p.name.split("_")[-1]))
+        for a in reversed(tries):
+            code = next((a / sub for sub in ("main", "src") if (a / sub).is_dir()), None)
+            if code is not None and any(f.is_file() for f in code.rglob("*")):
+                out[mod.name] = code
+                break
+    return out
+
+
+def export_run(run_dir: Path, dest: Path) -> list[Path]:
+    """把这次运行每个模块最后交的代码复制到 dest/<运行编号>/<模块>/，返回复制出来的文件。"""
+    import shutil
+    target = Path(dest) / Path(run_dir).name
+    copied: list[Path] = []
+    for mod, code in final_attempts(run_dir).items():
+        for f in sorted(code.rglob("*")):
+            if f.is_file():
+                to = target / mod / f.relative_to(code)
+                to.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(f, to)
+                copied.append(to)
+    return copied

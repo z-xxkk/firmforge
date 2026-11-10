@@ -305,9 +305,19 @@ class DesignerPage(QMainWindow):
         where, i = self._where(sid)
         return self._steps(where)[i] if i >= 0 else None
 
+    def _normalize(self) -> None:
+        """被并行、条件引用的步骤就是连上了：清掉它的"没连上"标记和临时位置（不管是怎么连上的）。"""
+        for where in ["main", *self.wf.subflows]:
+            steps = self._steps(where)
+            refs = {r for s in steps for r in (*s.branches, *s.then, *s.otherwise)}
+            if any(s.detached and s.id in refs for s in steps):
+                self._set_steps(where, [dataclasses.replace(s, detached=False, pos=None) if s.detached and s.id in refs
+                                        else s for s in steps])
+
     def _change(self, fn, fit: bool = False):
         self.undo.append(self.wf)
         fn()
+        self._normalize()
         if self.wf.version == self.saved.version and self.wf != self.saved:
             self.wf = dataclasses.replace(self.wf, version=bump(self.saved.version), based_on=self.saved.version)
         self.render_all(fit=fit)
@@ -387,25 +397,44 @@ class DesignerPage(QMainWindow):
         self._change(op)
 
     def connect_steps(self, src: str, dst: str):
+        """从 src 下沿拉线到 dst：dst 紧跟在 src 后面（src 是并行就成为分支，是条件就加到"是"分支）。
+        两头都会变成"连上了"：src 原来没连上的话，就把它放到 dst 原来的位置上，dst 接在它后面。"""
         ws, i = self._where(src)
         wd, j = self._where(dst)
         if ws != wd or i < 0 or j < 0:
             QMessageBox.information(self, "不能这样连", "只能在同一个流程（主流程或同一个子流程）里连线。")
             return
+        if src == dst:
+            return
         s = self._steps(ws)[i]
 
         def op():
-            steps = self._steps(ws)
+            steps = self._unref(self._steps(ws), dst)
             if s.kind == "parallel":
-                steps[i] = dataclasses.replace(s, branches=tuple(dict.fromkeys((*s.branches, dst))))
-            elif s.kind == "condition":
-                steps[i] = dataclasses.replace(s, then=tuple(dict.fromkeys((*s.then, dst))),
-                                               otherwise=tuple(x for x in s.otherwise if x != dst))
-            else:
-                moving = steps.pop(j)
                 k = next(n for n, x in enumerate(steps) if x.id == src)
-                steps.insert(k + 1, moving)
+                steps[k] = dataclasses.replace(steps[k], branches=tuple(dict.fromkeys((*steps[k].branches, dst))))
+                steps = [dataclasses.replace(x, detached=False, pos=None) if x.id == dst else x for x in steps]
+            elif s.kind == "condition":
+                k = next(n for n, x in enumerate(steps) if x.id == src)
+                steps[k] = dataclasses.replace(steps[k], then=tuple(dict.fromkeys((*steps[k].then, dst))))
+                steps = [dataclasses.replace(x, detached=False, pos=None) if x.id == dst else x for x in steps]
+            else:
+                orig = [x.id for x in steps if x.id != src]
+                before = orig[orig.index(dst) - 1] if orig.index(dst) > 0 else None     # dst 原来前面那一步
+                moving = next(x for x in steps if x.id == dst)
+                steps = [x for x in steps if x.id != dst]
+                moving = dataclasses.replace(moving, detached=False, pos=None)
+                if s.detached:                       # 起点原来没连上：它占 dst 原来的位置，dst 接在它后面
+                    head = next(x for x in steps if x.id == src)
+                    steps = [x for x in steps if x.id != src]
+                    head = dataclasses.replace(head, detached=False, pos=None)
+                    at = next((n + 1 for n, x in enumerate(steps) if x.id == before), 0)
+                    steps[at:at] = [head, moving]
+                else:
+                    k = next(n for n, x in enumerate(steps) if x.id == src)
+                    steps.insert(k + 1, moving)
             self._set_steps(ws, steps)
+            self.selected = dst
         self._change(op)
 
     # ------------------------------------------------------------ 拖拽：吸附、拖离、从步骤箱拖进来（DECISIONS 第 102 条）
