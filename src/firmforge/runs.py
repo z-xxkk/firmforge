@@ -69,7 +69,12 @@ def read_events(run_dir: Path | str) -> list[dict]:
     if not path.is_file():
         raise FileNotFoundError(f"{run_dir} 里没有 events.jsonl，不是运行目录")
     events = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
+    lines = [ln for ln in path.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+    for i, line in enumerate(lines):
+        try:
             events.append(json.loads(line))
+        except ValueError:
+            if i == len(lines) - 1:          # 最后一行写到一半就被强制结束：丢掉这一行，前面的照常回放
+                break
+            raise
     return events

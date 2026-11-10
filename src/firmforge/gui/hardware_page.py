@@ -179,10 +179,17 @@ class HardwarePage(QWidget):
 
     def reload(self):
         hwdir = self.project / self.hw
+        self.rules_error = ""
         try:
             self.rules = json.loads((hwdir / "rules.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            if not isinstance(self.rules, list) or not all(isinstance(r, dict) and "id" in r and "status" in r
+                                                           for r in self.rules):
+                raise ValueError("内容不是规则列表")
+        except FileNotFoundError:
             self.rules = []
+        except (OSError, ValueError) as exc:                # 文件坏了要明说，不能显示成"0 条"让人以为规则库是空的
+            self.rules = []
+            self.rules_error = f"规则库文件读不了：{exc}"
         self._fill_profile(hwdir)
         self._fill_list()
 
@@ -278,6 +285,8 @@ class HardwarePage(QWidget):
         rej = sum(1 for r in self.rules if is_rejected(r))
         self.rules_sub.setText(f"{trusted} 条已确认" + (f"，{len(self.pending)} 条等你确认" if self.pending else "")
                                + (f"，{rej} 条退回" if rej else ""))
+        if getattr(self, "rules_error", ""):
+            self.rules_sub.setText(f"⚠ {self.rules_error}（rules.json；从 git 或备份恢复）")
         keep = self.current["id"] if self.current else None
         c = T()
         self.list.blockSignals(True)

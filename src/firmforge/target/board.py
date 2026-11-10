@@ -88,8 +88,17 @@ class BoardRunner:
                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                                 timeout=self.run_timeout + 30, env=self.idf.env)
             out = rd.stdout
-            if rd.returncode != 0 and not out:
-                return BoardTestResult(skipped=f"读串口失败：{rd.stderr.strip()[-300:]}")
+            if rd.returncode != 0:
+                res = parse_board_output(out)
+                finished = res.started and not res.hang
+                # 读串口的程序自己出错退出（例如读到一半板子被拔掉）：测试没跑完不是代码的错，记 skipped；
+                # 已经读到结束标记或崩溃信息的照常判定（崩溃后芯片重启可能让串口断开）
+                if not finished and not res.crash:
+                    if log_path is not None:
+                        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+                        Path(log_path).write_text(out, encoding="utf-8")
+                    why = rd.stderr.strip().splitlines()[-1:] or ["没有输出"]
+                    return BoardTestResult(skipped=f"读串口中途出错，测试没跑完（板子可能被拔掉或串口被占用）：{why[0][-300:]}")
         except subprocess.TimeoutExpired as exc:
             out = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
         if log_path is not None:

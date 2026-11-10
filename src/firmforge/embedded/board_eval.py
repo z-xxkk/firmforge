@@ -47,6 +47,10 @@ CSV_FIELDS = ("task", "config", "run", "verdict", "failed_layer", "cases_passed"
               "flow_verdict", "attempts", "tokens", "cost", "seconds", "rules_used", "run_dir", "note")
 
 
+class EvalDataError(ValueError):
+    """评测输出目录里的数据坏了，需要人处理（不自动重新生成，免得同一轮评测前后用的东西不一样）。"""
+
+
 def task_design(task: BoardTask) -> Design:
     """评测题的固定设计：一个硬件层模块，编号取公共头文件名，文件就是标准答案的那几个 .c 文件。"""
     headers = task.public_files()
@@ -136,6 +140,27 @@ def run_single(task: BoardTask, ctx: EvalContext, name: str) -> tuple[FlowResult
     proj = (IdfProject(ctx.build_root / f"{rd.run_id}-single", ctx.idf, target=str(ctx.profile.chip.value),
                        requires=DEFAULT_REQUIRES + TEST_REQUIRES + task.requires) if ctx.idf is not None else None)
     attempt = 0
+    try:
+        attempt = _single_loop(task, ctx, m, msgs, files, proj, agents, bus, res)
+    except Exception as exc:                  # 模型调用失败等：记录写完整再往上抛（这一次不记进评测结果）
+        res.verdict, res.error = "error", f"{type(exc).__name__}: {exc}"
+        _single_finish(rd, bus, res, attempt)
+        raise
+    _single_finish(rd, bus, res, attempt)
+    return res, files, attempt
+
+
+def _single_finish(rd: RunDir, bus: EventBus, res: FlowResult, attempt: int) -> None:
+    rd.write_json("run.json", {"verdict": res.verdict, "error": res.error, "rule_mode": "single",
+                               "tokens": res.prompt_tokens + res.completion_tokens, "cost": round(res.cost, 6),
+                               "attempts": attempt})
+    bus.emit("run_finished", None, verdict=res.verdict, tokens=res.prompt_tokens + res.completion_tokens,
+             cost=round(res.cost, 6), error=res.error)
+
+
+def _single_loop(task: BoardTask, ctx: EvalContext, m: DesignModule, msgs: list[dict], files: dict[str, str],
+                 proj: IdfProject | None, agents: _Agents, bus: EventBus, res: FlowResult) -> int:
+    attempt = 0
     for attempt in range(1, ctx.max_attempts + 1):
         need = sorted(f for f in m.files if f.endswith(".c") and f not in files) if attempt == 1 else []
         for k in range(MAX_FORMAT_RETRIES + 1):                  # 没按格式交文件：当场补要（和多 Agent 流程一样）
@@ -160,11 +185,7 @@ def run_single(task: BoardTask, ctx: EvalContext, name: str) -> tuple[FlowResult
         errs = "\n".join(d.render() for d in b.errors) or b.log_tail[-1500:]
         if attempt < ctx.max_attempts:
             msgs = msgs + [{"role": "user", "content": coder_repair_message(attempt, ctx.max_attempts, "编译失败：\n" + errs)}]
-    rd.write_json("run.json", {"verdict": res.verdict, "rule_mode": "single", "tokens": res.prompt_tokens +
-                               res.completion_tokens, "cost": round(res.cost, 6), "attempts": attempt})
-    bus.emit("run_finished", None, verdict=res.verdict, tokens=res.prompt_tokens + res.completion_tokens,
-             cost=round(res.cost, 6), error="")
-    return res, files, attempt
+    return attempt
 
 
 # ---------------------------------------------------------------- 未核对规则（每题一次）
@@ -173,8 +194,13 @@ def unverified_rules(task: BoardTask, ctx: EvalContext) -> RuleSet:
     """查资料 Agent 为这道题的适用范围提炼规则，不核对、不经人工，直接当作已确认使用；结果缓存，同一题各次运行复用。"""
     cache = Path(ctx.rules_cache) / f"{task.id}.json"
     if cache.is_file():
-        data = json.loads(cache.read_text(encoding="utf-8"))
-        return RuleSet([Rule.from_dict(d) for d in data["rules"]])
+        try:
+            data = json.loads(cache.read_text(encoding="utf-8"))
+            return RuleSet([Rule.from_dict(d) for d in data["rules"]])
+        except (ValueError, KeyError, TypeError) as exc:
+            # 不自动重新生成：同一轮评测里规则要一致，重新生成也要花钱，交给人决定
+            raise EvalDataError(f"未核对规则的缓存文件坏了：{cache}（{exc}）。删掉它会重新生成（要调用模型），"
+                               f"或者从备份恢复") from exc
     rd = RunDir.create(ctx.runs_root, f"eval-rules-{task.id}")
     bus = EventBus(rd.run_id, rd.events_path)
     res = FlowResult(rd.path)
@@ -247,11 +273,24 @@ def run_once(task: BoardTask, cfg: str, run_no: int, ctx: EvalContext) -> EvalRo
 
 # ---------------------------------------------------------------- 批量与汇总
 
-def load_rows(out_dir: Path) -> list[dict]:
+def load_rows(out_dir: Path, bad: list[str] | None = None) -> list[dict]:
+    """读 runs.jsonl。写到一半被打断（断电、强制结束）留下的坏行跳过，放进 bad（这些组合会重跑）。"""
     p = Path(out_dir) / "runs.jsonl"
     if not p.is_file():
         return []
-    return [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows = []
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            continue
+        try:
+            r = json.loads(line)
+            if not isinstance(r, dict) or not {"task", "config", "run", "verdict"} <= r.keys():
+                raise ValueError("缺字段")
+            rows.append(r)
+        except ValueError:
+            if bad is not None:
+                bad.append(line)
+    return rows
 
 
 def plan_todo(tasks: list[BoardTask], configs: list[str], runs: int, rows: list[dict]) -> list[tuple[BoardTask, str, int]]:
@@ -270,16 +309,32 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
     out_dir.mkdir(parents=True, exist_ok=True)
     if ctx.rules_cache is None:
         ctx.rules_cache = out_dir / "unverified_rules"
-    rows = load_rows(out_dir)
+    bad: list[str] = []
+    rows = load_rows(out_dir, bad)
+    if bad:
+        progress(f"runs.jsonl 里有 {len(bad)} 行不完整（上次可能是被强制中断的），已去掉，对应的运行会重跑")
     done = {(r["task"], r["config"], r["run"]) for r in rows if r["verdict"] != "skipped"}
     rows = [r for r in rows if r["verdict"] != "skipped"]
     (out_dir / "runs.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
                                         encoding="utf-8")         # 过期的 skipped 行去掉（会重跑）
     todo = plan_todo(tasks, configs, runs, rows)
     progress(f"共 {len(todo)} 次运行要跑（已完成 {len(done)} 次）")
-    spent = 0.0
     cache = Path(ctx.rules_cache)
     known = {f.name for f in cache.glob("*.json")}
+    try:
+        _run_todo(todo, ctx, out_dir, rows, cache, known, progress, max_cost, stop)
+    except Exception as exc:
+        progress(f"出错停止：{type(exc).__name__}: {exc}；已完成的 {len(rows)} 次结果保留，"
+                 f"排除问题后用同一个输出目录再开始会接着跑")
+        raise
+    finally:
+        write_outputs(rows, out_dir, configs, ctx.rules if "verified" in configs else None)
+    return rows
+
+
+def _run_todo(todo, ctx: EvalContext, out_dir: Path, rows: list[dict], cache: Path, known: set[str],
+              progress: Callable[[str], None], max_cost: float, stop: Callable[[], bool] | None) -> None:
+    spent = 0.0
     for k, (t, c, n) in enumerate(todo, 1):
         if stop is not None and stop():
             progress(f"已暂停；还剩 {len(todo) - k + 1} 次没跑，用同一个输出目录再开始会接着跑")
@@ -293,7 +348,7 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
         for f in cache.glob("*.json"):                     # 这次新生成的未核对规则也算进花费
             if f.name not in known:
                 known.add(f.name)
-                spent += float(json.loads(f.read_text(encoding="utf-8")).get("cost", 0))
+                spent += float((_read_cache(f) or {}).get("cost", 0))
         rows.append(row)
         with (out_dir / "runs.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -302,8 +357,15 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
                  + (f"（{row['failed_layer']}）" if row["failed_layer"] else "")
                  + f"，{cases}，{row['tokens']} token，{row['cost']:.4f} 元，{row['seconds']:.0f} 秒"
                  + (f"；{row['note']}" if row["note"] else ""))
-    write_outputs(rows, out_dir, configs, ctx.rules if "verified" in configs else None)
-    return rows
+
+
+def _read_cache(f: Path) -> dict | None:
+    """读一份未核对规则缓存；文件坏了返回 None（汇总里会注明，不让整个汇总写不出来）。"""
+    try:
+        d = json.loads(Path(f).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) and isinstance(d.get("rules"), list) and "task" in d else None
+    except (OSError, ValueError):
+        return None
 
 
 MEASURED_DOCS = ("board-measured",)        # 上板实测记录的资料编号（DECISIONS 第 95 条）
@@ -323,20 +385,22 @@ def write_outputs(rows: list[dict], out_dir: Path, configs: list[str], verified_
         for r in rows:
             w.writerow({**r, "failed_cases": "；".join(r["failed_cases"])})
     text = summarize(rows, configs)
-    gen = sorted((Path(out_dir) / "unverified_rules").glob("*.json"))
+    gen = [(f, _read_cache(f)) for f in sorted((Path(out_dir) / "unverified_rules").glob("*.json"))]
+    broken = [f.name for f, d in gen if d is None]
+    gen = [(f, d) for f, d in gen if d is not None]
     if gen:
         lines = ["", "## 未核对规则（每题生成一次，各次运行复用；费用不含在上表里）", "",
                  "| 题目 | 规则数 | token | 成本（元） |", "|---|---|---|---|"]
         total = 0.0
-        for f in gen:
-            d = json.loads(f.read_text(encoding="utf-8"))
+        for _f, d in gen:
             total += float(d.get("cost", 0))
             lines.append(f"| {d['task']} | {len(d['rules'])} | {d.get('tokens', 0)} | {float(d.get('cost', 0)):.4f} |")
         lines.append(f"| 合计 | | | {total:.4f} |")
         text += "\n".join(lines) + "\n"
+    if broken:
+        text += f"\n⚠ 这些未核对规则缓存文件读不了，没算进上表：{'、'.join(broken)}\n"
     shown = [("verified（规则库，人工确认过）", r) for r in measured_rules(verified_rules)]
-    for f in gen:
-        d = json.loads(f.read_text(encoding="utf-8"))
+    for _f, d in gen:
         shown += [(f"unverified（{d['task']}，未核对）", r)
                   for r in measured_rules(RuleSet([Rule.from_dict(x) for x in d["rules"]]))]
     if shown:

@@ -278,7 +278,7 @@ def parse_board_output(text: str) -> BoardTestResult:
                                     f"{m['file'].strip()}:{m['line']}"))
     sums = _SUMMARY.findall(body)
     res.summary = tuple(int(x) for x in sums[-1]) if sums else None
-    crash = _CRASH.search(text[i:] if i >= 0 else text)
+    crash = _CRASH.search(text, max(i, 0))          # 在全文里从开始标记处找，位置才和下面截取那一行对得上
     if crash:
         start = text.rfind("\n", 0, crash.start()) + 1
         end = text.find("\n", crash.end())

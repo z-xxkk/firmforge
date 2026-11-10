@@ -1059,7 +1059,11 @@ class ChatPage(QWidget):
         dest = QFileDialog.getExistingDirectory(self, "把代码导出到哪个文件夹", str(Path.home()))
         if not dest:
             return
-        files = bv.export_run(self.run_dir, Path(dest))
+        try:
+            files = bv.export_run(self.run_dir, Path(dest))
+        except OSError as exc:
+            QMessageBox.warning(self, "导出失败", f"没能导出到 {dest}：\n{exc}\n\n换一个有写入权限、空间够的文件夹再试。")
+            return
         target = Path(dest) / self.run_dir.name
         QMessageBox.information(self, "已导出", f"导出了 {len(files)} 个文件到：\n{target}\n\n每个模块一个子文件夹；"
                                 "test/ 或 test_host/ 里是 Agent 自己写的测试。")
@@ -1082,16 +1086,22 @@ class ChatPage(QWidget):
         elif isinstance(brief, tuple) and self.run_dir and (self.run_dir / "llm_calls.jsonl").is_file():
             _, agent_role, node = brief
             best = None
-            for line in (self.run_dir / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines():
-                c = json.loads(line)
-                full = self.run_dir / "llm_calls" / f"{c['n']:04d}.json"
+            for line in (self.run_dir / "llm_calls.jsonl").read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    c = json.loads(line)
+                    full = self.run_dir / "llm_calls" / f"{c['n']:04d}.json"
+                except (ValueError, KeyError, TypeError):
+                    continue                      # 运行被强制结束时最后一行可能只写了一半
                 if not full.is_file():
                     continue
                 if agent_role and not c.get("agent", "").startswith(agent_role[:4]):
                     continue
                 best = full
-            if best is not None:
-                data = json.loads(best.read_text(encoding="utf-8"))
+            try:
+                data = json.loads(best.read_text(encoding="utf-8")) if best is not None else None
+            except ValueError:
+                data = None
+            if data is not None:
                 users = [m for m in data.get("messages", []) if m.get("role") == "user"]
                 for m in users:
                     secs = parse_sections(m.get("content") or "")

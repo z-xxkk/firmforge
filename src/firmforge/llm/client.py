@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import socket
@@ -110,11 +111,14 @@ class OpenAICompatClient:
                 last_error = f"HTTP {status}：{detail}"
                 retry_after = exc.headers.get("Retry-After") if exc.headers else None
                 if status not in RETRY_STATUS:
-                    raise LLMError(f"LLM 请求失败，{last_error}", status) from exc
-            except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as exc:
+                    hint = "（API key 不对或已失效，检查 .env）" if status in (401, 403) else \
+                        "（账户余额不足）" if status == 402 else ""
+                    raise LLMError(f"LLM 请求失败，{last_error}{hint}", status) from exc
+            except (OSError, http.client.HTTPException) as exc:
+                # 断网、DNS 失败、超时、连接被重置、SSL 中断、回复读到一半断开（IncompleteRead）都当网络错误重试
                 status = None
-                last_error = f"网络错误：{getattr(exc, 'reason', exc)}"
-            except json.JSONDecodeError as exc:
+                last_error = f"网络错误：{getattr(exc, 'reason', None) or exc!r}"
+            except ValueError as exc:                    # 不是 JSON，或者不是 UTF-8（例如网关返回的错误页）
                 raise LLMError(f"LLM 返回的不是 JSON：{exc}") from exc
             if attempt < self.max_retries:
                 delay = self.backoff_s * (2 ** attempt)
@@ -140,17 +144,22 @@ class OpenAICompatClient:
         latency = time.perf_counter() - t0
         try:
             msg = data["choices"][0]["message"]
-        except (KeyError, IndexError, TypeError) as exc:
+            if not isinstance(msg, dict):
+                raise TypeError("message 不是对象")
+            usage = data.get("usage") or {}
+            details = usage.get("completion_tokens_details") or {}
+            return LLMResponse(text=msg.get("content") or "", model=data.get("model") or model,
+                               prompt_tokens=int(usage.get("prompt_tokens") or 0),
+                               completion_tokens=int(usage.get("completion_tokens") or 0),
+                               latency_s=latency, tool_calls=msg.get("tool_calls") or None, raw=data,
+                               reasoning=msg.get("reasoning_content") or "",
+                               reasoning_tokens=int(details.get("reasoning_tokens") or 0))
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
             raise LLMError(f"LLM 回复格式不对：{str(data)[:200]}") from exc
-        usage = data.get("usage") or {}
-        details = usage.get("completion_tokens_details") or {}
-        return LLMResponse(text=msg.get("content") or "", model=data.get("model", model),
-                           prompt_tokens=int(usage.get("prompt_tokens", 0)),
-                           completion_tokens=int(usage.get("completion_tokens", 0)),
-                           latency_s=latency, tool_calls=msg.get("tool_calls"), raw=data,
-                           reasoning=msg.get("reasoning_content") or "",
-                           reasoning_tokens=int(details.get("reasoning_tokens", 0) or 0))
 
     def list_models(self) -> list[str]:
         data = self._request("GET", "/models", None)
-        return sorted(m.get("id", "") for m in data.get("data", []) if m.get("id"))
+        items = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise LLMError(f"模型列表格式不对：{str(data)[:200]}")
+        return sorted(m["id"] for m in items if isinstance(m, dict) and isinstance(m.get("id"), str) and m["id"])

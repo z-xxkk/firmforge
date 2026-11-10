@@ -73,6 +73,18 @@ class EventFollower(QObject):
 LIVE_WORKERS: set = set()           # 还在跑的后台线程；关窗口前要等它们结束（否则 Qt 直接中止程序）
 
 
+def friendly_error(exc: BaseException) -> str:
+    """后台运行出错时给人看的一句话：说清楚是哪一类问题、怎么办。"""
+    from ..llm import LLMError
+    if isinstance(exc, LLMError):
+        return f"模型调用失败：{exc}。检查网络和 .env 里的 API key；已经完成的部分保留在运行记录里"
+    if isinstance(exc, PermissionError):
+        return f"没有写入权限：{exc}"
+    if isinstance(exc, OSError):
+        return f"读写文件或设备出错：{exc}"
+    return f"{type(exc).__name__}: {exc}"
+
+
 class _Worker(QThread):
     def __init__(self, fn):
         super().__init__()
@@ -89,7 +101,7 @@ class _Worker(QThread):
         try:
             self.result = self.fn()
         except BaseException as exc:          # 包括中断
-            self.error = f"{type(exc).__name__}: {exc}"
+            self.error = friendly_error(exc)
 
 
 class Backend(QObject):

@@ -248,6 +248,7 @@ class EmbeddedFlow:
 
     def _write_snapshot(self, m: DesignModule, mr: ModuleResult, attempt: int, report: str) -> None:
         d = self.rd.attempt_dir(m.id, attempt)
+        d.mkdir(parents=True, exist_ok=True)              # 一个文件都没交时也要能写报告
         for rel, c in {**mr.files, **mr.tests}.items():
             p = d / "main" / rel
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -386,6 +387,14 @@ class EmbeddedFlow:
                                "incomplete" if verdicts <= {"pass", "skipped"} else "fail")
         except IdfUnavailable as exc:
             res.error = str(exc)
+        except Exception as exc:                         # 模型调用失败等：先把记录写完整（运行目录能正常回放），再往上抛
+            res.verdict, res.error = "error", f"{type(exc).__name__}: {exc}"
+            self._finish(res, t0)
+            raise
+        self._finish(res, t0)
+        return res
+
+    def _finish(self, res: FlowResult, t0: float) -> None:
         self.rd.write_json("run.json", {"verdict": res.verdict, "error": res.error, "rule_mode": self.rule_mode,
                                         "rules_used": res.rules_used,
                                         "modules": {k: v.verdict for k, v in res.modules.items()},
@@ -394,4 +403,3 @@ class EmbeddedFlow:
                                         "seconds": round(time.time() - t0, 1)})
         self.bus.emit("run_finished", None, verdict=res.verdict, tokens=res.prompt_tokens + res.completion_tokens,
                       cost=round(res.cost, 6), error=res.error)
-        return res

@@ -1040,7 +1040,7 @@ def cmd_firmware(args) -> int:
 
 def cmd_board_eval(args) -> int:
     """上板评测（DECISIONS 第 69 条 B 方向）：同一批上板题在几种配置下各跑几次，用固定判定规则和隐藏测试打分。"""
-    from .embedded.board_eval import evaluate, missing_scopes, parse_configs
+    from .embedded.board_eval import EvalDataError, evaluate, missing_scopes, parse_configs
     from .embedded.board_task import discover_board_tasks, load_board_task
     from .target.board import BoardRunner
     from .target.esp_idf import IdfEnv, IdfUnavailable
@@ -1079,7 +1079,11 @@ def cmd_board_eval(args) -> int:
                             runs_root=Path(DEFAULT_RUNS_DIR), build_root=Path(".ff_data") / "idf_build",
                             max_attempts=args.max_attempts, tier=args.tier, think=args.think)
     out = Path(args.out)
-    evaluate(tasks, configs, args.runs, out, ctx, max_cost=args.max_cost)
+    try:
+        evaluate(tasks, configs, args.runs, out, ctx, max_cost=args.max_cost)
+    except EvalDataError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return EXIT_USAGE
     print(f"\n汇总：{out / 'summary.md'}\n明细：{out / 'runs.csv'}")
     print((out / "summary.md").read_text(encoding="utf-8"))
     return EXIT_PASS
@@ -1156,6 +1160,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"错误：{exc}", file=sys.stderr)
         return EXIT_USAGE
     except LLMError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return EXIT_FAIL
+    except OSError as exc:                       # 目录没有写权限、磁盘满、文件被占用等：说清楚是哪个文件
         print(f"错误：{exc}", file=sys.stderr)
         return EXIT_FAIL
     except KeyboardInterrupt as exc:
