@@ -366,12 +366,13 @@ class ChatPage(QWidget):
         self.board_view = bv.BoardTestView()
         self.rules_view = QTextEdit()
         self.rules_view.setReadOnly(True)
-        self.tabs.addTab(self.layer_box, "检查结果")
-        self.tabs.addTab(self.board_view, "上板测试")
-        self.tabs.addTab(self.code_view, "代码")
-        self.tabs.addTab(self.rules_view, "用到的规则")
-        self.tabs.addTab(why_box, "为什么交给它")
-        self.tabs.addTab(self.brief_view, "发给 AI 的内容")
+        # 标签名尽量短；面板窄时标签缩短显示（省略号），不用左右箭头（箭头会盖住标签的字）
+        self.tabs.tabBar().setUsesScrollButtons(False)
+        self.tabs.tabBar().setElideMode(Qt.ElideRight)
+        for w, name, tip in ((self.layer_box, "检查", "检查结果"), (self.board_view, "上板", "上板测试的用例和串口输出"),
+                             (self.code_view, "代码", "这一次交上来的代码"), (self.rules_view, "规则", "这次用到的规则"),
+                             (why_box, "调度", "为什么交给这个 Agent"), (self.brief_view, "发给 AI", "发给 AI 的内容")):
+            self.tabs.setTabToolTip(self.tabs.addTab(w, name), tip)
         self.why_box = why_box
         ipanel.lay.addWidget(self.tabs)
         right.addWidget(gpanel)

@@ -672,8 +672,4 @@ firmforge mcp                            以 stdio 方式启动 MCP 服务（可
   - 执行 `pip install --break-system-packages -e .`；
   - `ENTRYPOINT ["firmforge"]`。
 - **在容器里调用 LLM**：用 `--env-file .env` 传入 API key。
-- **Windows**：
-  - 判定器和命令行通过 Docker Desktop 运行；
-  - 桌面软件在本机运行，默认用 `docker` 后端；
-  - 运行目录挂载用 `-v "<Windows 绝对路径>":/work`。
-- **打包**（阶段 5）：在 GitHub Actions 的 `windows-latest` 上用 PyInstaller 打包桌面软件，产出 FirmForge.exe；Linux 上用 `pip install .[gui]`。
+- **运行环境**（DECISIONS 第 101 条）：只在 Linux（Ubuntu 24.04）上开发和测试，不做 Windows 实测和打包；桌面软件用 `pip install -e .[gui,sources]` 安装后在本机运行。运行环境、依赖包、部署步骤写在 README 的"运行环境与部署"一节。

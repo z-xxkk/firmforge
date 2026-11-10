@@ -37,7 +37,7 @@ FirmForge 是一个**面向嵌入式固件开发的多 Agent 编排与验证平�
    - `cli.py` 和 `gui/` 只调用核心库的公开接口。
    - 核心库不 import `cli` 或 `gui`。
    - 核心库通过事件（见 ARCHITECTURE §2.8）向界面报告进度。
-3. **跨平台（Linux + Windows）。**
+3. **可移植的写法。**（作品只在 Linux 上开发和测试，不做 Windows，DECISIONS 第 101 条；下面的写法照旧保持）
    - 路径用 `pathlib`。
    - `subprocess` 一律传参数列表，不用 `shell=True`。
    - 读写文本一律 `encoding="utf-8"`。

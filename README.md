@@ -234,6 +234,67 @@ PYTHONPATH=src python3 -m firmforge doctor
 python3 -m unittest discover -s tests -v
 ```
 
+## 运行环境与部署
+
+### 我们用的环境
+
+| 项目 | 版本 |
+|---|---|
+| 操作系统 | Ubuntu 24.04.5 LTS（x86_64）；只在 Linux 上开发和测试，没有做 Windows（DECISIONS 第 101 条） |
+| Python | 3.12.3（要求 ≥ 3.11） |
+| 核心库依赖 | 只用 Python 标准库 |
+| 可选依赖 | 桌面软件 `PySide6-Essentials`（≥ 6.7，测试用 6.12.0）；读 PDF 资料 `pypdf`（≥ 5，测试用 6.21.4） |
+| Docker | 29.1.3；判定器的工具链（gcc、arm-none-eabi-gcc、cppcheck、gcov）装在镜像里 |
+| ESP-IDF | v6.1，默认装在 `~/esp/esp-idf-v6.1`，也可以用环境变量 `FF_IDF_PATH` 或 `IDF_PATH` 指定 |
+| 大模型 | DeepSeek（OpenAI 兼容接口），API key 放在 `.env` |
+| 开发板 | ESP32-C3 SuperMini（实测芯片 ESP32-C3 AZ rev v1.1），USB-C 连电脑，串口一般是 `/dev/ttyACM0` |
+| 外接器件 | MPU6050 模块（实为 MPU-6500 兼容芯片）、MAX30102 模块 |
+
+接线（以 `hardware/esp32c3_supermini/profile.json` 为准）：
+
+| 信号 | GPIO | 说明 |
+|---|---|---|
+| I2C SDA / SCL | 4 / 5 | MPU6050 和 MAX30102 共用这条总线 |
+| MPU6050 INT | 3 | |
+| MAX30102 INT | 10 | 低电平有效、开漏，需上拉 |
+| UART1 TX / RX | 0 / 1 | 回环测试：TX 接 RX |
+| PWM 输出 / 输入 | 6 / 7 | 回环测试：6 接 7 |
+
+### 部署步骤
+
+1. 取代码，建虚拟环境，装可选依赖：
+   ```bash
+   git clone https://github.com/z-xxkk/firmforge.git && cd firmforge
+   python3 -m venv .venv
+   .venv/bin/pip install -e ".[gui,sources]"
+   ```
+2. 构建判定器镜像：
+   ```bash
+   docker build -t firmforge -f docker/Dockerfile .
+   ```
+3. 安装 ESP-IDF v6.1（上板相关的功能需要）：按乐鑫官方文档安装到 `~/esp/esp-idf-v6.1`，目标芯片选 esp32c3。
+4. 填 API key：把 `.env.example` 复制成 `.env`，填入 DeepSeek 的 key（只放在 `.env`，不要写进代码）。
+5. 串口权限：当前用户要能读写 `/dev/ttyACM0`（Ubuntu 上一般在 `plugdev` 或 `dialout` 组里）。
+6. 检查环境：
+   ```bash
+   .venv/bin/firmforge doctor
+   .venv/bin/python -m unittest discover -s tests
+   ```
+7. 板子插好以后，自检上板评测题（标准答案要通过、变异体要被抓住，不调用模型、不花钱）：
+   ```bash
+   .venv/bin/firmforge check-board-tasks --board
+   ```
+8. 打开桌面软件：
+   ```bash
+   .venv/bin/firmforge gui
+   ```
+
+### 没有板子时能复现什么
+
+- 全部单元测试（假模型，不联网）：`.venv/bin/python -m unittest discover -s tests`。
+- 上板评测题只编译、不上板：`firmforge check-board-tasks`（不加 `--board`）。
+- 第 1 轮评测、失败分析案例和试点的原始数据都在 `docs/eval_data/`，桌面软件的评测页可以直接读这些 `runs.jsonl`。
+
 ## 判定器
 
 | 层 | 名称 | 通过条件 |
@@ -258,7 +319,7 @@ python3 -m unittest discover -s tests -v
 - 在 Linux 上用 `docker run -v` 运行时要加 `--user "$(id -u):$(id -g)"`，否则容器内生成的 `.ff_build/` 属于 root。
 - 国内网络下拉取基础镜像需要给 Docker 守护进程配置代理（`/etc/systemd/system/docker.service.d/http-proxy.conf`）。
 - 桌面软件里确认规则要一次表态完：没表态的规则不会留到下次（规则流程只把通过的规则入库）。
-- 自动找串口只认 Linux 的 `/dev/ttyACM*`、`/dev/serial/by-id/*` 等；Windows 上要用环境变量 `FF_SERIAL_PORT` 指定 COM 口。
+- 只在 Linux（Ubuntu 24.04）上开发和测试，没有做 Windows（DECISIONS 第 101 条）。自动找串口只认 `/dev/ttyACM*`、`/dev/serial/by-id/*` 等，也可以用环境变量 `FF_SERIAL_PORT` 指定。
 
 ## 开源组件
 
