@@ -195,7 +195,9 @@ class RunView:
 
 def flow_positions(steps: list, *, x0: float = 0, y0: float = 0, w: float = 150, h: float = 40,
                    gap: float = 26) -> dict[str, tuple[float, float]]:
-    """流程图：顶层步骤从上到下排一列；并行分支、条件的"是 / 否"分支排在右侧同一行。用户拖过的位置（pos）优先。"""
+    """流程图：顶层步骤从上到下排一列。
+    并行画成"分叉再汇合"（主流流程图的画法）：各分支在并行的下一行并排、整体居中，下一步再排在分支下面；
+    条件的"是 / 否"分支排在右侧同一行，主干继续往下。用户拖过的位置（pos）优先。"""
     pos: dict[str, tuple[float, float]] = {}
     referenced = {r for s in steps for r in (*s.branches, *s.then, *s.otherwise)}
     by_id = {s.id: s for s in steps}
@@ -205,12 +207,17 @@ def flow_positions(steps: list, *, x0: float = 0, y0: float = 0, w: float = 150,
             continue
         pos[s.id] = s.pos or (x0, y)
         y = pos[s.id][1] + h + gap
-        kids = list(s.branches) or [*s.then, *s.otherwise]
-        if kids:
-            for i, k in enumerate(kids):
-                ks = by_id.get(k)
-                if ks is not None:
-                    pos[k] = ks.pos or (x0 + (i + 1) * (w + 30), pos[s.id][1])
+        px, py = pos[s.id]
+        forks = [k for k in s.branches if k in by_id]
+        if forks:                                 # 并行：分支在下一行并排，以并行为中线
+            total = len(forks) * w + (len(forks) - 1) * 30
+            left = px + w / 2 - total / 2
+            for i, k in enumerate(forks):
+                pos[k] = by_id[k].pos or (left + i * (w + 30), y)
+            y += h + gap
+        for i, k in enumerate([*s.then, *s.otherwise]):
+            if k in by_id:
+                pos[k] = by_id[k].pos or (px + (i + 1) * (w + 30), py)
     for s in steps:                               # 引用了不存在的步骤等情况：兜底放在最下面
         if s.id not in pos:
             pos[s.id] = s.pos or (x0, y)
@@ -238,7 +245,8 @@ def snap_target(top_center: tuple[float, float], steps: dict[str, tuple[float, f
     返回 ("edge", 上一步, 下一步)：插进这条线；("after", 步骤, "")：接到这个步骤后面；
     ("branch", 并行或条件, 旁边的分支步骤)：和旁边那个步骤并列，成为同一个并行 / 条件的分支；None：放在空白处、不连。
     branch_of：分支步骤 → 引用它的并行或条件；parents：并行、条件步骤。
-    分支里的步骤没有先后（引擎里每个分支就是一个步骤），所以拖到分支步骤的下面或右边，都是"并列成为分支"。
+    分支里的步骤没有先后（引擎里每个分支就是一个步骤），所以拖到分支步骤的左右两边是"并列成为分支"；
+    分支下面是汇合线，拖到汇合线上是"并行做完以后的下一步"（汇合线的逻辑端点是 并行 → 下一步）。
     连线优先（它更具体）；都不近就不吸附。被拖的步骤自己和连到它的线不算。
     """
     branch_of, parents = branch_of or {}, parents or set()
@@ -262,12 +270,14 @@ def snap_target(top_center: tuple[float, float], steps: dict[str, tuple[float, f
             d = (dx ** 2 + dy ** 2) ** 0.5
             if d <= best_d:
                 best, best_d = ("after", sid, ""), d
-        if sid in branch_of or sid in parents:           # 右边：和它并列
-            gap, row = (x - w / 2) - (sx + w), abs(y - sy)
-            if -w * 0.25 <= gap <= SNAP_SIDE and row <= h:
-                d = (max(gap, 0) ** 2 + row ** 2) ** 0.5
-                if d <= best_d:
-                    best, best_d = ("after", sid, ""), d
+        if sid in branch_of or sid in parents:           # 右边（分支步骤的左边也算）：和它并列
+            row = abs(y - sy)
+            gaps = [(x - w / 2) - (sx + w)] + ([sx - (x + w / 2)] if sid in branch_of else [])
+            for gap in gaps:
+                if -w * 0.25 <= gap <= SNAP_SIDE and row <= h:
+                    d = (max(gap, 0) ** 2 + row ** 2) ** 0.5
+                    if d <= best_d:
+                        best, best_d = ("after", sid, ""), d
     if best is not None and best[1] in branch_of:
         return ("branch", branch_of[best[1]], best[1])
     return best

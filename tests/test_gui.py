@@ -34,14 +34,22 @@ class LayoutTest(unittest.TestCase):
         self.assertAlmostEqual(pos["a"][0] + pos["b"][0] + 100, 0)        # 第 0 层左右对称
         self.assertGreater(pos["c"][1], pos["a"][1])
 
-    def test_flow_positions_branches_to_the_right(self):
+    def test_flow_positions_parallel_forks_below(self):
+        # 并行画成"分叉再汇合"：分支在并行的下一行并排、以并行为中线，下一步排在分支下面；条件的分支在右侧同一行
         wf = load_workflow()
         steps = list(wf.subflows["module_impl"])
-        pos = flow_positions(steps)
+        pos = flow_positions(steps, w=160, h=42, gap=30)
         write = next(s for s in steps if s.kind == "parallel")
-        for b in write.branches:
-            self.assertEqual(pos[b][1], pos[write.id][1])
-            self.assertGreater(pos[b][0], pos[write.id][0])
+        ys = {pos[b][1] for b in write.branches}
+        self.assertEqual(len(ys), 1)
+        self.assertGreater(ys.pop(), pos[write.id][1])
+        xs = [pos[b][0] for b in write.branches]
+        self.assertAlmostEqual((min(xs) + max(xs)) / 2, pos[write.id][0])           # 整体居中
+        self.assertGreater(pos["check"][1], pos[write.branches[0]][1])
+        self.assertEqual(pos["check"][0], pos[write.id][0])
+        gate = next(s for s in steps if s.kind == "condition")
+        self.assertEqual(pos[gate.then[0]][1], pos[gate.id][1])
+        self.assertGreater(pos[gate.then[0]][0], pos[gate.id][0])
 
     def test_run_view_follows_events(self):
         v = RunView()
@@ -354,7 +362,7 @@ class GuiSmokeTest(unittest.TestCase):
 
     def test_designer_join_parallel_branch(self):
         # 负责人发现的 bug：想把 test 接到 code 旁边（同一个并行的分支），却被吸到主干上。
-        # 拖到分支步骤的右边、下面，或从分支步骤拉线，都是并列成为同一个并行的分支
+        # 拖到分支步骤的左右两边，或从分支步骤拉线，都是并列成为同一个并行的分支；拖到汇合线上是并行之后的下一步
         from PySide6.QtCore import QPoint, QPointF, Qt
         from PySide6.QtTest import QTest
         from firmforge.gui.graph import STEP_H, STEP_W
@@ -381,8 +389,15 @@ class GuiSmokeTest(unittest.TestCase):
         drag(pt("test", 30, 12), pt("code", STEP_W + 55, 12))                  # 右边
         self.assertEqual(branches(), ("code", "test"))
         away()
-        drag(pt("test", 30, 12), pt("code", 40, STEP_H + 42))                  # 下面
-        self.assertEqual(branches(), ("code", "test"))
+        drag(pt("test", 30, 12), pt("code", -STEP_W - 25 + 30, 12))            # 左边也一样
+        self.assertEqual(set(branches()), {"code", "test"})
+        away()
+        e = next(e for e in cv.edges if e.logical == ("write", "check"))       # 汇合线上：并行做完以后的下一步
+        drag(pt("test", 30, 12), cv.mapFromScene(e.mid()) + QPoint(30 - STEP_W // 2, 12))
+        self.assertEqual(branches(), ("code",))
+        self.assertEqual([s.id for s in d._steps("module_impl") if s.id in ("write", "test", "check")],
+                         ["write", "test", "check"])
+        self.assertFalse(d._get("test").detached)
         away()
         drag(pt("code", STEP_W / 2, STEP_H + 6), pt("test", STEP_W / 2, STEP_H / 2))   # 从 code 拉线
         self.assertEqual(branches(), ("code", "test"))

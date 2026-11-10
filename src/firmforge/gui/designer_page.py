@@ -153,7 +153,7 @@ class DesignerPage(QMainWindow):
                 it.setData(Qt.UserRole, kind)
                 self.palette.addItem(it)
         self.palette.itemDoubleClicked.connect(lambda it: it.data(Qt.UserRole) and self.add_step(it.data(Qt.UserRole)))
-        tip = label("把步骤拖进画布：放到连线上就插进去，放到某个步骤下面就接在它后面，放到并行分支的旁边就并列成为分支；"
+        tip = label("把步骤拖进画布：放到连线上就插进去，放到某个步骤下面就接在它后面，放到并行分支的左右就并列成为分支；"
                     "也可以双击加到选中步骤后面。鼠标移到连线上点 × 断开。", "Faint", wrap=True)
         box = QWidget()
         bl = QVBoxLayout(box)

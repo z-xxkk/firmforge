@@ -305,7 +305,7 @@ class StepItem(QGraphicsObject):
         elif s.kind == "parallel":
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(c["fail"] if s.detached else c["ink2"]))
-            p.drawRoundedRect(QRectF(0, STEP_H / 2 - 3, STEP_W, 6), 3, 3)
+            p.drawRoundedRect(QRectF(0, STEP_H - 12, STEP_W, 6), 3, 3)     # 横条在下、名字在上：分叉线从横条下面出去，不压字
         else:
             if s.kind == "foreach":
                 p.drawRoundedRect(QRectF(5, 5, STEP_W, STEP_H), radius, radius)
@@ -314,7 +314,7 @@ class StepItem(QGraphicsObject):
         p.setPen(QColor(c["ink"]))
         if s.kind == "parallel":
             p.setFont(_mono(9, True))
-            p.drawText(QRectF(0, STEP_H / 2 + 4, STEP_W, 16), Qt.AlignCenter, f"{s.id}（并行）" + ("，没连上" if s.detached else ""))
+            p.drawText(QRectF(0, 8, STEP_W, 18), Qt.AlignCenter, f"{s.id}（并行）" + ("，没连上" if s.detached else ""))
             return
         p.setFont(_mono(9.5, True))
         p.drawText(QRectF(12, 3, STEP_W - 20, 20), Qt.AlignLeft | Qt.AlignVCenter if s.kind != "condition" else Qt.AlignCenter, s.id)
@@ -373,6 +373,8 @@ class EdgeItem(QGraphicsPathItem):
     def __init__(self, a: str, b: str, path: QPainterPath, canvas: "FlowCanvas", deletable: bool):
         super().__init__(path)
         self.a, self.b, self.canvas, self.deletable = a, b, canvas, deletable
+        self.branch = False                 # 并行、条件到分支的线：可以断开，不能把步骤插进去
+        self.logical = (a, b)               # 汇合线（分支 → 下一步）画的是分支到下一步，含义是"并行 → 下一步"
         self.hot = False
         self.setAcceptHoverEvents(deletable)
         self._style()
@@ -459,29 +461,36 @@ class FlowCanvas(DotGridView):
         self.flow_of.clear()
         self.regions.clear()
         c = T()
-        groups = [("main", list(wf.main), 0.0)]
+        groups = [("main", list(wf.main))]
         sub = subflow or next(iter(wf.subflows), None)
         if sub:
-            groups.append((sub, list(wf.subflows[sub]), 300.0))
-        for name, steps, x0 in groups:
+            groups.append((sub, list(wf.subflows[sub])))
+        right = 0.0                                            # 已经画好的流程的右边界，下一个流程排在它右边
+        for name, steps in groups:
             linked = [s for s in steps if not s.detached]
-            pos = flow_positions(linked, x0=x0, y0=40)
+            kw = dict(y0=40, w=STEP_W, h=STEP_H, gap=30)
+            x0 = 0.0
+            if name != "main":                                 # 先排一遍量出左边界，再整体挪到主流程右边
+                draft = flow_positions(linked, x0=0.0, **kw)
+                x0 = right + 110 - min([p[0] for p in draft.values()] or [0.0])
+            pos = flow_positions(linked, x0=x0, **kw)
+            ys = [p[1] for p in pos.values()] or [40]
+            xs = [p[0] for p in pos.values()] or [x0]
+            frame = QRectF(min(xs) - 24, 0, max(xs) - min(xs) + STEP_W + 48, max(ys) + STEP_H + 40)
+            right = max(right, frame.right())
+            self.regions.append((name, frame))
             n = 0
             for s in steps:
                 if s.detached:                                 # 没给位置就放到流程旁边（主流程左边、子流程右边）
-                    pos[s.id] = s.pos or ((-STEP_W - 80 if name == "main" else x0 + 2 * STEP_W + 120), 40 + 64 * n)
+                    pos[s.id] = s.pos or ((-STEP_W - 80 if name == "main" else frame.right() + 40), 40 + 64 * n)
                     n += 1
-            ys = [p[1] for p in pos.values()] or [40]
-            xs = [p[0] for p in pos.values()] or [x0]
-            frame = QRectF(x0 - 24, 0, max(xs) - x0 + STEP_W + 48, max(ys) + STEP_H + 40)
-            self.regions.append((name, frame))
             if name != "main":
                 box = sc.addRect(frame, QPen(QColor(c["line"]), 1), QBrush(QColor(c["surface"])))
                 box.setOpacity(0.6)
                 box.setZValue(-2)
                 t = sc.addText(f"子流程 {name}")
                 t.setDefaultTextColor(QColor(c["ink2"]))
-                t.setPos(x0 - 18, 6)
+                t.setPos(frame.left() + 6, 6)
             prev = None
             refd = {r for s in linked for r in (*s.branches, *s.then, *s.otherwise)}
             for s in steps:
@@ -495,11 +504,17 @@ class FlowCanvas(DotGridView):
                 sc.addItem(it)
                 self.items_by_id[s.id] = it
                 self.flow_of[s.id] = name
+            by_id = {s.id: s for s in linked}
             for s in linked:
                 if s.id in refd:
                     continue
                 if prev is not None:
-                    self._edge(prev, s.id)
+                    forks = [k for k in by_id[prev].branches if k in self.items_by_id]
+                    if forks:                                  # 上一步是并行：各分支汇合到这一步
+                        for k in forks:
+                            self._edge(k, s.id, join=(prev, s.id))
+                    else:
+                        self._edge(prev, s.id)
                 for k in (*s.branches, *s.then, *s.otherwise):
                     self._edge(s.id, k, label="是" if k in s.then else ("否" if k in s.otherwise else ""), branch=True)
                 prev = s.id
@@ -522,12 +537,15 @@ class FlowCanvas(DotGridView):
             return path
         return curve(pa, pb)
 
-    def _edge(self, a: str, b: str, label: str = "", branch: bool = False) -> None:
+    def _edge(self, a: str, b: str, label: str = "", branch: bool = False, join: tuple[str, str] | None = None) -> None:
         ia, ib = self.items_by_id.get(a), self.items_by_id.get(b)
         if ia is None or ib is None:
             return
-        item = EdgeItem(a, b, self._edge_path(ia, ib), self, self.editable)
-        item.branch = branch                    # 并行、条件的分支线：可以断开，但不能把步骤插进去
+        # 汇合线不能单独断开（它不是一条独立的连接，断开分支要点"并行 → 分支"那条线）
+        item = EdgeItem(a, b, self._edge_path(ia, ib), self, self.editable and join is None)
+        item.branch = branch
+        if join is not None:
+            item.logical = join
         item.setZValue(-1)
         self.scene().addItem(item)
         self.edges.append(item)
@@ -543,8 +561,8 @@ class FlowCanvas(DotGridView):
         """可以吸附的地方：同一个流程里已连上的步骤（接到它后面）和顺序连线（插进去）。"""
         steps = {sid: (it.pos().x(), it.pos().y()) for sid, it in self.items_by_id.items()
                  if not it.step.detached and (flow is None or self.flow_of[sid] == flow) and sid != exclude}
-        edges = [(e.a, e.b, (e.mid().x(), e.mid().y())) for e in self.edges
-                 if not e.branch and e.a in steps and e.b in steps and exclude not in (e.a, e.b)]
+        edges = [(*e.logical, (e.mid().x(), e.mid().y())) for e in self.edges
+                 if not e.branch and e.a in steps and e.b in steps and exclude not in (e.a, e.b, *e.logical)]
         self._branch_of = {r: sid for sid in steps for r in (*self.items_by_id[sid].step.branches,
                                                               *self.items_by_id[sid].step.then,
                                                               *self.items_by_id[sid].step.otherwise) if r in steps}
@@ -577,9 +595,10 @@ class FlowCanvas(DotGridView):
         kind, a, b = target
         anchor = self.items_by_id[b if kind == "branch" else a]
         side = kind == "branch" or anchor.step.kind in ("parallel", "condition")
-        if side and top.y() < anchor.pos().y() + STEP_H:          # 并列：从旁边那一步的右侧连过来
-            start = anchor.pos() + QPointF(STEP_W, STEP_H / 2)
-            end = top + QPointF(-STEP_W / 2, STEP_H / 2)
+        if side and top.y() < anchor.pos().y() + STEP_H:          # 并列：从旁边那一步的侧面连过来
+            left = top.x() < anchor.pos().x() + STEP_W / 2
+            start = anchor.pos() + QPointF(0 if left else STEP_W, STEP_H / 2)
+            end = top + QPointF(STEP_W / 2 if left else -STEP_W / 2, STEP_H / 2)
             path = QPainterPath(start)
             path.cubicTo(QPointF(start.x() + 20, start.y()), QPointF(end.x() - 20, end.y()), end)
         else:
@@ -591,7 +610,7 @@ class FlowCanvas(DotGridView):
         self._preview.setZValue(5)
         if kind == "edge":
             for e in self.edges:
-                if (e.a, e.b) == (a, b):
+                if e.logical == (a, b) and not e.branch:
                     e.hot = True
                     e._style()
                     e.update()
