@@ -405,6 +405,91 @@ class GuiSmokeTest(unittest.TestCase):
         self.assertEqual(d.check(quiet=True), [])
         w.close()
 
+    def test_designer_explored_bugs(self):
+        # 2026-11-10 自查出的 6 个问题（真实鼠标事件）：
+        from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt
+        from PySide6.QtGui import QDropEvent
+        from PySide6.QtTest import QTest
+        from firmforge.gui.graph import STEP_H, STEP_MIME, STEP_W
+        w = self.window()
+        w.resize(1440, 900)
+        w.show()
+        w.go("flow")
+        d, cv = w.designer, w.designer.canvas
+        vp = cv.viewport()
+        base = d.wf
+
+        def reset():
+            d.wf = base
+            d.undo.clear()
+            d.selected = None
+            cv.user_view = False
+            d.render_all()
+
+        def drag(a, b):
+            QTest.mousePress(vp, Qt.LeftButton, Qt.NoModifier, a)
+            for k in range(1, 9):
+                QTest.mouseMove(vp, a + (b - a) * k / 8)
+            QTest.mouseRelease(vp, Qt.LeftButton, Qt.NoModifier, b)
+
+        def drop(kind, pt):
+            md = QMimeData()
+            md.setData(STEP_MIME, kind.encode())
+            cv.dropEvent(QDropEvent(QPointF(cv.mapFromScene(pt)), Qt.CopyAction, md, Qt.LeftButton, Qt.NoModifier))
+
+        def overlaps():
+            its = list(cv.items_by_id.values())
+            return [(a.step.id, b.step.id) for i, a in enumerate(its) for b in its[i + 1:]
+                    if abs(a.pos().x() - b.pos().x()) < STEP_W - 10 and abs(a.pos().y() - b.pos().y()) < STEP_H - 6]
+        pt = lambda sid, x=30, y=12: cv.mapFromScene(cv.items_by_id[sid].pos() + QPointF(x, y))     # noqa: E731
+        sub = lambda: [s.id for s in d._steps("module_impl")]                                       # noqa: E731
+        # ① 小范围挪过的步骤，再往它前面插步骤，不能叠在一起（连着的步骤不记手动位置）
+        a = pt("check")
+        drag(a, a + QPoint(25, 10))
+        self.assertIsNone(d._get("check").pos)
+        drop("human", next(e for e in cv.edges if e.logical == ("write", "check")).mid())
+        self.assertEqual(overlaps(), [])
+        # ② 第一步拖走以后能放回最前面（拖到现在第一步的正上方）
+        reset()
+        a = pt("plan")
+        drag(a, a + QPoint(-260, 60))
+        self.assertTrue(d._get("plan").detached)
+        drag(pt("plan"), cv.mapFromScene(cv.items_by_id["confirm_plan"].pos() + QPointF(30, -STEP_H - 8)))
+        self.assertEqual([s.id for s in d.wf.main][:2], ["plan", "confirm_plan"])
+        self.assertFalse(d._get("plan").detached)
+        # ③ 流程全拆开以后，放回框里就是第一步
+        reset()
+        for sid in ("review", "review_gate", "repair", "check", "test", "code", "write"):
+            d._step_dropped(sid, *d._parking("module_impl"), None, True)
+        self.assertEqual(overlaps(), [])
+        self.assertIn("module_impl", cv.empty_flows)
+        frame = next(r for n, r in cv.regions if n == "module_impl")
+        drag(pt("write", 80, 10), cv.mapFromScene(frame.center()))
+        self.assertFalse(d._get("write").detached)
+        # ④ 把主流程的步骤拖进子流程的框里：不接上，也不压在别的步骤上
+        reset()
+        drag(pt("integrate"), cv.mapFromScene(cv.items_by_id["repair"].pos() + QPointF(35, STEP_H + 42)))
+        self.assertTrue(d._get("integrate").detached)
+        self.assertEqual(overlaps(), [])
+        # ⑤ 拖到还没有分支的并行下面：成为它的分支；空并行保存前会被检查出来
+        reset()
+        drop("parallel", next(e for e in cv.edges if (e.a, e.b) == ("check", "repair")).mid())
+        self.assertTrue(any("并行还没有分支" in p for p in d.check(quiet=True)))
+        d._apply_code()                                                    # 空并行写进代码再读回来不报错
+        self.assertIn("parallel_1", sub())
+        drop("agent", cv.items_by_id["parallel_1"].pos() + QPointF(STEP_W / 2, STEP_H + 20))
+        self.assertEqual(d._get("parallel_1").branches, ("agent_1",))
+        # ⑥ 并行被拖走：分支跟着它，不会画成主干上的步骤
+        reset()
+        a = pt("write", 80, 10)
+        drag(a, a + QPoint(430, 60))
+        self.assertTrue(d._get("write").detached)
+        self.assertEqual(d._get("write").branches, ("code", "test"))
+        self.assertEqual(cv.floating, {"write", "code", "test"})
+        self.assertFalse([e for e in cv.edges if not e.branch and {"code", "test"} & {e.a, e.b}])
+        self.assertEqual(overlaps(), [])
+        w.close()
+
     def test_designer_edits_flow_into_code(self):
         w = self.window()
         dz = w.designer

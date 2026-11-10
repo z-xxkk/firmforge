@@ -76,6 +76,26 @@ class EngineProblemsTest(unittest.TestCase):
         self.assertTrue(parse_workflow(tomllib.loads(text), "x").main[1].detached)
         self.assertTrue(any("还没连上" in p for p in engine_problems(wf2, self.reg)))
 
+    def test_layout_ignores_stale_positions_and_carries_detached_kids(self):
+        from firmforge.gui.layout import attached_ids, flow_positions
+        sub = list(self.wf.subflows["module_impl"])
+        moved = [dataclasses.replace(s, pos=(999.0, 999.0)) if s.id == "check" else s for s in sub]
+        pos = flow_positions(moved, w=160, h=42, gap=30)
+        self.assertNotEqual(pos["check"], (999.0, 999.0))                  # 连着的步骤一律自动排
+        loose = [dataclasses.replace(s, detached=True, pos=(700.0, 50.0)) if s.id == "write" else s for s in sub]
+        pos = flow_positions(loose, w=160, h=42, gap=30)
+        self.assertEqual(pos["write"], (700.0, 50.0))
+        self.assertGreater(pos["code"][1], 50.0)                           # 分支跟着没连上的并行
+        self.assertEqual(pos["check"][1], 0)                               # 主干从 check 开始，不给浮着的步骤留位置
+        self.assertEqual(attached_ids(loose), {"check", "repair", "review_gate", "review"})
+
+    def test_snap_before_first_step(self):
+        from firmforge.gui.layout import snap_target
+        steps = {"a": (0.0, 100.0), "b": (0.0, 200.0)}
+        kw = dict(w=160, h=42, heads={"a"})
+        self.assertEqual(snap_target((80.0, 30.0), steps, [], **kw), ("before", "a", ""))
+        self.assertIsNone(snap_target((80.0, -200.0), steps, [], **kw))
+
     def test_snap_target(self):
         # 拖动时吸附到哪里：连线中点附近插进去，步骤正下方接在后面，远处不吸附
         from firmforge.gui.layout import SNAP_HANDLE, snap_target

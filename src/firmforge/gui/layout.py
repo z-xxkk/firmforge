@@ -194,35 +194,67 @@ class RunView:
 # ---------------------------------------------------------------- 流程图排布
 
 def flow_positions(steps: list, *, x0: float = 0, y0: float = 0, w: float = 150, h: float = 40,
-                   gap: float = 26) -> dict[str, tuple[float, float]]:
-    """流程图：顶层步骤从上到下排一列。
+                   gap: float = 26, park: tuple[float, float] | None = None) -> dict[str, tuple[float, float]]:
+    """流程图的自动排布：顶层步骤从上到下排一列。
     并行画成"分叉再汇合"（主流流程图的画法）：各分支在并行的下一行并排、整体居中，下一步再排在分支下面；
-    条件的"是 / 否"分支排在右侧同一行，主干继续往下。用户拖过的位置（pos）优先。"""
+    条件的"是 / 否"分支排在右侧同一行，主干继续往下。
+    连在流程里的步骤一律自动排（不记手动位置，否则插入步骤时会叠在一起）；
+    没连上的步骤（detached）不占主干的位置：放在它自己记的 pos，没有就从 park 起往下排；它的分支跟着它走。"""
     pos: dict[str, tuple[float, float]] = {}
     referenced = {r for s in steps for r in (*s.branches, *s.then, *s.otherwise)}
     by_id = {s.id: s for s in steps}
-    y = y0
-    for s in steps:
-        if s.id in referenced:
-            continue
-        pos[s.id] = s.pos or (x0, y)
-        y = pos[s.id][1] + h + gap
-        px, py = pos[s.id]
-        forks = [k for k in s.branches if k in by_id]
+
+    def kids(s, px: float, py: float) -> int:
+        """排 s 的分支；返回它们在下面占了几行。"""
+        used = 0
+        forks = [k for k in s.branches if k in by_id and k not in pos]
         if forks:                                 # 并行：分支在下一行并排，以并行为中线
             total = len(forks) * w + (len(forks) - 1) * 30
             left = px + w / 2 - total / 2
             for i, k in enumerate(forks):
-                pos[k] = by_id[k].pos or (left + i * (w + 30), y)
-            y += h + gap
-        for i, k in enumerate([*s.then, *s.otherwise]):
-            if k in by_id:
-                pos[k] = by_id[k].pos or (px + (i + 1) * (w + 30), py)
-    for s in steps:                               # 引用了不存在的步骤等情况：兜底放在最下面
+                pos[k] = (left + i * (w + 30), py + h + gap)
+            used = 1 + max(kids(by_id[k], *pos[k]) for k in forks)
+        side = [k for k in (*s.then, *s.otherwise) if k in by_id and k not in pos]
+        for i, k in enumerate(side):
+            pos[k] = (px + (i + 1) * (w + 30), py)
+            used = max(used, kids(by_id[k], *pos[k]))
+        return used
+
+    y, n = y0, 0
+    park_x, park_y = park or (x0 - w - 80, y0)
+    for s in steps:
+        if s.id in referenced:
+            continue
+        if getattr(s, "detached", False):
+            pos[s.id] = s.pos or (park_x, park_y + n * (h + 22))
+            n += 1 + kids(s, *pos[s.id])
+            continue
+        pos[s.id] = (x0, y)
+        y += (h + gap) * (1 + kids(s, x0, y))
+    for s in steps:                               # 引用成环等异常情况：兜底放在最下面
         if s.id not in pos:
-            pos[s.id] = s.pos or (x0, y)
+            pos[s.id] = (x0, y)
             y += h + gap
     return pos
+
+
+def attached_ids(steps: list) -> set[str]:
+    """连在流程里的步骤：顶层没断开的步骤，以及它们的分支（分支的分支也算）。其余是"浮着的"。"""
+    by_id = {s.id: s for s in steps}
+    referenced = {r for s in steps for r in (*s.branches, *s.then, *s.otherwise)}
+    out: set[str] = set()
+
+    def add(s):
+        if s.id in out:
+            return
+        out.add(s.id)
+        for k in (*s.branches, *s.then, *s.otherwise):
+            if k in by_id:
+                add(by_id[k])
+    for s in steps:
+        if s.id not in referenced and not getattr(s, "detached", False):
+            add(s)
+    return out
 
 
 # ---------------------------------------------------------------- 设计器：拖动时吸附到哪里（DECISIONS 第 102 条）
@@ -238,18 +270,19 @@ SNAP_SIDE = 110.0       # 拖到分支步骤（或并行、条件）右边这个
 def snap_target(top_center: tuple[float, float], steps: dict[str, tuple[float, float]],
                 edges: list[tuple[str, str, tuple[float, float]]], *, w: float, h: float,
                 exclude: str = "", branch_of: dict[str, str] | None = None,
-                parents: set[str] | None = None) -> tuple[str, str, str] | None:
+                parents: set[str] | None = None, heads: set[str] | None = None) -> tuple[str, str, str] | None:
     """拖动中的步骤（上沿中点在 top_center）该接到哪里。
 
     steps：步骤 → 左上角坐标；edges：(上一步, 下一步, 连线中点)。
     返回 ("edge", 上一步, 下一步)：插进这条线；("after", 步骤, "")：接到这个步骤后面；
     ("branch", 并行或条件, 旁边的分支步骤)：和旁边那个步骤并列，成为同一个并行 / 条件的分支；None：放在空白处、不连。
-    branch_of：分支步骤 → 引用它的并行或条件；parents：并行、条件步骤。
+    ("before", 第一步, "")：放到流程的最前面（拖到第一步的正上方）。
+    branch_of：分支步骤 → 引用它的并行或条件；parents：并行、条件步骤；heads：各流程的第一步。
     分支里的步骤没有先后（引擎里每个分支就是一个步骤），所以拖到分支步骤的左右两边是"并列成为分支"；
     分支下面是汇合线，拖到汇合线上是"并行做完以后的下一步"（汇合线的逻辑端点是 并行 → 下一步）。
     连线优先（它更具体）；都不近就不吸附。被拖的步骤自己和连到它的线不算。
     """
-    branch_of, parents = branch_of or {}, parents or set()
+    branch_of, parents, heads = branch_of or {}, parents or set(), heads or set()
     x, y = top_center
     best, best_d = None, SNAP_EDGE
     for a, b, (mx, my) in edges:
@@ -280,6 +313,14 @@ def snap_target(top_center: tuple[float, float], steps: dict[str, tuple[float, f
                         best, best_d = ("after", sid, ""), d
     if best is not None and best[1] in branch_of:
         return ("branch", branch_of[best[1]], best[1])
+    if best is None:
+        for sid in heads:                                # 第一步的正上方：放到最前面
+            if sid == exclude or sid not in steps:
+                continue
+            sx, sy = steps[sid]
+            dx, dy = abs(x - (sx + w / 2)), sy - (y + h)
+            if dx <= w * 0.6 and -h * 0.5 <= dy <= SNAP_HANDLE:
+                return ("before", sid, "")
     return best
 
 

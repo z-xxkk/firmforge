@@ -99,8 +99,6 @@ def _step(d: dict, where: str) -> Step:
         raise WorkflowError(f"{where} 步骤 {sid}：condition 要有 if")
     if kind in ("foreach", "subflow") and not d.get("subflow"):
         raise WorkflowError(f"{where} 步骤 {sid}：{kind} 要指明 subflow")
-    if kind == "parallel" and not d.get("branches"):
-        raise WorkflowError(f"{where} 步骤 {sid}：parallel 要有 branches")
     pos = d.get("pos")
     if pos is not None and (not isinstance(pos, list) or len(pos) != 2):
         raise WorkflowError(f"{where} 步骤 {sid}：pos 要写成 [x, y]")
@@ -271,6 +269,8 @@ def engine_problems(wf: Workflow, registry=None) -> list[str]:
                 problems.append(f"子流程 {name} 的步骤 {s.id}：子流程里的检查只能检查本模块（scope = module）")
             elif s.kind == "foreach":
                 problems.append(f"子流程 {name} 的步骤 {s.id}：\"每个模块各跑\"只能放在主流程")
+            elif s.kind == "parallel" and not s.branches:
+                problems.append(f"子流程 {name} 的步骤 {s.id}：并行还没有分支，把步骤拖到它下面")
             elif s.kind == "loop" and s.max in (None, ""):
                 problems.append(f"子流程 {name} 的步骤 {s.id}：循环必须有次数上限")
             elif s.kind == "subflow":

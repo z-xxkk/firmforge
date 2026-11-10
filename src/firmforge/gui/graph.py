@@ -10,8 +10,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QMenu
 
-from .layout import (UNIT_NAMES, ModuleView, RunView, flow_positions, grid_positions, layer_names, moved_far,
-                     snap_target)
+from .layout import (UNIT_NAMES, ModuleView, RunView, attached_ids, flow_positions, grid_positions, layer_names,
+                     moved_far, snap_target)
 from .theme import MONO
 from .widgets import T
 
@@ -323,7 +323,7 @@ class StepItem(QGraphicsObject):
         p.setFont(f)
         p.setPen(QColor(c["fail"] if s.detached else c["ink3"]))
         p.drawText(QRectF(12, 20, STEP_W - 20, 18), Qt.AlignLeft | Qt.AlignVCenter if s.kind != "condition" else Qt.AlignCenter,
-                   "没连上：拖到连线或步骤下面" if s.detached else step_subtitle(s))
+                   ("没连上" if s.kind == "condition" else "没连上：拖到连线或步骤下面") if s.detached else step_subtitle(s))
         if self.editable:
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(c["ink3"]))
@@ -466,24 +466,25 @@ class FlowCanvas(DotGridView):
         if sub:
             groups.append((sub, list(wf.subflows[sub])))
         right = 0.0                                            # 已经画好的流程的右边界，下一个流程排在它右边
+        self.floating: set[str] = set()                        # 没连上的步骤，以及跟着它们的分支
+        self.heads: set[str] = set()                           # 各流程的第一步（拖到它上方 = 放到最前面）
+        self.empty_flows: set[str] = set()                     # 一个连着的步骤都没有的流程
         for name, steps in groups:
-            linked = [s for s in steps if not s.detached]
             kw = dict(y0=40, w=STEP_W, h=STEP_H, gap=30)
+            att = attached_ids(steps)
+            self.floating |= {s.id for s in steps} - att
             x0 = 0.0
             if name != "main":                                 # 先排一遍量出左边界，再整体挪到主流程右边
-                draft = flow_positions(linked, x0=0.0, **kw)
-                x0 = right + 110 - min([p[0] for p in draft.values()] or [0.0])
-            pos = flow_positions(linked, x0=x0, **kw)
-            ys = [p[1] for p in pos.values()] or [40]
-            xs = [p[0] for p in pos.values()] or [x0]
+                draft = flow_positions(steps, x0=0.0, **kw)
+                x0 = right + 110 - min([p[0] for sid, p in draft.items() if sid in att] or [0.0])
+            pos = flow_positions(steps, x0=x0, **kw)
+            ys = [p[1] for sid, p in pos.items() if sid in att] or [40]
+            xs = [p[0] for sid, p in pos.items() if sid in att] or [x0]
             frame = QRectF(min(xs) - 24, 0, max(xs) - min(xs) + STEP_W + 48, max(ys) + STEP_H + 40)
+            if name != "main":                                 # 没连上的步骤：主流程的放左边，子流程的放框的右边
+                pos = flow_positions(steps, x0=x0, park=(frame.right() + 40, 40), **kw)
             right = max(right, frame.right())
             self.regions.append((name, frame))
-            n = 0
-            for s in steps:
-                if s.detached:                                 # 没给位置就放到流程旁边（主流程左边、子流程右边）
-                    pos[s.id] = s.pos or ((-STEP_W - 80 if name == "main" else frame.right() + 40), 40 + 64 * n)
-                    n += 1
             if name != "main":
                 box = sc.addRect(frame, QPen(QColor(c["line"]), 1), QBrush(QColor(c["surface"])))
                 box.setOpacity(0.6)
@@ -492,7 +493,8 @@ class FlowCanvas(DotGridView):
                 t.setDefaultTextColor(QColor(c["ink2"]))
                 t.setPos(frame.left() + 6, 6)
             prev = None
-            refd = {r for s in linked for r in (*s.branches, *s.then, *s.otherwise)}
+            refd = {r for s in steps for r in (*s.branches, *s.then, *s.otherwise)}
+            by_id = {s.id: s for s in steps}
             for s in steps:
                 it = StepItem(s, self.editable)
                 it.canvas = self
@@ -504,20 +506,24 @@ class FlowCanvas(DotGridView):
                 sc.addItem(it)
                 self.items_by_id[s.id] = it
                 self.flow_of[s.id] = name
-            by_id = {s.id: s for s in linked}
-            for s in linked:
-                if s.id in refd:
+            for s in steps:                                    # 主干：顶层、连着的步骤按先后连起来
+                if s.id in refd or s.detached:
                     continue
-                if prev is not None:
+                if prev is None:
+                    self.heads.add(s.id)
+                else:
                     forks = [k for k in by_id[prev].branches if k in self.items_by_id]
                     if forks:                                  # 上一步是并行：各分支汇合到这一步
                         for k in forks:
                             self._edge(k, s.id, join=(prev, s.id))
                     else:
                         self._edge(prev, s.id)
+                prev = s.id
+            if prev is None:
+                self.empty_flows.add(name)
+            for s in steps:                                    # 分支线：并行、条件到它的分支（没连上的并行也带着分支）
                 for k in (*s.branches, *s.then, *s.otherwise):
                     self._edge(s.id, k, label="是" if k in s.then else ("否" if k in s.otherwise else ""), branch=True)
-                prev = s.id
         if fit:
             self.fit()
 
@@ -560,7 +566,7 @@ class FlowCanvas(DotGridView):
     def _targets(self, flow: str | None, exclude: str = ""):
         """可以吸附的地方：同一个流程里已连上的步骤（接到它后面）和顺序连线（插进去）。"""
         steps = {sid: (it.pos().x(), it.pos().y()) for sid, it in self.items_by_id.items()
-                 if not it.step.detached and (flow is None or self.flow_of[sid] == flow) and sid != exclude}
+                 if sid not in self.floating and (flow is None or self.flow_of[sid] == flow) and sid != exclude}
         edges = [(*e.logical, (e.mid().x(), e.mid().y())) for e in self.edges
                  if not e.branch and e.a in steps and e.b in steps and exclude not in (e.a, e.b, *e.logical)]
         self._branch_of = {r: sid for sid in steps for r in (*self.items_by_id[sid].step.branches,
@@ -571,8 +577,17 @@ class FlowCanvas(DotGridView):
 
     def _snap(self, top: QPointF, flow: str | None, exclude: str = ""):
         steps, edges = self._targets(flow, exclude=exclude)
-        return snap_target((top.x(), top.y()), steps, edges, w=STEP_W, h=STEP_H, exclude=exclude,
-                           branch_of=self._branch_of, parents=self._parents)
+        target = snap_target((top.x(), top.y()), steps, edges, w=STEP_W, h=STEP_H, exclude=exclude,
+                             branch_of=self._branch_of, parents=self._parents, heads=self.heads)
+        if target is not None and target[0] == "edge":        # 还没有分支的并行：拖到它下面是成为它的第一个分支
+            a = self.items_by_id[target[1]].step
+            if a.kind == "parallel" and not a.branches:
+                target = ("after", a.id, "")
+        if target is None:                                     # 这个流程一个连着的步骤都没有：放下就是第一步
+            f = flow or self._flow_at(top)
+            if f in self.empty_flows:
+                target = ("first", f, "")
+        return target
 
     def _flow_at(self, p: QPointF) -> str:
         for name, rect in reversed(self.regions):
@@ -593,6 +608,15 @@ class FlowCanvas(DotGridView):
         if target is None:
             return
         kind, a, b = target
+        if kind == "first":
+            return
+        if kind == "before":                                   # 放到最前面：从被拖步骤的下沿连到第一步的上沿
+            head = self.items_by_id[a]
+            pen = QPen(QColor(T()["accent"]), 2, Qt.DashLine)
+            pen.setCapStyle(Qt.RoundCap)
+            self._preview = sc.addPath(curve(top + QPointF(0, STEP_H), head.pos() + QPointF(STEP_W / 2, 0)), pen)
+            self._preview.setZValue(5)
+            return
         anchor = self.items_by_id[b if kind == "branch" else a]
         side = kind == "branch" or anchor.step.kind in ("parallel", "condition")
         if side and top.y() < anchor.pos().y() + STEP_H:          # 并列：从旁边那一步的侧面连过来
@@ -621,7 +645,7 @@ class FlowCanvas(DotGridView):
     def _dragging(self, item: StepItem) -> None:
         """拖动中：没拖远时连线跟着走；拖远了连线隐藏（断开），并提示松手会吸附到哪里。"""
         sid = item.step.id
-        far = item.step.detached or moved_far((item._origin.x(), item._origin.y()), (item.pos().x(), item.pos().y()))
+        far = sid in self.floating or moved_far((item._origin.x(), item._origin.y()), (item.pos().x(), item.pos().y()))
         for e in self._attached(sid):
             e.setVisible(not far)
             if not far:
@@ -633,7 +657,7 @@ class FlowCanvas(DotGridView):
 
     def _dropped(self, item: StepItem, origin: QPointF) -> None:
         sid = item.step.id
-        far = item.step.detached or moved_far((origin.x(), origin.y()), (item.pos().x(), item.pos().y()))
+        far = sid in self.floating or moved_far((origin.x(), origin.y()), (item.pos().x(), item.pos().y()))
         target = None
         if far:
             target = self._snap(item.pos() + QPointF(STEP_W / 2, 0), self.flow_of.get(sid), exclude=sid)
@@ -652,7 +676,7 @@ class FlowCanvas(DotGridView):
         flow = self._flow_at(p)
         target = self._snap(p, None)
         if target is not None:
-            flow = self.flow_of[target[1]]
+            flow = target[1] if target[0] == "first" else self.flow_of[target[1]]
         return p, flow, target
 
     def dragMoveEvent(self, ev):

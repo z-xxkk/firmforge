@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDockWidget, QFormL
 
 from ..orchestrator.workflow import (CONDITIONS, Step, Workflow, dump_workflow, engine_problems, list_versions,
                                      load_workflow, parse_workflow, save_workflow)
-from .graph import COND_NAMES, KIND_NAMES, ROLE_NAMES, STEP_MIME, STEP_W, FlowCanvas
+from .graph import COND_NAMES, KIND_NAMES, ROLE_NAMES, STEP_H, STEP_MIME, STEP_W, FlowCanvas
 from .runner import _Worker
 from .widgets import FlowLayout, Panel, T, label
 
@@ -244,14 +244,14 @@ class DesignerPage(QMainWindow):
         self.tree.clear()
         for name, steps in [("主流程 main", self.wf.main), *[(f"子流程 {n}", s) for n, s in self.wf.subflows.items()]]:
             top = QTreeWidgetItem([name])
+            self.tree.addTopLevelItem(top)               # 先挂到树上，下面选中当前步骤才生效
+            top.setExpanded(True)
             for s in steps:
-                it = QTreeWidgetItem([f"{s.id}　{KIND_NAMES.get(s.kind, s.kind)}"])
+                it = QTreeWidgetItem([f"{s.id}　{KIND_NAMES.get(s.kind, s.kind)}" + ("（没连上）" if s.detached else "")])
                 it.setData(0, Qt.UserRole, s.id)
                 top.addChild(it)
                 if s.id == self.selected:
                     self.tree.setCurrentItem(it)
-            self.tree.addTopLevelItem(top)
-            top.setExpanded(True)
 
     def check(self, quiet: bool = False):
         from ..agents.registry import default_registry
@@ -460,11 +460,16 @@ class DesignerPage(QMainWindow):
         _, anchor, _ = target
         steps = [s for s in self._steps(where) if s.id != step.id]
         steps = self._unref(steps, step.id)
+        step = dataclasses.replace(step, detached=False, pos=None)
+        if target[0] == "first":                     # 流程里还没有连着的步骤：它就是第一步
+            return [step, *steps]
         k = next((n for n, s in enumerate(steps) if s.id == anchor), -1)
         if k < 0:
             return None
         a = steps[k]
-        step = dataclasses.replace(step, detached=False, pos=None)
+        if target[0] == "before":                    # 放到最前面
+            steps.insert(k, step)
+            return steps
         if target[0] == "branch":                    # 和 target[2] 并列：加进同一个并行 / 条件的同一个分支列表
             sib = target[2]
 
@@ -500,6 +505,9 @@ class DesignerPage(QMainWindow):
                 self.selected = sid
             self._change(op)
         elif far:
+            if self._overlaps(sid, x, y):            # 压在别的步骤上（比如拖进了另一个流程的框里）：停到旁边的空地
+                x, y = self._parking(where)
+
             def op():
                 steps = self._unref(self._steps(where), sid)
                 k = next(n for n, s in enumerate(steps) if s.id == sid)
@@ -508,7 +516,11 @@ class DesignerPage(QMainWindow):
                 self.selected = sid
             self._change(op)
         else:
-            self._moved(sid, x, y)
+            self.render_all(fit=False)               # 小范围挪动：松手回到自动排好的位置（连着的步骤不记手动位置）
+
+    def _overlaps(self, sid: str, x: float, y: float) -> bool:
+        return any(o != sid and abs(it.pos().x() - x) < STEP_W + 8 and abs(it.pos().y() - y) < STEP_H + 8
+                   for o, it in self.canvas.items_by_id.items())
 
     def _new_dropped(self, kind: str, where: str, x: float, y: float, target):
         if kind == "foreach" and where != "main":
@@ -520,6 +532,8 @@ class DesignerPage(QMainWindow):
             if steps is None:
                 return
         else:
+            if self._overlaps(step.id, x, y):
+                x, y = self._parking(where)
             steps = self._steps(where) + [dataclasses.replace(step, detached=True, pos=(round(x, 1), round(y, 1)))]
 
         def op():
@@ -530,12 +544,13 @@ class DesignerPage(QMainWindow):
 
     def _parking(self, where: str) -> tuple[float, float]:
         """断开的步骤放到流程旁边的空地：主流程放左边，子流程放在子流程框的右边，依次往下排，不压住别的步骤。"""
-        n = sum(1 for s in self._steps(where) if s.detached)
-        if where == "main":
-            return (-STEP_W - 80.0, 40.0 + 64 * n)
         rect = next((r for name, r in self.canvas.regions if name == where), None)
-        x = rect.right() + 40 if rect is not None else 700.0
-        return (round(x, 1), 40.0 + 64 * n)
+        x = -STEP_W - 80.0 if where == "main" else (rect.right() + 40 if rect is not None else 700.0)
+        y = 40.0
+        while any(abs(it.pos().x() - x) < STEP_W + 8 and abs(it.pos().y() - y) < STEP_H + 8
+                  for it in self.canvas.items_by_id.values()):
+            y += 64                                  # 往下找一个不压住别的步骤的位置
+        return (round(x, 1), y)
 
     def disconnect(self, a: str, b: str):
         """断开 a→b：b 变成"没连上"，原来 b 前后的步骤自动接上。"""
