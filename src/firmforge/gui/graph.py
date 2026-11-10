@@ -10,7 +10,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QMenu
 
-from .layout import UNIT_NAMES, ModuleView, RunView, flow_positions, grid_positions, layer_names
+from .layout import (UNIT_NAMES, ModuleView, RunView, flow_positions, grid_positions, layer_names, moved_far,
+                     snap_target)
 from .theme import MONO
 from .widgets import T
 
@@ -35,6 +36,7 @@ class DotGridView(QGraphicsView):
         self.setFrameShape(QGraphicsView.NoFrame)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.user_view = False      # 用户自己缩放、拖动过画面以后，窗口大小变化不再自动重新适应（不然缩放会被重置）
 
     def drawBackground(self, p: QPainter, rect: QRectF):
         p.fillRect(rect, QColor(T()["canvas"]))
@@ -55,6 +57,7 @@ class DotGridView(QGraphicsView):
         if ev.modifiers() & Qt.ControlModifier or True:
             f = 1.12 if ev.angleDelta().y() > 0 else 1 / 1.12
             self.scale(f, f)
+            self.user_view = True
 
     def fit(self):
         """缩放到刚好装下；最多放大到 1 倍，最少缩到 0.85 倍（再小字就看不清，宁可滚动）。"""
@@ -70,7 +73,7 @@ class DotGridView(QGraphicsView):
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
-        if self.scene() and self.scene().items():
+        if self.scene() and self.scene().items() and not self.user_view:
             self.fit()
 
 
@@ -248,7 +251,11 @@ def step_subtitle(s) -> str:
     return KIND_NAMES.get(s.kind, s.kind)
 
 
+STEP_MIME = "application/x-firmforge-step"      # 从步骤箱拖出来的步骤类型
+
+
 class StepItem(QGraphicsObject):
+    """流程图里的一个步骤。设计器里可以拖动：小范围挪动时连线跟着走；拖远了连线断开，松手时靠近连线或步骤就吸附接上。"""
     moved = Signal(str, float, float)
     clicked = Signal(str)
     connect_to = Signal(str, str)
@@ -262,6 +269,8 @@ class StepItem(QGraphicsObject):
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, editable)
         self.setCursor(Qt.PointingHandCursor)
         self._drag_line = None
+        self._origin: QPointF | None = None
+        self.canvas: "FlowCanvas | None" = None
 
     def boundingRect(self):
         return QRectF(-6, -6, STEP_W + 12, STEP_H + 18)
@@ -275,10 +284,13 @@ class StepItem(QGraphicsObject):
             p.drawRoundedRect(QRectF(-5, -5, STEP_W + 10, STEP_H + 10), 16, 16)
         fill = c["accent_soft"] if self.state == "new" else c["surface"]
         edge = c["run"] if self.state in ("running", "selected") else (c["accent"] if self.state in ("done", "new") else c["line"])
+        if s.detached:
+            edge = c["fail"]
         pen = QPen(QColor(edge), 1.3)
         radius = 12
-        if s.kind == "human":
+        if s.kind == "human" or s.detached:
             pen.setStyle(Qt.DashLine)
+        if s.kind == "human":
             radius = STEP_H / 2
         p.setPen(pen)
         p.setBrush(QColor(fill))
@@ -292,7 +304,7 @@ class StepItem(QGraphicsObject):
             p.drawPath(path)
         elif s.kind == "parallel":
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(c["ink2"]))
+            p.setBrush(QColor(c["fail"] if s.detached else c["ink2"]))
             p.drawRoundedRect(QRectF(0, STEP_H / 2 - 3, STEP_W, 6), 3, 3)
         else:
             if s.kind == "foreach":
@@ -302,24 +314,25 @@ class StepItem(QGraphicsObject):
         p.setPen(QColor(c["ink"]))
         if s.kind == "parallel":
             p.setFont(_mono(9, True))
-            p.drawText(QRectF(0, STEP_H / 2 + 4, STEP_W, 16), Qt.AlignCenter, f"{s.id}（并行）")
+            p.drawText(QRectF(0, STEP_H / 2 + 4, STEP_W, 16), Qt.AlignCenter, f"{s.id}（并行）" + ("，没连上" if s.detached else ""))
             return
         p.setFont(_mono(9.5, True))
         p.drawText(QRectF(12, 3, STEP_W - 20, 20), Qt.AlignLeft | Qt.AlignVCenter if s.kind != "condition" else Qt.AlignCenter, s.id)
         f = QFont()
         f.setPointSizeF(8.5)
         p.setFont(f)
-        p.setPen(QColor(c["ink3"]))
+        p.setPen(QColor(c["fail"] if s.detached else c["ink3"]))
         p.drawText(QRectF(12, 20, STEP_W - 20, 18), Qt.AlignLeft | Qt.AlignVCenter if s.kind != "condition" else Qt.AlignCenter,
-                   step_subtitle(s))
+                   "没连上：拖到连线或步骤下面" if s.detached else step_subtitle(s))
         if self.editable:
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(c["ink3"]))
             p.drawEllipse(QPointF(STEP_W / 2, STEP_H + 6), 3, 3)     # 连线把手
 
     def itemChange(self, change, value):
-        if change == QGraphicsItem.ItemPositionHasChanged and self.editable:
-            self.moved.emit(self.step.id, self.pos().x(), self.pos().y())
+        if change == QGraphicsItem.ItemPositionHasChanged and self.editable and self.canvas is not None \
+                and self._origin is not None:
+            self.canvas._dragging(self)
         return super().itemChange(change, value)
 
     def mousePressEvent(self, ev):
@@ -329,6 +342,7 @@ class StepItem(QGraphicsObject):
             self._drag_from = self.mapToScene(QPointF(STEP_W / 2, STEP_H + 6))
             ev.accept()
             return
+        self._origin = QPointF(self.pos())
         super().mousePressEvent(ev)
 
     def mouseMoveEvent(self, ev):
@@ -348,39 +362,120 @@ class StepItem(QGraphicsObject):
                     break
             return
         super().mouseReleaseEvent(ev)
+        origin, self._origin = self._origin, None
+        if self.editable and self.canvas is not None and origin is not None and origin != self.pos():
+            self.canvas._dropped(self, origin)
+
+
+class EdgeItem(QGraphicsPathItem):
+    """连线。设计器里鼠标移上去变色并在中点出现 ×，点 × 断开（n8n 的做法：悬停连线后删除）。"""
+
+    def __init__(self, a: str, b: str, path: QPainterPath, canvas: "FlowCanvas", deletable: bool):
+        super().__init__(path)
+        self.a, self.b, self.canvas, self.deletable = a, b, canvas, deletable
+        self.hot = False
+        self.setAcceptHoverEvents(deletable)
+        self._style()
+
+    def mid(self) -> QPointF:
+        return self.path().pointAtPercent(0.5)
+
+    def _style(self):
+        c = T()
+        pen = QPen(QColor(c["accent"] if self.hot else "#B8C0C9"), 2.4 if self.hot else 1.6)
+        pen.setCapStyle(Qt.RoundCap)
+        self.setPen(pen)
+
+    def shape(self):                                   # 线周围 8 像素都算"在线上"，好点中
+        from PySide6.QtGui import QPainterPathStroker
+        st = QPainterPathStroker()
+        st.setWidth(16)
+        return st.createStroke(self.path())
+
+    def boundingRect(self):
+        return super().boundingRect().adjusted(-12, -12, 12, 12)
+
+    def paint(self, p, opt, widget=None):
+        super().paint(p, opt, widget)
+        if self.hot:
+            c, m = T(), self.mid()
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QPen(QColor(c["accent"]), 1.2))
+            p.setBrush(QColor(c["surface"]))
+            p.drawEllipse(m, 9, 9)
+            p.setPen(QPen(QColor(c["accent"]), 1.6, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(m + QPointF(-3.5, -3.5), m + QPointF(3.5, 3.5))
+            p.drawLine(m + QPointF(-3.5, 3.5), m + QPointF(3.5, -3.5))
+
+    def hoverEnterEvent(self, ev):
+        self.hot = True
+        self._style()
+        self.setToolTip(f"{self.a} → {self.b}：点中间的 × 断开这条连线")
+        self.update()
+
+    def hoverLeaveEvent(self, ev):
+        self.hot = False
+        self._style()
+        self.update()
+
+    def mousePressEvent(self, ev):
+        if self.deletable and (ev.scenePos() - self.mid()).manhattanLength() <= 14:
+            self.canvas.disconnect_edge.emit(self.a, self.b)
+            ev.accept()
+            return
+        ev.ignore()
 
 
 class FlowCanvas(DotGridView):
-    """流程图：设计器里可编辑（拖动、从下沿拉线），对话页里只读并高亮当前步骤。"""
+    """流程图：设计器里可编辑（拖动、吸附、从步骤箱拖进来、从下沿拉线、悬停连线断开），对话页里只读并高亮当前步骤。"""
     step_clicked = Signal(str)
     step_moved = Signal(str, float, float)
     connect_steps = Signal(str, str)
     context_action = Signal(str, str)      # (动作, 步骤 id)
+    step_dropped = Signal(str, float, float, object, bool)   # (步骤, x, y, 吸附目标或 None, 是否拖离了原位)
+    new_dropped = Signal(str, str, float, float, object)    # (类型, 流程, x, y, 吸附目标或 None)
+    disconnect_edge = Signal(str, str)
 
     def __init__(self, editable: bool = False, parent=None):
         super().__init__(parent)
         self.editable = editable
         self.setScene(QGraphicsScene(self))
         self.items_by_id: dict[str, StepItem] = {}
+        self.edges: list[EdgeItem] = []
+        self.flow_of: dict[str, str] = {}
+        self.regions: list[tuple[str, QRectF]] = []
+        self._preview = None
         if editable:
             self.setDragMode(QGraphicsView.RubberBandDrag)
+            self.setAcceptDrops(True)
 
     def show_workflow(self, wf, subflow: str | None = None, states: dict | None = None, fit: bool = True) -> None:
-        """画主流程，右侧再画第一个子流程（或指定的子流程）。"""
+        """画主流程，右侧再画第一个子流程（或指定的子流程）。没连上的步骤不连线，用红色虚线框标出。"""
         sc = self.scene()
         sc.clear()
+        self._preview = None
         self.items_by_id.clear()
+        self.edges.clear()
+        self.flow_of.clear()
+        self.regions.clear()
         c = T()
         groups = [("main", list(wf.main), 0.0)]
         sub = subflow or next(iter(wf.subflows), None)
         if sub:
             groups.append((sub, list(wf.subflows[sub]), 300.0))
         for name, steps, x0 in groups:
-            pos = flow_positions(steps, x0=x0, y0=40)
+            linked = [s for s in steps if not s.detached]
+            pos = flow_positions(linked, x0=x0, y0=40)
+            n = 0
+            for s in steps:
+                if s.detached:                                 # 没给位置就放到流程旁边（主流程左边、子流程右边）
+                    pos[s.id] = s.pos or ((-STEP_W - 80 if name == "main" else x0 + 2 * STEP_W + 120), 40 + 64 * n)
+                    n += 1
+            ys = [p[1] for p in pos.values()] or [40]
+            xs = [p[0] for p in pos.values()] or [x0]
+            frame = QRectF(x0 - 24, 0, max(xs) - x0 + STEP_W + 48, max(ys) + STEP_H + 40)
+            self.regions.append((name, frame))
             if name != "main":
-                ys = [p[1] for p in pos.values()] or [40]
-                xs = [p[0] for p in pos.values()] or [x0]
-                frame = QRectF(x0 - 24, 0, max(xs) - x0 + STEP_W + 48, max(ys) + STEP_H + 40)
                 box = sc.addRect(frame, QPen(QColor(c["line"]), 1), QBrush(QColor(c["surface"])))
                 box.setOpacity(0.6)
                 box.setZValue(-2)
@@ -388,9 +483,10 @@ class FlowCanvas(DotGridView):
                 t.setDefaultTextColor(QColor(c["ink2"]))
                 t.setPos(x0 - 18, 6)
             prev = None
-            refd = {r for s in steps for r in (*s.branches, *s.then, *s.otherwise)}
+            refd = {r for s in linked for r in (*s.branches, *s.then, *s.otherwise)}
             for s in steps:
                 it = StepItem(s, self.editable)
+                it.canvas = self
                 it.setPos(*pos[s.id])
                 it.state = (states or {}).get(s.id, "")
                 it.clicked.connect(self.step_clicked.emit)
@@ -398,38 +494,177 @@ class FlowCanvas(DotGridView):
                 it.connect_to.connect(self.connect_steps.emit)
                 sc.addItem(it)
                 self.items_by_id[s.id] = it
-            for s in steps:
+                self.flow_of[s.id] = name
+            for s in linked:
                 if s.id in refd:
                     continue
                 if prev is not None:
                     self._edge(prev, s.id)
                 for k in (*s.branches, *s.then, *s.otherwise):
-                    self._edge(s.id, k, label="是" if k in s.then else ("否" if k in s.otherwise else ""))
+                    self._edge(s.id, k, label="是" if k in s.then else ("否" if k in s.otherwise else ""), branch=True)
                 prev = s.id
         if fit:
             self.fit()
 
-    def _edge(self, a: str, b: str, label: str = "") -> None:
+    def _edge_path(self, a: StepItem, b: StepItem) -> QPainterPath:
+        pa = a.pos() + QPointF(STEP_W / 2, STEP_H)
+        pb = b.pos() + QPointF(STEP_W / 2, 0)
+        if abs(b.pos().y() - a.pos().y()) < STEP_H / 2:     # 同一行（分支）：从右侧连出去
+            pa = a.pos() + QPointF(STEP_W, STEP_H / 2)
+            pb = b.pos() + QPointF(0, STEP_H / 2)
+            path = QPainterPath(pa)
+            path.cubicTo(QPointF(pa.x() + 30, pa.y()), QPointF(pb.x() - 30, pb.y()), pb)
+            return path
+        return curve(pa, pb)
+
+    def _edge(self, a: str, b: str, label: str = "", branch: bool = False) -> None:
         ia, ib = self.items_by_id.get(a), self.items_by_id.get(b)
         if ia is None or ib is None:
             return
-        pa = ia.pos() + QPointF(STEP_W / 2, STEP_H)
-        pb = ib.pos() + QPointF(STEP_W / 2, 0)
-        if abs(ib.pos().y() - ia.pos().y()) < STEP_H / 2:     # 同一行（分支）：从右侧连出去
-            pa = ia.pos() + QPointF(STEP_W, STEP_H / 2)
-            pb = ib.pos() + QPointF(0, STEP_H / 2)
-            path = QPainterPath(pa)
-            path.cubicTo(QPointF(pa.x() + 30, pa.y()), QPointF(pb.x() - 30, pb.y()), pb)
-        else:
-            path = curve(pa, pb)
-        pen = QPen(QColor("#B8C0C9"), 1.6)
-        pen.setCapStyle(Qt.RoundCap)
-        item = self.scene().addPath(path, pen)
+        item = EdgeItem(a, b, self._edge_path(ia, ib), self, self.editable)
+        item.branch = branch                    # 并行、条件的分支线：可以断开，但不能把步骤插进去
         item.setZValue(-1)
+        self.scene().addItem(item)
+        self.edges.append(item)
         if label:
             t = self.scene().addText(label)
             t.setDefaultTextColor(QColor(T()["ink3"]))
-            t.setPos((pa + pb) / 2 + QPointF(-6, -18))
+            m = item.mid()
+            t.setPos(m + QPointF(-6, -20))
+
+    # ------------------------------------------------------------ 拖动与吸附（DECISIONS 第 102 条）
+
+    def _targets(self, flow: str | None, exclude: str = ""):
+        """可以吸附的地方：同一个流程里已连上的步骤（接到它后面）和顺序连线（插进去）。"""
+        steps = {sid: (it.pos().x(), it.pos().y()) for sid, it in self.items_by_id.items()
+                 if not it.step.detached and (flow is None or self.flow_of[sid] == flow) and sid != exclude}
+        edges = [(e.a, e.b, (e.mid().x(), e.mid().y())) for e in self.edges
+                 if not e.branch and e.a in steps and e.b in steps and exclude not in (e.a, e.b)]
+        return steps, edges
+
+    def _flow_at(self, p: QPointF) -> str:
+        for name, rect in reversed(self.regions):
+            if name != "main" and rect.contains(p):
+                return name
+        return "main"
+
+    def _show_preview(self, target, top: QPointF) -> None:
+        sc = self.scene()
+        if self._preview is not None:
+            sc.removeItem(self._preview)
+            self._preview = None
+        for e in self.edges:
+            if e.hot and not e.isUnderMouse():
+                e.hot = False
+                e._style()
+                e.update()
+        if target is None:
+            return
+        kind, a, b = target
+        anchor = self.items_by_id[a]
+        start = anchor.pos() + QPointF(STEP_W / 2, STEP_H)
+        path = curve(start, top)
+        pen = QPen(QColor(T()["accent"]), 2, Qt.DashLine)
+        pen.setCapStyle(Qt.RoundCap)
+        self._preview = sc.addPath(path, pen)
+        self._preview.setZValue(5)
+        if kind == "edge":
+            for e in self.edges:
+                if (e.a, e.b) == (a, b):
+                    e.hot = True
+                    e._style()
+                    e.update()
+
+    def _attached(self, sid: str) -> list[EdgeItem]:
+        return [e for e in self.edges if sid in (e.a, e.b)]
+
+    def _dragging(self, item: StepItem) -> None:
+        """拖动中：没拖远时连线跟着走；拖远了连线隐藏（断开），并提示松手会吸附到哪里。"""
+        sid = item.step.id
+        far = item.step.detached or moved_far((item._origin.x(), item._origin.y()), (item.pos().x(), item.pos().y()))
+        for e in self._attached(sid):
+            e.setVisible(not far)
+            if not far:
+                e.setPath(self._edge_path(self.items_by_id[e.a], self.items_by_id[e.b]))
+        target = None
+        if far:
+            steps, edges = self._targets(self.flow_of.get(sid), exclude=sid)
+            top = item.pos() + QPointF(STEP_W / 2, 0)
+            target = snap_target((top.x(), top.y()), steps, edges, w=STEP_W, h=STEP_H, exclude=sid)
+        self._show_preview(target, item.pos() + QPointF(STEP_W / 2, 0))
+
+    def _dropped(self, item: StepItem, origin: QPointF) -> None:
+        sid = item.step.id
+        far = item.step.detached or moved_far((origin.x(), origin.y()), (item.pos().x(), item.pos().y()))
+        target = None
+        if far:
+            steps, edges = self._targets(self.flow_of.get(sid), exclude=sid)
+            top = item.pos() + QPointF(STEP_W / 2, 0)
+            target = snap_target((top.x(), top.y()), steps, edges, w=STEP_W, h=STEP_H, exclude=sid)
+        self._show_preview(None, QPointF())
+        self.step_dropped.emit(sid, item.pos().x(), item.pos().y(), target, far)
+
+    # 从步骤箱拖进来
+    def dragEnterEvent(self, ev):
+        if self.editable and ev.mimeData().hasFormat(STEP_MIME):
+            ev.acceptProposedAction()
+        else:
+            super().dragEnterEvent(ev)
+
+    def _drop_target(self, ev):
+        p = self.mapToScene(ev.position().toPoint())
+        flow = self._flow_at(p)
+        steps, edges = self._targets(None)
+        target = snap_target((p.x(), p.y()), steps, edges, w=STEP_W, h=STEP_H)
+        if target is not None:
+            flow = self.flow_of[target[1]]
+        return p, flow, target
+
+    def dragMoveEvent(self, ev):
+        if self.editable and ev.mimeData().hasFormat(STEP_MIME):
+            p, _, target = self._drop_target(ev)
+            self._show_preview(target, p)
+            ev.acceptProposedAction()
+        else:
+            super().dragMoveEvent(ev)
+
+    def dragLeaveEvent(self, ev):
+        self._show_preview(None, QPointF())
+        super().dragLeaveEvent(ev)
+
+    def dropEvent(self, ev):
+        if not (self.editable and ev.mimeData().hasFormat(STEP_MIME)):
+            return super().dropEvent(ev)
+        p, flow, target = self._drop_target(ev)
+        self._show_preview(None, QPointF())
+        kind = bytes(ev.mimeData().data(STEP_MIME)).decode("utf-8")
+        self.new_dropped.emit(kind, flow, p.x() - STEP_W / 2, p.y(), target)
+        ev.acceptProposedAction()
+
+    # 中键按住拖动画布（主流画布软件的平移方式）
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MiddleButton:
+            self._pan = ev.position()
+            self.user_view = True
+            self.setCursor(Qt.ClosedHandCursor)
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if getattr(self, "_pan", None) is not None:
+            d = ev.position() - self._pan
+            self._pan = ev.position()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - int(d.x()))
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - int(d.y()))
+            return
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if getattr(self, "_pan", None) is not None and ev.button() == Qt.MiddleButton:
+            self._pan = None
+            self.unsetCursor()
+            return
+        super().mouseReleaseEvent(ev)
 
     def _moved(self, sid, x, y):
         self.step_moved.emit(sid, x, y)
@@ -443,12 +678,20 @@ class FlowCanvas(DotGridView):
         if not self.editable:
             return
         item = self.itemAt(ev.pos())
+        if isinstance(item, EdgeItem):
+            m = QMenu(self)
+            m.addAction(f"断开 {item.a} → {item.b}", lambda: self.disconnect_edge.emit(item.a, item.b))
+            m.exec(ev.globalPos())
+            return
         while item is not None and not isinstance(item, StepItem):
             item = item.parentItem()
         if item is None:
             return
         m = QMenu(self)
-        for act, text in (("up", "上移一步"), ("down", "下移一步"), ("ask_ai", "让 AI 改这一步…"),
-                          ("ref", "引用到对话"), ("delete", "删除")):
+        acts = [("up", "上移一步"), ("down", "下移一步"), ("detach", "从流程里拿出来（断开连线）"),
+                ("ask_ai", "让 AI 改这一步…"), ("ref", "引用到对话"), ("delete", "删除")]
+        for act, text in acts:
+            if act == "detach" and item.step.detached:
+                continue
             m.addAction(text, lambda a=act, sid=item.step.id: self.context_action.emit(a, sid))
         m.exec(ev.globalPos())

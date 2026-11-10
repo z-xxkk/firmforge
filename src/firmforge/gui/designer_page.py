@@ -4,6 +4,12 @@
 四块面板都是 QDockWidget，可以拖到别的边、叠成标签页、拉出来变成浮动小窗，布局会记住。
 连线的含义：顶层步骤按先后顺序执行；从一个步骤下沿拉线到另一个步骤 = 让后者紧跟在前者后面；
 从"并行"拉线 = 加一个分支；从"条件"拉线 = 加到"是"分支（属性里可以改到"否"）。
+
+拖拽（DECISIONS 第 102 条，照 Node-RED、n8n 的做法）：
+- 从步骤箱把步骤拖进画布：放到连线中点附近就插进这条线，放到某个步骤正下方就接到它后面，放在空白处就是"没连上"；
+- 拖动已连好的步骤：小范围挪动连线跟着走；拖远了连线断开、前后两步自动接上，松手时靠近连线或步骤就吸附接上；
+- 鼠标移到连线上，点中间的 × 断开；被断开的步骤变成"没连上"（红色虚线框），连上或删除前不能保存、不能试运行；
+- 快捷键：Delete 删除选中的步骤，Ctrl+Z 撤销，Ctrl+S 保存；中键按住拖动画布，滚轮缩放。
 """
 
 from __future__ import annotations
@@ -12,20 +18,40 @@ import dataclasses
 import tomllib
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QTimer, Signal
-from PySide6.QtWidgets import (QComboBox, QDockWidget, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-                               QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
-                               QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtCore import QMimeData, QSettings, Qt, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDockWidget, QFormLayout, QHBoxLayout, QInputDialog, QLabel,
+                               QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
+                               QPushButton, QSizePolicy, QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ..orchestrator.workflow import (CONDITIONS, Step, Workflow, dump_workflow, engine_problems, list_versions,
                                      load_workflow, parse_workflow, save_workflow)
-from .graph import COND_NAMES, KIND_NAMES, ROLE_NAMES, FlowCanvas
+from .graph import COND_NAMES, KIND_NAMES, ROLE_NAMES, STEP_MIME, STEP_W, FlowCanvas
 from .runner import _Worker
-from .widgets import Panel, T, label
+from .widgets import FlowLayout, Panel, T, label
 
 PALETTE = [("干活", [("agent", "Agent 干活"), ("verify", "检查"), ("human", "等人确认")]),
            ("控制", [("parallel", "并行"), ("condition", "条件"), ("loop", "循环")]),
            ("嵌套", [("subflow", "子流程"), ("foreach", "每个模块各跑")])]
+
+
+class PaletteList(QListWidget):
+    """步骤箱：可以把步骤拖进画布（也可以双击加到选中步骤后面）。"""
+
+    def __init__(self):
+        super().__init__()
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragOnly)
+
+    def mimeData(self, items):
+        md = QMimeData()
+        kind = items[0].data(Qt.UserRole) if items else None
+        if kind:
+            md.setData(STEP_MIME, kind.encode("utf-8"))
+        return md
+
+    def mimeTypes(self):
+        return [STEP_MIME]
 
 
 def bump(version: str) -> str:
@@ -68,7 +94,9 @@ class DesignerPage(QMainWindow):
 
     def _build(self):
         center = Panel(margins=(16, 12, 14, 8))
-        top = QHBoxLayout()
+        bar = QWidget()                                  # 窄的时候按钮折到第二行，不被截断
+        top = FlowLayout(bar, spacing=8)
+        bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.name_label = label("", "H2")
         self.version_combo = QComboBox()
         self.version_combo.setObjectName("Pill")
@@ -80,37 +108,53 @@ class DesignerPage(QMainWindow):
         top.addWidget(self.name_label)
         top.addWidget(self.version_combo)
         top.addWidget(self.based_label)
-        top.addStretch(1)
         top.addWidget(self.sub_combo)
-        for text, fn, kind in (("撤销", self.do_undo, "Ghost"), ("检查", self.check, "Ghost"),
+        for text, fn, kind in (("撤销", self.do_undo, "Ghost"), ("适应画布", self.canvas_fit, "Ghost"),
+                               ("检查", self.check, "Ghost"),
                                ("让 AI 改", self.ask_ai, "Ghost"), ("保存为新版本", self.save, ""),
-                               ("试运行", lambda: self.try_run.emit(self.wf), "Primary")):
+                               ("试运行", self._try_run, "Primary")):
             b = QPushButton(text)
             if kind:
                 b.setObjectName(kind)
             b.clicked.connect(fn)
             top.addWidget(b)
-        center.lay.addLayout(top)
+        center.lay.addWidget(bar)
         self.canvas = FlowCanvas(editable=True)
         self.canvas.step_clicked.connect(self.select)
         self.canvas.step_moved.connect(self._moved)
         self.canvas.connect_steps.connect(self.connect_steps)
         self.canvas.context_action.connect(self._context)
+        self.canvas.step_dropped.connect(self._step_dropped)
+        self.canvas.new_dropped.connect(self._new_dropped)
+        self.canvas.disconnect_edge.connect(self.disconnect)
+        # 删除、撤销只在画布上生效（在属性栏、代码区打字时按退格不会删掉步骤）；保存在整个设计器里生效
+        for keys, fn, owner in ((QKeySequence.Delete, lambda: self.selected and self.delete(self.selected), self.canvas),
+                                (QKeySequence("Backspace"), lambda: self.selected and self.delete(self.selected), self.canvas),
+                                (QKeySequence.Undo, self.do_undo, self.canvas), (QKeySequence("Ctrl+0"), self.canvas_fit, self.canvas),
+                                (QKeySequence.Save, self.save, self)):
+            sc = QShortcut(keys, owner)
+            sc.setContext(Qt.WidgetWithChildrenShortcut)
+            sc.activated.connect(fn)
         center.lay.addWidget(self.canvas, 1)
         self.setCentralWidget(center)
 
-        self.palette = QListWidget()
+        self.palette = PaletteList()
         self.palette.setMinimumWidth(150)
         for group, items in PALETTE:
             hdr = QListWidgetItem(group)
-            hdr.setFlags(Qt.NoItemFlags)
+            hdr.setFlags(Qt.NoItemFlags)                 # 分组标题：浅色小字，不能拖、不能选
+            f = hdr.font()
+            f.setPointSizeF(f.pointSizeF() * 0.85)
+            hdr.setFont(f)
+            hdr.setForeground(Qt.gray)
             self.palette.addItem(hdr)
             for kind, text in items:
                 it = QListWidgetItem(text)
                 it.setData(Qt.UserRole, kind)
                 self.palette.addItem(it)
         self.palette.itemDoubleClicked.connect(lambda it: it.data(Qt.UserRole) and self.add_step(it.data(Qt.UserRole)))
-        tip = label("双击加到选中步骤的后面；从步骤下沿的小圆点拉线到另一个步骤，让它紧跟在后面。", "Faint", wrap=True)
+        tip = label("把步骤拖进画布：放到连线上就插进去，放到某个步骤下面就接在它后面；也可以双击加到选中步骤后面。"
+                    "鼠标移到连线上点 × 断开。", "Faint", wrap=True)
         box = QWidget()
         bl = QVBoxLayout(box)
         bl.setContentsMargins(0, 0, 0, 0)
@@ -146,6 +190,24 @@ class DesignerPage(QMainWindow):
     def save_layout(self):
         QSettings().setValue("designer/state", self.saveState())
 
+    def _try_run(self):
+        probs = self.check()
+        if probs:
+            QMessageBox.warning(self, "还不能试运行", "引擎执行不了这个流程：\n\n" + "\n".join(probs))
+            return
+        self.try_run.emit(self.wf)
+
+    def canvas_fit(self):
+        """整个流程缩放到刚好装下（最多放大到 1 倍；比自动适应缩得更小，保证所有步骤都看得见）。"""
+        cv = self.canvas
+        cv.user_view = True
+        r = cv.scene().itemsBoundingRect().adjusted(-30, -30, 30, 30)
+        cv.setSceneRect(r)
+        cv.fitInView(r, Qt.KeepAspectRatio)
+        if cv.transform().m11() > 1.0:
+            cv.resetTransform()
+            cv.centerOn(r.center())
+
     # ------------------------------------------------------------ 显示
 
     def render_all(self, fit: bool = True):
@@ -168,6 +230,8 @@ class DesignerPage(QMainWindow):
         if self.selected:
             states[self.selected] = "selected"
         self.canvas.show_workflow(self.wf, self.current_sub, states, fit=fit)
+        if not fit and self.selected in self.canvas.items_by_id:     # 画面跟到刚操作的那一步（比如断开后停到旁边的空地）
+            self.canvas.ensureVisible(self.canvas.items_by_id[self.selected], 60, 60)
         self._fill_tree()
         text = dump_workflow(self.wf)
         if self.code.toPlainText() != text:
@@ -268,10 +332,7 @@ class DesignerPage(QMainWindow):
             n += 1
         return f"{base}_{n}"
 
-    def add_step(self, kind: str):
-        where = self._where(self.selected)[0] if self.selected else (self.current_sub or "main")
-        if kind == "foreach":
-            where = "main"
+    def _new_step(self, kind: str, where: str) -> Step:
         defaults = {"agent": dict(role="coder" if where != "main" else "planner"),
                     "verify": dict(scope="all" if where == "main" else "module"),
                     "loop": dict(body="repair_round", until="verify_passed", max=6),
@@ -279,7 +340,14 @@ class DesignerPage(QMainWindow):
                     "parallel": dict(branches=()), "subflow": dict(subflow=self.current_sub or ""),
                     "foreach": dict(over="plan.modules", subflow=self.current_sub or "")}
         sid = self._unique({"agent": "agent", "human": "confirm"}.get(kind, kind))
-        step = Step(id=sid, kind=kind, **defaults.get(kind, {}))
+        return Step(id=sid, kind=kind, **defaults.get(kind, {}))
+
+    def add_step(self, kind: str):
+        where = self._where(self.selected)[0] if self.selected else (self.current_sub or "main")
+        if kind == "foreach":
+            where = "main"
+        step = self._new_step(kind, where)
+        sid = step.id
 
         def op():
             steps = self._steps(where)
@@ -340,6 +408,99 @@ class DesignerPage(QMainWindow):
             self._set_steps(ws, steps)
         self._change(op)
 
+    # ------------------------------------------------------------ 拖拽：吸附、拖离、从步骤箱拖进来（DECISIONS 第 102 条）
+
+    def _unref(self, steps: list[Step], sid: str) -> list[Step]:
+        return [dataclasses.replace(s, branches=tuple(x for x in s.branches if x != sid),
+                                    then=tuple(x for x in s.then if x != sid),
+                                    otherwise=tuple(x for x in s.otherwise if x != sid)) for s in steps]
+
+    def _place(self, step: Step, where: str, target) -> list[Step] | None:
+        """把 step 放到 target 处：("edge", a, b) 插进 a→b；("after", a, "") 接到 a 后面
+        （a 是并行就成为一个分支，a 是条件就加到"是"分支）。返回新的步骤列表；放不了返回 None。"""
+        _, anchor, _ = target
+        steps = [s for s in self._steps(where) if s.id != step.id]
+        steps = self._unref(steps, step.id)
+        k = next((n for n, s in enumerate(steps) if s.id == anchor), -1)
+        if k < 0:
+            return None
+        a = steps[k]
+        step = dataclasses.replace(step, detached=False, pos=None)
+        if target[0] == "after" and a.kind == "parallel":
+            steps[k] = dataclasses.replace(a, branches=tuple(dict.fromkeys((*a.branches, step.id))))
+        elif target[0] == "after" and a.kind == "condition":
+            steps[k] = dataclasses.replace(a, then=tuple(dict.fromkeys((*a.then, step.id))))
+        steps.insert(k + 1, step)
+        return steps
+
+    def _step_dropped(self, sid: str, x: float, y: float, target, far: bool):
+        where, i = self._where(sid)
+        if i < 0:
+            return
+        step = self._steps(where)[i]
+        if target is not None:
+            steps = self._place(step, where, target)
+            if steps is None:
+                self.render_all(fit=False)
+                return
+
+            def op():
+                self._set_steps(where, steps)
+                self.selected = sid
+            self._change(op)
+        elif far:
+            def op():
+                steps = self._unref(self._steps(where), sid)
+                k = next(n for n, s in enumerate(steps) if s.id == sid)
+                steps[k] = dataclasses.replace(steps[k], detached=True, pos=(round(x, 1), round(y, 1)))
+                self._set_steps(where, steps)
+                self.selected = sid
+            self._change(op)
+        else:
+            self._moved(sid, x, y)
+
+    def _new_dropped(self, kind: str, where: str, x: float, y: float, target):
+        if kind == "foreach" and where != "main":
+            QMessageBox.information(self, "不能放在这里", "\"每个模块各跑\"只能放在主流程。")
+            return
+        step = self._new_step(kind, where)
+        if target is not None:
+            steps = self._place(step, where, target)
+            if steps is None:
+                return
+        else:
+            steps = self._steps(where) + [dataclasses.replace(step, detached=True, pos=(round(x, 1), round(y, 1)))]
+
+        def op():
+            self._set_steps(where, steps)
+            self.new_ids.add(step.id)
+            self.selected = step.id
+        self._change(op)
+
+    def _parking(self, where: str) -> tuple[float, float]:
+        """断开的步骤放到流程旁边的空地：主流程放左边，子流程放在子流程框的右边，依次往下排，不压住别的步骤。"""
+        n = sum(1 for s in self._steps(where) if s.detached)
+        if where == "main":
+            return (-STEP_W - 80.0, 40.0 + 64 * n)
+        rect = next((r for name, r in self.canvas.regions if name == where), None)
+        x = rect.right() + 40 if rect is not None else 700.0
+        return (round(x, 1), 40.0 + 64 * n)
+
+    def disconnect(self, a: str, b: str):
+        """断开 a→b：b 变成"没连上"，原来 b 前后的步骤自动接上。"""
+        where, j = self._where(b)
+        if j < 0:
+            return
+        pos = self._parking(where)
+
+        def op():
+            steps = self._unref(self._steps(where), b)
+            k = next(n for n, s in enumerate(steps) if s.id == b)
+            steps[k] = dataclasses.replace(steps[k], detached=True, pos=pos)
+            self._set_steps(where, steps)
+            self.selected = b
+        self._change(op)
+
     def _moved(self, sid, x, y):
         where, i = self._where(sid)
         if i < 0:
@@ -354,6 +515,9 @@ class DesignerPage(QMainWindow):
     def _context(self, action: str, sid: str):
         if action == "delete":
             self.delete(sid)
+        elif action == "detach":
+            x, y = self._parking(self._where(sid)[0])
+            self._step_dropped(sid, x, y, None, True)
         elif action in ("up", "down"):
             self.move(sid, -1 if action == "up" else 1)
         elif action == "ask_ai":

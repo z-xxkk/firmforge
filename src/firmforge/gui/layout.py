@@ -216,3 +216,46 @@ def flow_positions(steps: list, *, x0: float = 0, y0: float = 0, w: float = 150,
             pos[s.id] = s.pos or (x0, y)
             y += h + gap
     return pos
+
+
+# ---------------------------------------------------------------- 设计器：拖动时吸附到哪里（DECISIONS 第 102 条）
+
+SNAP_HANDLE = 70.0      # 拖到某个步骤正下方这个距离以内，就接到它后面
+SNAP_EDGE = 28.0        # 拖到连线中点这个距离以内，就插进这条线（Node-RED 的做法）
+DETACH = 50.0           # 已连好的步骤拖离原位超过这个距离，它的连线就断开
+
+
+def snap_target(top_center: tuple[float, float], steps: dict[str, tuple[float, float]],
+                edges: list[tuple[str, str, tuple[float, float]]], *, w: float, h: float,
+                exclude: str = "") -> tuple[str, str, str] | None:
+    """拖动中的步骤（上沿中点在 top_center）该接到哪里。
+
+    steps：步骤 → 左上角坐标；edges：(上一步, 下一步, 连线中点)。
+    返回 ("edge", 上一步, 下一步)：插进这条线；("after", 步骤, "")：接到这个步骤后面；None：放在空白处、不连。
+    连线优先（它更具体）；都不近就不吸附。被拖的步骤自己和连到它的线不算。
+    """
+    x, y = top_center
+    best, best_d = None, SNAP_EDGE
+    for a, b, (mx, my) in edges:
+        if exclude in (a, b):
+            continue
+        d = ((x - mx) ** 2 + (y - my) ** 2) ** 0.5
+        if d <= best_d:
+            best, best_d = ("edge", a, b), d
+    if best is not None:
+        return best
+    best_d = SNAP_HANDLE
+    for sid, (sx, sy) in steps.items():
+        if sid == exclude:
+            continue
+        hx, hy = sx + w / 2, sy + h                      # 下沿中点（连线把手）
+        dx, dy = abs(x - hx), y - hy
+        if dx <= w * 0.6 and 0 <= dy <= SNAP_HANDLE:
+            d = (dx ** 2 + dy ** 2) ** 0.5
+            if d <= best_d:
+                best, best_d = ("after", sid, ""), d
+    return best
+
+
+def moved_far(origin: tuple[float, float], now: tuple[float, float]) -> bool:
+    return ((origin[0] - now[0]) ** 2 + (origin[1] - now[1]) ** 2) ** 0.5 > DETACH

@@ -248,6 +248,52 @@ class GuiSmokeTest(unittest.TestCase):
             self.assertIn("int ppg_ok", page.code_view.toPlainText())
             w.close()
 
+    def test_designer_drag_snap_and_detach(self):
+        # 照 Node-RED、n8n 的拖拽（DECISIONS 第 102 条）：拖到连线上插进去、拖到步骤下面接在后面、空白处没连上；
+        # 已连好的步骤拖远连线消失、前后自动接上；断开连线；有没连上的步骤不能保存
+        from PySide6.QtCore import QMimeData, QPointF, Qt
+        from PySide6.QtGui import QDropEvent
+        from firmforge.gui.graph import STEP_H, STEP_MIME, STEP_W
+        w = self.window()
+        d = w.designer
+        cv = d.canvas
+        ids = lambda: [s.id + ("!" if s.detached else "") for s in d.wf.main]          # noqa: E731
+
+        def drop(kind, pt):
+            md = QMimeData()
+            md.setData(STEP_MIME, kind.encode())
+            cv.dropEvent(QDropEvent(QPointF(cv.mapFromScene(pt)), Qt.CopyAction, md, Qt.LeftButton, Qt.NoModifier))
+        e = next(e for e in cv.edges if (e.a, e.b) == ("plan", "confirm_plan"))
+        drop("human", e.mid())
+        self.assertEqual(ids()[:3], ["plan", "confirm_1", "confirm_plan"])
+        drop("human", cv.items_by_id["integrate"].pos() + QPointF(STEP_W / 2, STEP_H + 30))
+        self.assertEqual(ids()[-1], "confirm_2")
+        drop("agent", QPointF(-900, -900))
+        self.assertEqual(ids()[-1], "agent_1!")
+        self.assertTrue(any("还没连上" in p for p in d.check(quiet=True)))
+        # 拖远：连线隐藏，松手后断开、前后接上
+        it = cv.items_by_id["confirm_plan"]
+        it._origin = QPointF(it.pos())
+        it.setPos(it.pos() + QPointF(400, 0))
+        self.assertTrue(all(not e.isVisible() for e in cv.edges if "confirm_plan" in (e.a, e.b)))
+        o, it._origin = it._origin, None
+        cv._dropped(it, o)
+        self.assertIn("confirm_plan!", ids())
+        # 拖到 plan 正下方：吸附接上
+        it = cv.items_by_id["confirm_plan"]
+        it._origin = QPointF(it.pos())
+        it.setPos(cv.items_by_id["plan"].pos() + QPointF(5, STEP_H + 25))
+        self.assertIsNotNone(cv._preview)                                  # 松手前先显示会接到哪里
+        o, it._origin = it._origin, None
+        cv._dropped(it, o)
+        self.assertEqual(ids()[:2], ["plan", "confirm_plan"])
+        # 断开连线：后一步变成没连上
+        cv.disconnect_edge.emit("plan", "confirm_plan")
+        self.assertIn("confirm_plan!", ids())
+        d.do_undo()
+        self.assertNotIn("confirm_plan!", ids())
+        w.close()
+
     def test_designer_edits_flow_into_code(self):
         w = self.window()
         dz = w.designer

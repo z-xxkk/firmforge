@@ -67,6 +67,29 @@ class EngineProblemsTest(unittest.TestCase):
         no_plan = with_steps(self.wf, main=[s for s in self.wf.main if s.kind != "agent"])
         self.assertIn("规划步骤", "\n".join(engine_problems(no_plan, self.reg)))
 
+    def test_detached_step_round_trips_and_blocks_running(self):
+        # 设计器里"还没连上"的步骤（DECISIONS 第 102 条）：存进 TOML 能读回；连上或删除前引擎不执行
+        step = dataclasses.replace(self.wf.main[1], detached=True, pos=(-240.0, 40.0))
+        wf2 = with_steps(self.wf, main=(self.wf.main[0], step, *self.wf.main[2:]))
+        text = dump_workflow(wf2)
+        self.assertEqual(text.count("detached = true"), 1)                 # 没断开的步骤不写 detached
+        self.assertTrue(parse_workflow(tomllib.loads(text), "x").main[1].detached)
+        self.assertTrue(any("还没连上" in p for p in engine_problems(wf2, self.reg)))
+
+    def test_snap_target(self):
+        # 拖动时吸附到哪里：连线中点附近插进去，步骤正下方接在后面，远处不吸附
+        from firmforge.gui.layout import SNAP_HANDLE, snap_target
+        steps = {"a": (0.0, 0.0), "b": (0.0, 100.0)}
+        edges = [("a", "b", (80.0, 70.0))]
+        kw = dict(w=160, h=42)
+        self.assertEqual(snap_target((85.0, 75.0), steps, edges, **kw), ("edge", "a", "b"))
+        self.assertEqual(snap_target((80.0, 142.0 + 20), steps, edges, **kw), ("after", "b", ""))
+        self.assertIsNone(snap_target((600.0, 600.0), steps, edges, **kw))
+        self.assertIsNone(snap_target((80.0, 142.0 + SNAP_HANDLE + 5), steps, edges, **kw))
+        # 被拖的步骤自己、以及连到它的线不算
+        self.assertEqual(snap_target((85.0, 75.0), steps, edges, exclude="b", **kw), ("after", "a", ""))
+        self.assertIsNone(snap_target((85.0, 75.0), steps, edges, exclude="a", **kw))
+
     def test_engine_refuses_bad_workflow(self):
         from firmforge.orchestrator.workflow import WorkflowError
         from firmforge.orchestrator.engine import Engine

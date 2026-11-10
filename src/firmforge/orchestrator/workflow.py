@@ -5,6 +5,8 @@
 
 桌面软件的设计器和引擎读写的是同一份 TOML（像 Qt Designer 的 .ui 文件）：
 - pos、note 只给设计器用（画布位置、说明），引擎忽略；
+- detached 表示设计器里"还没连上"的步骤（从步骤箱拖到空白处、或从连线上拖开的），engine_problems 会报出来，
+  所以有没连上的步骤时不能保存、不能运行（DECISIONS 第 102 条）；
 - 保存新版本时，旧版本另存到 workflows/history/<名字>-<版本>.toml；
 - engine_problems() 检查"设计器画出来的东西引擎能不能执行"，设计器保存前和引擎启动时都用它。
 """
@@ -48,6 +50,7 @@ class Step:
     agent: str | None = None          # agent 步骤指定某个 Agent（不填就由调度器按角色挑）
     note: str | None = None           # 说明（设计器显示）
     pos: tuple[float, float] | None = None   # 画布位置（只给设计器用）
+    detached: bool = False            # 设计器里还没连上（连上或删除前不能保存、不能运行）
 
 
 @dataclass(frozen=True)
@@ -106,7 +109,8 @@ def _step(d: dict, where: str) -> Step:
                 otherwise=tuple(d.get("else", ())), cond=d.get("if"), when=d.get("when"),
                 until=d.get("until"), body=d.get("body"), max=d.get("max"),
                 enabled_by=d.get("enabled_by"), over=d.get("over"), subflow=d.get("subflow"),
-                agent=d.get("agent"), note=d.get("note"), pos=tuple(float(x) for x in pos) if pos else None)
+                agent=d.get("agent"), note=d.get("note"), pos=tuple(float(x) for x in pos) if pos else None,
+                detached=bool(d.get("detached", False)))
 
 
 def _check_refs(steps: tuple[Step, ...], where: str, subflows: dict) -> None:
@@ -158,7 +162,7 @@ def load_workflow(name_or_path: str | Path = "module_dev", version: str | None =
 _STEP_KEYS = (("id", "id"), ("kind", "kind"), ("role", "role"), ("agent", "agent"), ("scope", "scope"),
               ("branches", "branches"), ("cond", "if"), ("then", "then"), ("otherwise", "else"), ("when", "when"),
               ("until", "until"), ("body", "body"), ("max", "max"), ("enabled_by", "enabled_by"), ("over", "over"),
-              ("subflow", "subflow"), ("note", "note"), ("pos", "pos"))
+              ("subflow", "subflow"), ("note", "note"), ("pos", "pos"), ("detached", "detached"))
 
 
 def _toml_value(v) -> str:
@@ -176,7 +180,7 @@ def step_toml(step: Step, table: str = "main") -> str:
     lines = [f"[[{table}]]"]
     for attr, key in _STEP_KEYS:
         v = getattr(step, attr)
-        if v in (None, (), ""):
+        if v in (None, (), "") or v is False:
             continue
         lines.append(f"{key} = {_toml_value(v)}")
     return "\n".join(lines)
@@ -232,6 +236,9 @@ SUB_ROLES = ("coder", "tester", "reviewer")
 def engine_problems(wf: Workflow, registry=None) -> list[str]:
     """设计器画的流程，引擎能不能执行。返回问题列表（空表示没问题）。"""
     problems: list[str] = []
+    for s in (*wf.main, *[x for ss in wf.subflows.values() for x in ss]):
+        if s.detached:
+            problems.append(f"步骤 {s.id} 还没连上：把它拖到连线上或某个步骤的正下方，或者删掉它")
     if not any(s.kind == "agent" and s.role == "planner" for s in wf.main):
         problems.append("主流程要有一个规划步骤（Agent：planner）")
     if not any(s.kind == "foreach" for s in wf.main):
