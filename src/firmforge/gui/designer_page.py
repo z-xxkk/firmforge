@@ -212,6 +212,10 @@ class DesignerPage(QMainWindow):
 
     def render_all(self, fit: bool = True):
         self._syncing = True
+        if self.selected and self._where(self.selected)[1] < 0:   # 选中的步骤已经不在了（撤销、删除、换版本以后）
+            self.selected = None
+        if self.current_sub not in self.wf.subflows:
+            self.current_sub = next(iter(self.wf.subflows), None)
         self.name_label.setText(self.wf.name)
         self.version_combo.clear()
         versions = list_versions(self.wf.name)
@@ -315,9 +319,14 @@ class DesignerPage(QMainWindow):
                                         else s for s in steps])
 
     def _change(self, fn, fit: bool = False):
-        self.undo.append(self.wf)
+        prev = self.wf
+        self.undo.append(prev)
         fn()
         self._normalize()
+        if self.wf == prev:                          # 实际没改动（拖完放回原处、拉线到自己等）：不留撤销记录
+            self.undo.pop()
+            self.render_all(fit=fit)
+            return
         if self.wf.version == self.saved.version and self.wf != self.saved:
             self.wf = dataclasses.replace(self.wf, version=bump(self.saved.version), based_on=self.saved.version)
         self.render_all(fit=fit)
@@ -353,7 +362,7 @@ class DesignerPage(QMainWindow):
         return Step(id=sid, kind=kind, **defaults.get(kind, {}))
 
     def add_step(self, kind: str):
-        where = self._where(self.selected)[0] if self.selected else (self.current_sub or "main")
+        where = (self._where(self.selected)[0] if self.selected else "") or (self.current_sub or "main")
         if kind == "foreach":
             where = "main"
         step = self._new_step(kind, where)
@@ -411,6 +420,9 @@ class DesignerPage(QMainWindow):
         if parent is not None and not s.detached:    # 起点是分支里的步骤：分支没有先后，拉线 = 让终点和它并列
             moving = self._steps(ws)[j]
             steps = self._place(moving, ws, ("branch", parent.id, src))
+            if steps is None:                        # 比如从分支拉线到它自己的并行：成环，不做
+                self.render_all(fit=False)
+                return
 
             def op2():
                 self._set_steps(ws, steps)
@@ -733,6 +745,9 @@ class DesignerPage(QMainWindow):
     # ------------------------------------------------------------ 让 AI 改
 
     def ask_ai(self, instruction: str | None = None):
+        if getattr(self, "_ai", None) is not None and self._ai.isRunning():
+            QMessageBox.information(self, "AI 还在改", "上一次的修改还没回来，等它回来再提新的要求。")
+            return
         if instruction is None:
             text, ok = QInputDialog.getMultiLineText(self, "让 AI 改工作流",
                                                      "想怎么改？例如\"审查之后加一步人工验收\"。选中的步骤会一起交给 AI。")
@@ -748,17 +763,20 @@ class DesignerPage(QMainWindow):
             QMessageBox.warning(self, "没法联系模型", str(exc))
             return
         sel = [self.selected] if self.selected else []
-        self._ai = _Worker(lambda: propose_workflow_edit(llm, config.load_settings(), self.wf, instruction, sel))
-        self._ai.finished.connect(self._ai_done)
-        self._ai.start()
+        worker = _Worker(lambda: propose_workflow_edit(llm, config.load_settings(), self.wf, instruction, sel))
+        worker.finished.connect(lambda w=worker: self._ai_done(w))       # 用结束的那一个，不是"最近一个"
+        self._ai = worker
+        worker.start()
         self.problems.clear()
         self.problems.addItem("AI 正在改……")
 
-    def _ai_done(self):
-        if self._ai.error:
-            QMessageBox.warning(self, "AI 没有改成", self._ai.error)
+    def _ai_done(self, worker=None):
+        worker = worker or self._ai
+        if worker.error or worker.result is None:
+            self.check(quiet=True)
+            QMessageBox.warning(self, "AI 没有改成", worker.error or "没有拿到回复")
             return
-        new, probs, _sent, raw = self._ai.result
+        new, probs, _sent, raw = worker.result
         if new is None or probs:
             QMessageBox.warning(self, "AI 的修改不能用", "\n".join(probs) or "没有拿到新的工作流")
             return

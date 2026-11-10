@@ -224,7 +224,35 @@ class MainWindow(QMainWindow):
         self.chat.add_user(f"用工作流 {wf.name} {wf.version} 试运行评测题 {tid}")
         self.chat.start_run(load_task(self.project / "tasks" / tid))
 
+    def busy(self) -> list[str]:
+        """还没结束的运行（关窗口前问一声）。"""
+        from .runner import LIVE_WORKERS
+        names = [text for owner, text in ((self.chat, "对话页的运行"), (self.hardware, "硬件页的查资料提炼规则"),
+                                          (self.evalp, "评测页的评测"))
+                 if getattr(owner, "backend", None) is not None]
+        if not names and any(w.isRunning() for w in LIVE_WORKERS):
+            names.append("一次模型调用")
+        return names
+
     def closeEvent(self, ev):
+        from PySide6.QtWidgets import QMessageBox
+        from .runner import shutdown_workers
+        names = self.busy()
+        if names:
+            ans = QMessageBox.question(self, "还有运行没结束",
+                                       f"{'、'.join(names)}还没结束。现在关闭会中止它（评测已经跑完的部分会保留，"
+                                       "下次用同一个目录开始会接着跑）。\n\n确定关闭吗？")
+            if ans != QMessageBox.Yes:
+                ev.ignore()
+                return
+            for owner in (self.chat, self.hardware, self.evalp):
+                b = getattr(owner, "backend", None)
+                if b is not None:
+                    try:
+                        b.stop()
+                    except Exception:                    # noqa: BLE001  停的时候出错也要继续关
+                        pass
+        shutdown_workers()                               # 等后台线程结束，否则 Qt 会直接中止程序
         st = QSettings()
         st.setValue("window/geometry", self.saveGeometry())
         st.setValue("window/page_key", self.page_keys[self.stack.currentIndex()])

@@ -217,10 +217,11 @@ class SettingsPage(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "连不上", str(exc))
             return
-        self._mw = _Worker(client.list_models)
-        self._mw.finished.connect(lambda: QMessageBox.information(
-            self, "测试连接", self._mw.error or ("可用型号：\n" + "\n".join(self._mw.result or []))))
-        self._mw.start()
+        w = self._mw = _Worker(client.list_models)
+        # 用结束的那一个 worker（连点两次时 self._mw 已经换成新的）；被中途停掉时没有结果
+        w.finished.connect(lambda: QMessageBox.information(
+            self, "测试连接", w.error or ("可用型号：\n" + "\n".join(w.result) if w.result else "没有拿到结果（被中途停掉了）")))
+        w.start()
 
     # ------------------------------------------------------------ 工具与 MCP
 
@@ -348,29 +349,31 @@ class SettingsPage(QWidget):
                 return c.version, [t["name"] for t in c.list_tools()]
             finally:
                 c.close()
-        self._tw = _Worker(job)
-        self._tw.finished.connect(lambda: self._mcp_tested(name))
-        self._tw.start()
+        w = self._tw = _Worker(job)
+        w.finished.connect(lambda: self._mcp_tested(name, w))
+        w.start()
 
-    def _mcp_tested(self, name):
+    def _mcp_tested(self, name, w=None):
+        w = w or self._tw
         for r in range(self.mcp_table.rowCount()):
             if self.mcp_table.item(r, 0).text() == name:
-                if self._tw.error:
+                if w.error or w.result is None:
                     self.mcp_table.setItem(r, 2, QTableWidgetItem("连不上"))
-                    self.mcp_table.setItem(r, 3, QTableWidgetItem(self._tw.error[:60]))
+                    self.mcp_table.setItem(r, 3, QTableWidgetItem((w.error or "没有拿到结果（被中途停掉了）")[:60]))
                 else:
-                    version, tools = self._tw.result
+                    version, tools = w.result
                     self.mcp_table.setItem(r, 2, QTableWidgetItem(f"已连接（{version}）"))
                     self.mcp_table.setItem(r, 3, QTableWidgetItem("、".join(f"mcp__{name}__{t}" for t in tools)))
 
     def _selftest(self):
         import subprocess
         import sys
-        self._sw = _Worker(lambda: subprocess.run([sys.executable, "-m", "firmforge", "mcp", "--selftest"],
-                                                  capture_output=True, text=True, encoding="utf-8", timeout=120))
-        self._sw.finished.connect(lambda: QMessageBox.information(
-            self, "MCP 自检", self._sw.error or (self._sw.result.stdout + self._sw.result.stderr)))
-        self._sw.start()
+        w = self._sw = _Worker(lambda: subprocess.run([sys.executable, "-m", "firmforge", "mcp", "--selftest"],
+                                                      capture_output=True, text=True, encoding="utf-8", timeout=120))
+        w.finished.connect(lambda: QMessageBox.information(
+            self, "MCP 自检", w.error or ((w.result.stdout + w.result.stderr) if w.result is not None
+                                          else "没有拿到结果（被中途停掉了）")))
+        w.start()
 
     # ------------------------------------------------------------ 记忆与知识库
 

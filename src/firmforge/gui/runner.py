@@ -70,12 +70,20 @@ class EventFollower(QObject):
         self.timer.stop()
 
 
+LIVE_WORKERS: set = set()           # 还在跑的后台线程；关窗口前要等它们结束（否则 Qt 直接中止程序）
+
+
 class _Worker(QThread):
     def __init__(self, fn):
         super().__init__()
         self.fn = fn
         self.result = None
         self.error = ""
+        self.finished.connect(lambda: LIVE_WORKERS.discard(self))
+
+    def start(self, *args):
+        LIVE_WORKERS.add(self)                   # 同时也保住引用：跑着的线程不会被当垃圾回收掉
+        super().start(*args)
 
     def run(self):
         try:
@@ -177,6 +185,15 @@ class LocalBackend(Backend):
         self.answer("")
         if self.worker is not None and self.worker.isRunning():
             self.worker.terminate()
+
+
+def shutdown_workers(timeout_ms: int = 3000) -> None:
+    """关窗口前：等后台线程结束，等不到就强行停掉（模型调用卡在网络上时）。"""
+    for w in list(LIVE_WORKERS):
+        if w.isRunning() and not w.wait(timeout_ms):
+            w.terminate()
+            w.wait(2000)
+        LIVE_WORKERS.discard(w)
 
 
 def rule_review_payload(pending, escalated, results: dict | None = None) -> dict:
@@ -424,7 +441,12 @@ class EvalBackend(Backend):
         self._stop = True
 
     def stop(self) -> None:
+        """关窗口时用：不等正在跑的一次，直接停（已经写进 runs.jsonl 的结果保留，再开始会接着跑）。"""
         self.pause()
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.terminate()
+            self.worker.wait(2000)
+        BOARD_USERS.discard(self)
 
     def answer(self, value) -> None:
         pass

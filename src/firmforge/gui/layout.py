@@ -257,6 +257,51 @@ def attached_ids(steps: list) -> set[str]:
     return out
 
 
+def canvas_layout(groups: list[tuple[str, list]], *, w: float, h: float, gap: float = 30, y0: float = 40,
+                  flow_gap: float = 110) -> tuple[dict[str, tuple[float, float]], dict[str, tuple[float, float, float, float]]]:
+    """整张流程图的位置：主流程在左，子流程依次排在右边。最后统一避让，保证任何两个步骤都不叠在一起
+    （"猴子"测试发现各种组合下会叠：条件分支、并行分叉往左伸、浮着的步骤停在别人原来的位置等）。
+    返回 (步骤 → 左上角, 流程 → 框的 (x, y, 宽, 高))；框只按连着的步骤算。"""
+    pos: dict[str, tuple[float, float]] = {}
+    frames: dict[str, tuple[float, float, float, float]] = {}
+    placed: list[tuple[float, float]] = []
+
+    def free(x: float, y: float) -> bool:
+        return all(abs(x - px) >= w + 12 or abs(y - py) >= h + 12 for px, py in placed)
+
+    right = None
+    for name, steps in groups:
+        att = attached_ids(steps)
+        kw = dict(y0=y0, w=w, h=h, gap=gap)
+        x0 = 0.0
+        if right is not None:                            # 先排一遍量出左边界，再整体挪到前一个流程的右边
+            draft = flow_positions(steps, x0=0.0, **kw)
+            x0 = right + flow_gap - min([q[0] for sid, q in draft.items() if sid in att] or [0.0])
+        first = flow_positions(steps, x0=x0, **kw)
+        xs = [first[s][0] for s in first if s in att] or [x0]
+        park = None if right is None else (max(xs) + w + 40, y0)
+        raw = flow_positions(steps, x0=x0, park=park, **kw) if park else first
+        order = [s.id for s in steps if s.id in att and s.id in raw]
+        order = sorted(order, key=lambda s: (raw[s][1], raw[s][0])) + [s.id for s in steps if s.id not in att]
+        for sid in order:                                # 连着的往右让，浮着的往下让
+            x, y = raw[sid]
+            for _ in range(400):
+                if free(x, y):
+                    break
+                if sid in att:
+                    x += w + 30
+                else:
+                    y += h + 22
+            pos[sid] = (x, y)
+            placed.append((x, y))
+        xs = [pos[s][0] for s in pos if s in att and s in raw] or [x0]
+        ys = [pos[s][1] for s in pos if s in att and s in raw] or [y0]
+        frames[name] = (min(xs) - 24, 0.0, max(xs) - min(xs) + w + 48, max(ys) + h + 40)
+        right = max(right or 0.0, frames[name][0] + frames[name][2],
+                    max([pos[s][0] + w for s in raw] or [0.0]))
+    return pos, frames
+
+
 # ---------------------------------------------------------------- 设计器：拖动时吸附到哪里（DECISIONS 第 102 条）
 
 SNAP_HANDLE = 70.0      # 拖到某个步骤正下方这个距离以内，就接到它后面

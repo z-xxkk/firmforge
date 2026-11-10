@@ -83,6 +83,8 @@ firmforge firmware --spec 需求.md                # 嵌入式新流程：规则
 firmforge check-board-tasks [题目 id]            # 上板评测题自检（没有板子时编译标准答案和变异体）
 firmforge board-eval --out results/<实验名> --plan --max-cost 0  # 先看要跑多少次、verified 缺哪些规则（不调用模型）
 firmforge board-eval --out results/<实验名> --runs 2 --max-cost 20  # 题目 × 四种配置 × 2 次（默认 fast 档、思考 low），最多花 20 元
+QT_QPA_PLATFORM=offscreen python tests/monkey_designer.py --seeds 0-29 --steps 400   # 设计器随机操作长测（固定种子，可重现）
+QT_QPA_PLATFORM=offscreen python tests/monkey_pages.py --seeds 0-14 --steps 300      # 其他几页随机点击长测（在项目副本里跑）
 docker build -t firmforge-gui -f docker/Dockerfile.gui .   # 界面测试与截图用的镜像（offscreen）
 docker build -t firmforge -f docker/Dockerfile .
 docker run --rm --env-file .env --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work firmforge <子命令>

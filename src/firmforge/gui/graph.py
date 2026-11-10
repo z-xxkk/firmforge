@@ -10,7 +10,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QMenu
 
-from .layout import (UNIT_NAMES, ModuleView, RunView, attached_ids, flow_positions, grid_positions, layer_names,
+from .layout import (UNIT_NAMES, ModuleView, RunView, attached_ids, canvas_layout, grid_positions, layer_names,
                      moved_far, snap_target)
 from .theme import MONO
 from .widgets import T
@@ -465,25 +465,13 @@ class FlowCanvas(DotGridView):
         sub = subflow or next(iter(wf.subflows), None)
         if sub:
             groups.append((sub, list(wf.subflows[sub])))
-        right = 0.0                                            # 已经画好的流程的右边界，下一个流程排在它右边
         self.floating: set[str] = set()                        # 没连上的步骤，以及跟着它们的分支
         self.heads: set[str] = set()                           # 各流程的第一步（拖到它上方 = 放到最前面）
         self.empty_flows: set[str] = set()                     # 一个连着的步骤都没有的流程
+        pos, frames = canvas_layout(groups, w=STEP_W, h=STEP_H)
         for name, steps in groups:
-            kw = dict(y0=40, w=STEP_W, h=STEP_H, gap=30)
-            att = attached_ids(steps)
-            self.floating |= {s.id for s in steps} - att
-            x0 = 0.0
-            if name != "main":                                 # 先排一遍量出左边界，再整体挪到主流程右边
-                draft = flow_positions(steps, x0=0.0, **kw)
-                x0 = right + 110 - min([p[0] for sid, p in draft.items() if sid in att] or [0.0])
-            pos = flow_positions(steps, x0=x0, **kw)
-            ys = [p[1] for sid, p in pos.items() if sid in att] or [40]
-            xs = [p[0] for sid, p in pos.items() if sid in att] or [x0]
-            frame = QRectF(min(xs) - 24, 0, max(xs) - min(xs) + STEP_W + 48, max(ys) + STEP_H + 40)
-            if name != "main":                                 # 没连上的步骤：主流程的放左边，子流程的放框的右边
-                pos = flow_positions(steps, x0=x0, park=(frame.right() + 40, 40), **kw)
-            right = max(right, frame.right())
+            self.floating |= {s.id for s in steps} - attached_ids(steps)
+            frame = QRectF(*frames[name])
             self.regions.append((name, frame))
             if name != "main":
                 box = sc.addRect(frame, QPen(QColor(c["line"]), 1), QBrush(QColor(c["surface"])))
