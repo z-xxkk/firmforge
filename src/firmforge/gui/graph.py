@@ -512,6 +512,11 @@ class FlowCanvas(DotGridView):
         if abs(b.pos().y() - a.pos().y()) < STEP_H / 2:     # 同一行（分支）：从右侧连出去
             pa = a.pos() + QPointF(STEP_W, STEP_H / 2)
             pb = b.pos() + QPointF(0, STEP_H / 2)
+            if b.pos().x() - a.pos().x() > STEP_W + 60:     # 中间隔着别的分支：从上方绕过去，不穿过它
+                pb = b.pos() + QPointF(STEP_W / 2, 0)
+                path = QPainterPath(pa)
+                path.cubicTo(QPointF(pa.x() + 30, pa.y() - 46), QPointF(pb.x(), pb.y() - 46), pb)
+                return path
             path = QPainterPath(pa)
             path.cubicTo(QPointF(pa.x() + 30, pa.y()), QPointF(pb.x() - 30, pb.y()), pb)
             return path
@@ -540,7 +545,16 @@ class FlowCanvas(DotGridView):
                  if not it.step.detached and (flow is None or self.flow_of[sid] == flow) and sid != exclude}
         edges = [(e.a, e.b, (e.mid().x(), e.mid().y())) for e in self.edges
                  if not e.branch and e.a in steps and e.b in steps and exclude not in (e.a, e.b)]
+        self._branch_of = {r: sid for sid in steps for r in (*self.items_by_id[sid].step.branches,
+                                                              *self.items_by_id[sid].step.then,
+                                                              *self.items_by_id[sid].step.otherwise) if r in steps}
+        self._parents = {sid for sid in steps if self.items_by_id[sid].step.kind in ("parallel", "condition")}
         return steps, edges
+
+    def _snap(self, top: QPointF, flow: str | None, exclude: str = ""):
+        steps, edges = self._targets(flow, exclude=exclude)
+        return snap_target((top.x(), top.y()), steps, edges, w=STEP_W, h=STEP_H, exclude=exclude,
+                           branch_of=self._branch_of, parents=self._parents)
 
     def _flow_at(self, p: QPointF) -> str:
         for name, rect in reversed(self.regions):
@@ -561,9 +575,16 @@ class FlowCanvas(DotGridView):
         if target is None:
             return
         kind, a, b = target
-        anchor = self.items_by_id[a]
-        start = anchor.pos() + QPointF(STEP_W / 2, STEP_H)
-        path = curve(start, top)
+        anchor = self.items_by_id[b if kind == "branch" else a]
+        side = kind == "branch" or anchor.step.kind in ("parallel", "condition")
+        if side and top.y() < anchor.pos().y() + STEP_H:          # 并列：从旁边那一步的右侧连过来
+            start = anchor.pos() + QPointF(STEP_W, STEP_H / 2)
+            end = top + QPointF(-STEP_W / 2, STEP_H / 2)
+            path = QPainterPath(start)
+            path.cubicTo(QPointF(start.x() + 20, start.y()), QPointF(end.x() - 20, end.y()), end)
+        else:
+            start = anchor.pos() + QPointF(STEP_W / 2, STEP_H)
+            path = curve(start, top)
         pen = QPen(QColor(T()["accent"]), 2, Qt.DashLine)
         pen.setCapStyle(Qt.RoundCap)
         self._preview = sc.addPath(path, pen)
@@ -588,9 +609,7 @@ class FlowCanvas(DotGridView):
                 e.setPath(self._edge_path(self.items_by_id[e.a], self.items_by_id[e.b]))
         target = None
         if far:
-            steps, edges = self._targets(self.flow_of.get(sid), exclude=sid)
-            top = item.pos() + QPointF(STEP_W / 2, 0)
-            target = snap_target((top.x(), top.y()), steps, edges, w=STEP_W, h=STEP_H, exclude=sid)
+            target = self._snap(item.pos() + QPointF(STEP_W / 2, 0), self.flow_of.get(sid), exclude=sid)
         self._show_preview(target, item.pos() + QPointF(STEP_W / 2, 0))
 
     def _dropped(self, item: StepItem, origin: QPointF) -> None:
@@ -598,9 +617,7 @@ class FlowCanvas(DotGridView):
         far = item.step.detached or moved_far((origin.x(), origin.y()), (item.pos().x(), item.pos().y()))
         target = None
         if far:
-            steps, edges = self._targets(self.flow_of.get(sid), exclude=sid)
-            top = item.pos() + QPointF(STEP_W / 2, 0)
-            target = snap_target((top.x(), top.y()), steps, edges, w=STEP_W, h=STEP_H, exclude=sid)
+            target = self._snap(item.pos() + QPointF(STEP_W / 2, 0), self.flow_of.get(sid), exclude=sid)
         self._show_preview(None, QPointF())
         self.step_dropped.emit(sid, item.pos().x(), item.pos().y(), target, far)
 
@@ -614,8 +631,7 @@ class FlowCanvas(DotGridView):
     def _drop_target(self, ev):
         p = self.mapToScene(ev.position().toPoint())
         flow = self._flow_at(p)
-        steps, edges = self._targets(None)
-        target = snap_target((p.x(), p.y()), steps, edges, w=STEP_W, h=STEP_H)
+        target = self._snap(p, None)
         if target is not None:
             flow = self.flow_of[target[1]]
         return p, flow, target

@@ -153,8 +153,8 @@ class DesignerPage(QMainWindow):
                 it.setData(Qt.UserRole, kind)
                 self.palette.addItem(it)
         self.palette.itemDoubleClicked.connect(lambda it: it.data(Qt.UserRole) and self.add_step(it.data(Qt.UserRole)))
-        tip = label("把步骤拖进画布：放到连线上就插进去，放到某个步骤下面就接在它后面；也可以双击加到选中步骤后面。"
-                    "鼠标移到连线上点 × 断开。", "Faint", wrap=True)
+        tip = label("把步骤拖进画布：放到连线上就插进去，放到某个步骤下面就接在它后面，放到并行分支的旁边就并列成为分支；"
+                    "也可以双击加到选中步骤后面。鼠标移到连线上点 × 断开。", "Faint", wrap=True)
         box = QWidget()
         bl = QVBoxLayout(box)
         bl.setContentsMargins(0, 0, 0, 0)
@@ -407,6 +407,16 @@ class DesignerPage(QMainWindow):
         if src == dst:
             return
         s = self._steps(ws)[i]
+        parent = next((x for x in self._steps(ws) if src in (*x.branches, *x.then, *x.otherwise)), None)
+        if parent is not None and not s.detached:    # 起点是分支里的步骤：分支没有先后，拉线 = 让终点和它并列
+            moving = self._steps(ws)[j]
+            steps = self._place(moving, ws, ("branch", parent.id, src))
+
+            def op2():
+                self._set_steps(ws, steps)
+                self.selected = dst
+            self._change(op2)
+            return
 
         def op():
             steps = self._unref(self._steps(ws), dst)
@@ -455,6 +465,18 @@ class DesignerPage(QMainWindow):
             return None
         a = steps[k]
         step = dataclasses.replace(step, detached=False, pos=None)
+        if target[0] == "branch":                    # 和 target[2] 并列：加进同一个并行 / 条件的同一个分支列表
+            sib = target[2]
+
+            def join(ids):
+                ids = [x for x in ids if x != step.id]
+                if sib in ids:
+                    ids.insert(ids.index(sib) + 1, step.id)
+                return tuple(ids)
+            steps[k] = dataclasses.replace(a, branches=join(a.branches), then=join(a.then), otherwise=join(a.otherwise))
+            at = next((n for n, s in enumerate(steps) if s.id == sib), k)
+            steps.insert(at + 1, step)
+            return steps
         if target[0] == "after" and a.kind == "parallel":
             steps[k] = dataclasses.replace(a, branches=tuple(dict.fromkeys((*a.branches, step.id))))
         elif target[0] == "after" and a.kind == "condition":

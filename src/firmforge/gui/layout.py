@@ -225,15 +225,23 @@ SNAP_EDGE = 28.0        # 拖到连线中点这个距离以内，就插进这条
 DETACH = 50.0           # 已连好的步骤拖离原位超过这个距离，它的连线就断开
 
 
+SNAP_SIDE = 110.0       # 拖到分支步骤（或并行、条件）右边这个距离以内，就并列成为同一个并行 / 条件的分支
+
+
 def snap_target(top_center: tuple[float, float], steps: dict[str, tuple[float, float]],
                 edges: list[tuple[str, str, tuple[float, float]]], *, w: float, h: float,
-                exclude: str = "") -> tuple[str, str, str] | None:
+                exclude: str = "", branch_of: dict[str, str] | None = None,
+                parents: set[str] | None = None) -> tuple[str, str, str] | None:
     """拖动中的步骤（上沿中点在 top_center）该接到哪里。
 
     steps：步骤 → 左上角坐标；edges：(上一步, 下一步, 连线中点)。
-    返回 ("edge", 上一步, 下一步)：插进这条线；("after", 步骤, "")：接到这个步骤后面；None：放在空白处、不连。
+    返回 ("edge", 上一步, 下一步)：插进这条线；("after", 步骤, "")：接到这个步骤后面；
+    ("branch", 并行或条件, 旁边的分支步骤)：和旁边那个步骤并列，成为同一个并行 / 条件的分支；None：放在空白处、不连。
+    branch_of：分支步骤 → 引用它的并行或条件；parents：并行、条件步骤。
+    分支里的步骤没有先后（引擎里每个分支就是一个步骤），所以拖到分支步骤的下面或右边，都是"并列成为分支"。
     连线优先（它更具体）；都不近就不吸附。被拖的步骤自己和连到它的线不算。
     """
+    branch_of, parents = branch_of or {}, parents or set()
     x, y = top_center
     best, best_d = None, SNAP_EDGE
     for a, b, (mx, my) in edges:
@@ -254,6 +262,14 @@ def snap_target(top_center: tuple[float, float], steps: dict[str, tuple[float, f
             d = (dx ** 2 + dy ** 2) ** 0.5
             if d <= best_d:
                 best, best_d = ("after", sid, ""), d
+        if sid in branch_of or sid in parents:           # 右边：和它并列
+            gap, row = (x - w / 2) - (sx + w), abs(y - sy)
+            if -w * 0.25 <= gap <= SNAP_SIDE and row <= h:
+                d = (max(gap, 0) ** 2 + row ** 2) ** 0.5
+                if d <= best_d:
+                    best, best_d = ("after", sid, ""), d
+    if best is not None and best[1] in branch_of:
+        return ("branch", branch_of[best[1]], best[1])
     return best
 
 

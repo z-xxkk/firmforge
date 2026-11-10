@@ -352,6 +352,44 @@ class GuiSmokeTest(unittest.TestCase):
         self.assertFalse([p for p in d.check(quiet=True) if "没连上" in p])
         w.close()
 
+    def test_designer_join_parallel_branch(self):
+        # 负责人发现的 bug：想把 test 接到 code 旁边（同一个并行的分支），却被吸到主干上。
+        # 拖到分支步骤的右边、下面，或从分支步骤拉线，都是并列成为同一个并行的分支
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtTest import QTest
+        from firmforge.gui.graph import STEP_H, STEP_W
+        w = self.window()
+        w.resize(1440, 900)
+        w.show()
+        w.go("flow")
+        d, cv = w.designer, w.designer.canvas
+        vp = cv.viewport()
+
+        def drag(a, b):
+            QTest.mousePress(vp, Qt.LeftButton, Qt.NoModifier, a)
+            for k in range(1, 9):
+                QTest.mouseMove(vp, a + (b - a) * k / 8)
+            QTest.mouseRelease(vp, Qt.LeftButton, Qt.NoModifier, b)
+        pt = lambda sid, x, y: cv.mapFromScene(cv.items_by_id[sid].pos() + QPointF(x, y))     # noqa: E731
+        branches = lambda: d._get("write").branches                                            # noqa: E731
+
+        def away():
+            a = pt("test", 30, 12)
+            drag(a, a + QPoint(-40, 330))
+            self.assertEqual(branches(), ("code",))
+        away()
+        drag(pt("test", 30, 12), pt("code", STEP_W + 55, 12))                  # 右边
+        self.assertEqual(branches(), ("code", "test"))
+        away()
+        drag(pt("test", 30, 12), pt("code", 40, STEP_H + 42))                  # 下面
+        self.assertEqual(branches(), ("code", "test"))
+        away()
+        drag(pt("code", STEP_W / 2, STEP_H + 6), pt("test", STEP_W / 2, STEP_H / 2))   # 从 code 拉线
+        self.assertEqual(branches(), ("code", "test"))
+        self.assertFalse(d._get("test").detached)
+        self.assertEqual(d.check(quiet=True), [])
+        w.close()
+
     def test_designer_edits_flow_into_code(self):
         w = self.window()
         dz = w.designer
