@@ -239,6 +239,10 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv if argv is None else argv)
     app.setOrganizationName("FirmForge")
     app.setApplicationName("FirmForge")
+    app.setDesktopFileName("firmforge")             # 和应用列表里的 firmforge.desktop 对上，任务栏显示同一个图标
+    from . import desktop_entry
+    if desktop_entry.icon_path().is_file():
+        app.setWindowIcon(QIcon(str(desktop_entry.icon_path())))
     config.load_default_dotenv()
     project = Path.cwd() if (Path.cwd() / "firmforge.toml").is_file() else config.project_root()
     win = MainWindow(project)

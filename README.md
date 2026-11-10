@@ -289,6 +289,7 @@ python3 -m unittest discover -s tests -v
    ```bash
    .venv/bin/firmforge gui
    ```
+   想在桌面的"显示应用"里直接点开，运行一次 `.venv/bin/firmforge gui --install-shortcut`（`--remove-shortcut` 去掉）。
 
 ### 没有板子时能复现什么
 

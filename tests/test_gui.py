@@ -294,6 +294,24 @@ class GuiSmokeTest(unittest.TestCase):
         self.assertNotIn("confirm_plan!", ids())
         w.close()
 
+    def test_desktop_shortcut(self):
+        # Linux 应用列表里的快捷方式：桌面项指向虚拟环境里的 firmforge-gui，工作目录是项目目录，图标画得出来
+        from unittest import mock
+        from firmforge.gui import desktop_entry as de
+        with tempfile.TemporaryDirectory() as d, mock.patch("pathlib.Path.home", return_value=Path(d)):
+            exe = Path(d) / "bin" / "firmforge-gui"
+            exe.parent.mkdir()
+            exe.write_text("")
+            with mock.patch("sys.executable", str(Path(d) / "bin" / "python3")):
+                dp, icon = de.install(helpers.ROOT)
+            text = dp.read_text(encoding="utf-8")
+            self.assertIn(f"Exec={exe}", text)
+            self.assertIn(f"Path={Path(helpers.ROOT).resolve()}", text)
+            self.assertIn("StartupWMClass=FirmForge", text)
+            self.assertGreater(icon.stat().st_size, 1000)
+            self.assertEqual(len(de.uninstall()), 2)
+            self.assertFalse(dp.exists())
+
     def test_designer_edits_flow_into_code(self):
         w = self.window()
         dz = w.designer
