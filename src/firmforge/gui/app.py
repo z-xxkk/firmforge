@@ -204,20 +204,27 @@ class MainWindow(QMainWindow):
 
     def _open_run(self, run_dir: str):
         self.go("chat")
-        self.chat.start_replay(Path(run_dir))
+        self.chat.open_run(Path(run_dir))
 
     def _designer_ai(self, instruction: str):
         self.go("flow")
         self.designer.ask_ai(instruction or None)
 
     def _try_run(self, wf):
-        tid = self.chat.task_combo.currentData()
-        if not tid:
-            items = [self.chat.task_combo.itemData(i) for i in range(1, self.chat.task_combo.count())]
-            tid, ok = QInputDialog.getItem(self, "试运行", f"用 {wf.name} {wf.version} 跑哪一道评测题？", items, 0, False)
-            if not ok:
+        """设计器里的工作流跑的是纯逻辑流程：题目只能从 tasks/ 里选（对话页选着"上板"时，题目下拉框里是上板题）。"""
+        from PySide6.QtWidgets import QMessageBox
+        from ..tasks import discover_tasks, load_task
+        ids = [t.id for t in discover_tasks(self.project / "tasks")] if (self.project / "tasks").is_dir() else []
+        tid = self.chat.task_combo.currentData() if not self.chat.embedded else ""
+        if tid not in ids:
+            if not ids:
+                QMessageBox.information(self, "试运行", "tasks/ 里没有评测题，没法试运行。")
                 return
-        from ..tasks import load_task
+            tid, ok = QInputDialog.getItem(self, "试运行", f"用 {wf.name} {wf.version} 跑哪一道评测题？", ids, 0, False)
+            if not ok or tid not in ids:
+                return
+        if self.chat.embedded:                            # 切到纯逻辑流程，对话页的选项和详情标签跟着换
+            self.chat.flow_combo.setCurrentIndex(self.chat.flow_combo.findData("classic"))
         self.go("chat")
         self.chat.workflow = wf
         self.chat.new_chat()

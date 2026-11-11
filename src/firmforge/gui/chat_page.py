@@ -102,6 +102,7 @@ class AgentMessage(QWidget):
         col.addLayout(head)
         self.body = label(text, wrap=True)
         self.body.setTextFormat(Qt.MarkdownText)
+        self.body.setMinimumWidth(10)                     # 诊断里的长代码片段不把对话区撑出横向滚动条
         col.addWidget(self.body)
         self.actions = QHBoxLayout()
         self.actions.setSpacing(8)
@@ -168,7 +169,7 @@ def line_widget(*parts, indent: int = 36, bg: bool = False) -> QWidget:
     lay.setSpacing(8)
     for p in parts:
         if isinstance(p, QWidget):
-            lay.addWidget(p)
+            lay.addWidget(p, 1 if p.property("stretch") else 0)     # 标了 stretch 的部件占剩下的宽度
         else:                                    # 长句换行，不把对话区撑出横向滚动条
             lab = label(str(p), "Muted", wrap=True)
             lab.setMinimumWidth(10)
@@ -239,9 +240,17 @@ class ChatPage(QWidget):
         self.stop_btn.setObjectName("Ghost")
         self.stop_btn.clicked.connect(self.stop)
         self.stop_btn.setVisible(False)
+        # 打开历史运行时直接显示完整记录（和常见的 Agent 软件一样）；想看过程动起来再点"从头回放"（录演示视频用）
+        self.replay_btn = QPushButton("从头回放")
+        self.replay_btn.setObjectName("Ghost")
+        self.replay_btn.setToolTip("按原来的先后顺序重新播放这次运行，可以调速度、拖进度")
+        self.replay_btn.clicked.connect(lambda: self.run_dir is not None and
+                                        self.start_replay(self.run_dir, append=self.conv is not None))
+        self.replay_btn.setVisible(False)
         head.addWidget(self.title)
         head.addWidget(self.head_pills)
         head.addStretch(1)
+        head.addWidget(self.replay_btn)
         self.review_box = Toggle(QSettings().value("chat/human_review", True, bool))
         self.review_box.setToolTip("开启后：规划完成、工作流里的等人确认步骤、升级到转人工时，都会在对话里问你")
         self.review_label = label("规划后等我确认", "Faint")
@@ -252,6 +261,7 @@ class ChatPage(QWidget):
         mid.lay.addLayout(head)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)   # 对话只上下滚，和常见聊天软件一样
         inner = QWidget()
         inner.setObjectName("ScrollInner")
         self.msgs = QVBoxLayout(inner)
@@ -502,7 +512,7 @@ class ChatPage(QWidget):
             return
         kind, path = data
         if kind == "run":
-            self.start_replay(Path(path))
+            self.open_run(Path(path))
             return
         from ..chat import Conversation
         self.clear()
@@ -518,8 +528,7 @@ class ChatPage(QWidget):
             else:
                 self.add_agent("analyst", "analyst", t.text)
         if self.conv.runs:
-            self.run_dir = Path(self.conv.runs[-1])
-            self.start_replay(self.run_dir, append=True)
+            self.open_run(Path(self.conv.runs[-1]), append=True)
 
     # ------------------------------------------------------------ 消息
 
@@ -557,6 +566,7 @@ class ChatPage(QWidget):
                 w.deleteLater()
         self.view = RunView()
         self.seen_events = []
+        self.replay_btn.setVisible(False)
         self.graph.refresh(self.view)
         self.pending = None
         self.messages_by_module.clear()
@@ -862,8 +872,11 @@ class ChatPage(QWidget):
                            meta=f"把握 {d.get('confidence')}", brief=("call", "diagnoser", node))
         elif t == "tool_result":
             col = T()["pass"] if d.get("ok") else T()["fail"]
-            self.add_line(Dot(col), f"{d.get('agent')} 调用工具", label(d.get("tool", ""), "Mono"),
-                          label(d.get("summary") or ("完成" if d.get("ok") else "失败"), "Faint"), bg=True)
+            summary = label(d.get("summary") or ("完成" if d.get("ok") else "失败"), "Faint", wrap=True)
+            summary.setMinimumWidth(10)                   # 查询内容很长时换行，不把对话区撑宽
+            summary.setProperty("stretch", True)
+            who = label(f"{d.get('agent')} 调用工具", "Muted")
+            self.add_line(Dot(col), who, label(d.get("tool", ""), "Mono"), summary, bg=True)
         elif t == "escalated":
             self.add_line(f"{node} 升到第 {d.get('level')} 级（{d.get('name')}）：{d.get('reason')}")
         elif t == "rollback":
@@ -1144,9 +1157,43 @@ class ChatPage(QWidget):
 
     # ------------------------------------------------------------ 回放
 
+    def open_run(self, run_dir: Path, append: bool = False):
+        """打开一次历史运行：一下子显示完整的对话记录和最终状态，不做动画（DECISIONS 第 106 条）。"""
+        from ..runs import read_events
+        if self.backend is not None:
+            return
+        if self.replay is not None:
+            self.replay.pause()
+            self.replay = None
+        if not append:
+            self.clear()
+            self.title.setText(f"运行 {run_dir.name}")
+        self.clear_graph()
+        self.replay_bar.setVisible(False)
+        self.run_dir = run_dir
+        try:
+            events = read_events(run_dir)
+        except (OSError, ValueError) as exc:
+            self.add_line(f"读不了这次运行的记录：{exc}", bg=True)
+            return
+        self.setUpdatesEnabled(False)                     # 一次性放进去，最后再画，打开大的运行也不卡
+        try:
+            for e in events:
+                self.on_event(e)
+        finally:
+            self.setUpdatesEnabled(True)
+        mods = list(self.view.modules.values())
+        pick = next((m for m in mods if m.status == "failed"), mods[0] if mods else None)
+        if pick is not None:                              # 默认选中出问题的模块（没有就第一个），直接看到修正过程
+            self.select_module(pick.id)
+            self.tabs.setCurrentWidget(self.timeline)
+        self.replay_btn.setVisible(True)
+        QTimer.singleShot(30, lambda: self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum()))
+
     def start_replay(self, run_dir: Path, append: bool = False):
         if self.backend is not None:
             return
+        self.replay_btn.setVisible(False)
         if not append:
             self.clear()
             self.title.setText(f"回放 {run_dir.name}")

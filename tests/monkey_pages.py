@@ -88,7 +88,10 @@ def fake_world(rng: random.Random):
         if r < 0.6:
             return "随便说点什么，不按任何格式。"
         return "```json\n{\"faithful\": true, \"reason\": \"一致\"}\n```"
-    _swap(llm_mod.OpenAICompatClient, "from_settings", staticmethod(lambda s, **k: FakeLLM(reply)))
+    class _FakeClient(FakeLLM):                    # 设置页"测试连接并列出型号"要用 list_models
+        def list_models(self):
+            return ["deepseek-fake"]
+    _swap(llm_mod.OpenAICompatClient, "from_settings", staticmethod(lambda s, **k: _FakeClient(reply)))
 
     def no_idf(*a, **k):
         raise esp_idf.IdfUnavailable("猴子测试：当作没装 ESP-IDF")

@@ -1,7 +1,7 @@
 """评测工作区（DECISIONS 第 100 条，界面草图 gui_sketch_board.md 第三节）：左设置、中结果、右运行记录。
 
 结果直接读输出目录里的 runs.jsonl（和 `firmforge board-eval` 写的同一份），所以终端里跑的评测也能在这里看。
-每次运行一个小方块：绿通过、红没通过、灰跳过、琥珀正在跑；点方块在对话页回放那次运行。
+每次运行一个小方块：绿通过、红没通过、灰跳过、琥珀正在跑；点方块在对话页打开那次运行。
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ class Squares(QWidget):
         self.setFixedHeight(22)
         self.setMinimumWidth(len(cells) * 18 + 8)
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("点小方块在对话页回放那次运行")
+        self.setToolTip("点小方块在对话页打开那次运行")
 
     def paintEvent(self, ev):
         p = QPainter(self)
@@ -165,7 +165,7 @@ class EvalPage(QWidget):
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionMode(QTableWidget.NoSelection)
         mid.lay.addWidget(self.table, 3)
-        mid.lay.addWidget(label("每个小方块是一次运行：绿色通过，红色没通过，灰色跳过，琥珀色正在跑。点方块回放那次运行。", "Faint", wrap=True))
+        mid.lay.addWidget(label("每个小方块是一次运行：绿色通过，红色没通过，灰色跳过，琥珀色正在跑。点方块在对话页打开那次运行。", "Faint", wrap=True))
         mid.lay.addWidget(label("没通过的卡在哪一层", "Faint"))
         self.layers = QTableWidget(0, 6)
         self.layers.setHorizontalHeaderLabels(["配置", "合规", "编译", "上板测试", "隐藏用例", "每次（元）"])

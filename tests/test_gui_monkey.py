@@ -219,6 +219,34 @@ class MonkeyFoundTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_QT, "需要 PySide6（在 firmforge-gui 镜像里跑）")
+class TryRunTest(unittest.TestCase):
+    """猴子测试找到的：对话页选着"上板"时，设计器"试运行"拿了上板题的编号去 tasks/ 里找，报错。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_try_run_while_chat_is_on_board_flow(self):
+        from PySide6.QtWidgets import QInputDialog
+        from firmforge.gui.app import MainWindow
+        from firmforge.orchestrator.workflow import load_workflow
+        w = MainWindow(helpers.ROOT)
+        w.apply_theme()
+        started = []
+        w.chat.start_run = lambda task: started.append(task.id)
+        w.chat.flow_combo.setCurrentIndex(w.chat.flow_combo.findData("embedded"))
+        w.chat.task_combo.setCurrentIndex(w.chat.task_combo.findData("ledc_pwm"))     # 上板题
+        saved = QInputDialog.getItem
+        QInputDialog.getItem = staticmethod(lambda *a, **k: ("crc16_modbus", True))
+        try:
+            w._try_run(load_workflow())
+        finally:
+            QInputDialog.getItem = saved
+        self.assertEqual(started, ["crc16_modbus"])
+        self.assertFalse(w.chat.embedded)                    # 切到了纯逻辑流程
+        w.close()
+
+
 class BackendTest(unittest.TestCase):
     """对话页、硬件页、评测页的后台运行（覆盖率最低的一块）。"""
 

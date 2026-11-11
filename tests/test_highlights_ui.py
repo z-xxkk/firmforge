@@ -283,6 +283,40 @@ class HighlightsGuiTest(unittest.TestCase):
             self.assertEqual(page.seen_events, [])
         self.assertEqual(self.errors, [])
 
+    def test_open_history_shows_whole_run_at_once(self):
+        # 点开历史运行：直接显示完整记录和最终状态（不是回放动画）；想看过程再点"从头回放"（DECISIONS 第 106 条）
+        from PySide6.QtCore import Qt
+        from firmforge.gui.chat_page import ChatPage
+        with tempfile.TemporaryDirectory() as d:
+            proj = Path(d)
+            rd = make_run(proj)
+            runs = proj / ".ff_runs"
+            runs.mkdir()
+            rd = rd.rename(runs / "20261111-120000-eval-x")
+            page = ChatPage(proj)
+            page.refresh_sessions()
+            item = next(page.sessions.item(i) for i in range(page.sessions.count())
+                        if page.sessions.item(i).data(Qt.UserRole))
+            page._open_session(item)
+            self.assertIsNone(page.replay)
+            self.assertFalse(page.replay_bar.isVisibleTo(page))
+            self.assertTrue(page.replay_btn.isVisibleTo(page))
+            self.assertTrue(page.title.text().startswith("运行 "))
+            self.assertEqual(page.view.modules["m"].status, "done")        # 最终状态
+            self.assertEqual(len(page.seen_events), len(EMB_EVENTS) + 2)
+            self.assertEqual(page.graph.selected, "m")                      # 自动选中模块，直接看到修正过程
+            self.assertIs(page.tabs.currentWidget(), page.timeline)
+            page.replay_btn.click()                                         # 从头回放
+            self.assertIsNotNone(page.replay)
+            self.assertTrue(page.replay_bar.isVisibleTo(page))
+            self.assertFalse(page.replay_btn.isVisibleTo(page))
+            page.replay.pause()
+            page.open_run(rd)                                               # 回放中再打开：停掉回放，直接显示
+            self.assertIsNone(page.replay)
+            (rd / "events.jsonl").write_text('{"type": "run_sta\n{"bad": 1}\n', encoding="utf-8")
+            page.open_run(rd)                                               # 记录坏了：说明原因，不崩
+        self.assertEqual(self.errors, [])
+
     def test_hardware_page_viewer_and_conflicts(self):
         from PySide6.QtWidgets import QFrame
         from firmforge.gui.hardware_page import HardwarePage
