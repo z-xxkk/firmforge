@@ -68,8 +68,10 @@ def cmd_doctor(args) -> int:
     for name, (var, _default, desc) in config.TOOL_SPECS.items():
         path = tc.resolve(name)
         if path:
-            ver = config.tool_version(path)
+            ver = config.tool_version(path, "-v" if name in config.OPTIONAL_TOOLS else "--version")
             print(f"[ OK ] {getattr(tc, name):<20} {desc}  {ver}")
+        elif name in config.OPTIONAL_TOOLS:
+            print(f"[可选] {getattr(tc, name):<20} {desc}  未找到（可用 {var} 指定）")
         else:
             missing += 1
             print(f"[MISS] {getattr(tc, name):<20} {desc}  未找到（可用 {var} 指定）")

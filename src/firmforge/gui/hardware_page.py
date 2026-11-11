@@ -142,6 +142,11 @@ class HardwarePage(QWidget):
         self.d_cite.setWordWrap(True)
         self.d_cite.setTextFormat(Qt.RichText)
         self.d_cite.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.page_btn = QPushButton("在手册里看原文")
+        self.page_btn.setObjectName("Ghost")
+        self.page_btn.setToolTip("打开引用的那一页手册，原文用绿框标出；可以一边看一边通过或驳回")
+        self.page_btn.clicked.connect(self.open_cited_page)
+        self.page_btn.setVisible(False)
         self.d_bits = QLabel()
         self.d_bits.setWordWrap(True)
         self.d_bits.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -149,7 +154,10 @@ class HardwarePage(QWidget):
         self.d_steps.setWordWrap(True)
         self.d_steps.setTextFormat(Qt.RichText)
         self.d_notes = label("", "Muted", wrap=True)
-        for w in (self.d_head, self.d_text, self.d_cite, self.d_bits, self.d_steps, self.d_notes):
+        for w in (self.d_head, self.d_text, self.d_cite):
+            right.lay.addWidget(w)
+        right.lay.addLayout(hbox(self.page_btn, "stretch"))
+        for w in (self.d_bits, self.d_steps, self.d_notes):
             right.lay.addWidget(w)
         right.lay.addStretch(1)
         self.comment = QLineEdit()
@@ -262,7 +270,55 @@ class HardwarePage(QWidget):
             self.prof.addLayout(hbox(label("实测记录", "Faint"), "stretch", label("规则可以引用", "Faint")))
             for mid, title in meas:
                 self.prof.addLayout(self._kv(mid, title, mono=True))
+        self._fill_conflicts(hwdir)
         self.prof.addStretch(1)
+
+    def _fill_conflicts(self, hwdir: Path) -> None:
+        """资料和实测对不上的地方（conflicts.json）：手册怎么说 → 实测怎么说 → 怎么处理（DECISIONS 第 105 条）。"""
+        from ..grounding.conflicts import load_conflicts
+        try:
+            items = load_conflicts(hwdir, self.library())
+        except (OSError, ValueError) as exc:
+            self.prof.addWidget(label(f"读不了 conflicts.json：{exc}", "Muted", wrap=True))
+            return
+        if not items:
+            return
+        c = T()
+        self.prof.addLayout(hbox(label("手册和板子对不上", "Faint"), "stretch", label("以实测为准", "Faint")))
+        for it in items:
+            box = QFrame()
+            box.setObjectName("ConflictCard")
+            edge = c["run"] if not it.problems else c["fail"]
+            box.setStyleSheet(f"#ConflictCard {{ border: 1px solid {edge}; border-radius: 12px; background: {c['run_soft']}; }}"
+                              f" QLabel {{ border: none; background: transparent; }}")
+            v = QVBoxLayout(box)
+            v.setContentsMargins(12, 10, 12, 10)
+            v.setSpacing(4)
+            v.addWidget(label(f"{it.id}　{it.title}", wrap=True))
+            doc = self.library().docs.get(it.doc)
+            where = f"{doc.title if doc is not None else it.doc} 第 {it.page} 页" if it.page else it.doc
+            old = label(f"手册：{it.doc_claim}", wrap=True)
+            old.setStyleSheet(f"color: {c['ink2']}; text-decoration: line-through;")
+            new = label(f"实测（{it.record}）：{it.measured_claim}", wrap=True)
+            new.setStyleSheet(f"color: {c['run']}; font-weight: 600;")
+            src = label(where, "Faint", wrap=True)
+            for w in (old, src, new):
+                w.setMinimumWidth(20)
+                v.addWidget(w)
+            if it.resolution:
+                r = label(it.resolution, "Muted", wrap=True)
+                r.setMinimumWidth(20)
+                v.addWidget(r)
+            if it.problems:
+                bad = label("核对没通过：" + "；".join(it.problems), wrap=True)
+                bad.setStyleSheet(f"color: {c['fail']};")
+                v.addWidget(bad)
+            if it.page:
+                btn = QPushButton("看手册原页")
+                btn.setObjectName("Ghost")
+                btn.clicked.connect(lambda _=False, it=it: self.open_page(it.doc, int(it.page), it.quote))
+                v.addLayout(hbox(btn, "stretch"))
+            self.prof.addWidget(box)
 
     # ------------------------------------------------------------ 规则列表
 
@@ -360,10 +416,12 @@ class HardwarePage(QWidget):
         bits = ""
         try:
             doc = self.library().docs.get(cite.get("doc", ""))
+            self.page_btn.setVisible(doc is not None and doc.kind == "pdf" and bool(cite.get("page")))
             if doc is not None and cite.get("page"):
                 bits = doc.page_bits(int(cite["page"]))
         except Exception:                                   # noqa: BLE001  资料缓存读不到就不显示位标注
             bits = ""
+            self.page_btn.setVisible(False)
         self.d_bits.setVisible(bool(bits))
         self.d_bits.setText(f"这一页的寄存器位标注（平台按 PDF 坐标算出，不是原文）：\n{bits}")
         self.d_bits.setStyleSheet(f"border: 1px dashed {c['grip']}; border-radius: 12px; padding: 8px 12px; color: {c['ink2']};")
@@ -385,7 +443,24 @@ class HardwarePage(QWidget):
             v, note = self.decisions.get(r["id"], ("", ""))
             self.comment.setText(note)
 
+    def open_page(self, doc_id: str, page: int, quote: str) -> None:
+        """打开手册原页窗口（不阻塞，可以同时开几页）。"""
+        from .page_viewer import PageViewer
+        doc = self.library().docs.get(doc_id)
+        title = doc.title if doc is not None else doc_id
+        layout = (doc.page_layout(page) or doc.page(page)) if doc is not None else ""
+        v = PageViewer(self.project, self.project / self.hw, doc_id, title, page, quote, layout, parent=self)
+        v.setAttribute(Qt.WA_DeleteOnClose)
+        self.viewers = [w for w in getattr(self, "viewers", []) if w.isVisible()] + [v]
+        v.show()
+
+    def open_cited_page(self) -> None:
+        cite = (self.current or {}).get("cite") or {}
+        if cite.get("doc") and cite.get("page"):
+            self.open_page(cite["doc"], int(cite["page"]), cite.get("quote", ""))
+
     def _clear_detail(self, text: str = "从中间选一条规则"):
+        self.page_btn.setVisible(False)
         self.d_head.setText("")
         self.d_text.setText(text)
         for w in (self.d_cite, self.d_bits, self.d_steps, self.d_notes):

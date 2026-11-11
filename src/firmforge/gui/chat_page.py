@@ -192,6 +192,8 @@ class ChatPage(QWidget):
         self.runs_dir = project / ".ff_runs"
         self.chats_dir = project / ".ff_chats"
         self.view = RunView()
+        self.seen_events: list[dict] = []          # 这次运行到现在为止的事件（直播、回放都记），修正过程按它画
+        self.picked_attempt: int | None = None     # 在修正过程里点选的那一次尝试
         self.backend = None
         self.replay: ReplayPlayer | None = None
         self.conv = None
@@ -377,12 +379,14 @@ class ChatPage(QWidget):
         self.brief_view.setObjectName("Code")
         self.brief_view.setReadOnly(True)
         self.board_view = bv.BoardTestView()
+        self.timeline = bv.RepairTimeline()                 # 修正过程（DECISIONS 第 105 条）
+        self.timeline.attempt_clicked.connect(lambda n: self.select_module(self.graph.selected, attempt=n))
         self.rules_view = QTextEdit()
         self.rules_view.setReadOnly(True)
         # 标签名尽量短；面板窄时标签缩短显示（省略号），不用左右箭头（箭头会盖住标签的字）
         self.tabs.tabBar().setUsesScrollButtons(False)
         self.tabs.tabBar().setElideMode(Qt.ElideRight)
-        for w, name, tip in ((self.layer_box, "检查", "检查结果"), (self.board_view, "上板", "上板测试的用例和串口输出"),
+        for w, name, tip in ((self.timeline, "过程", "每次尝试的检查结果、诊断和交给谁改"), (self.layer_box, "检查", "检查结果"), (self.board_view, "上板", "上板测试的用例和串口输出"),
                              (code_box, "代码", "这一次交上来的代码；可以导出"), (self.rules_view, "规则", "这次用到的规则"),
                              (why_box, "调度", "为什么交给这个 Agent"), (self.brief_view, "发给 AI", "发给 AI 的内容")):
             self.tabs.setTabToolTip(self.tabs.addTab(w, name), tip)
@@ -552,6 +556,7 @@ class ChatPage(QWidget):
                 w.setParent(None)
                 w.deleteLater()
         self.view = RunView()
+        self.seen_events = []
         self.graph.refresh(self.view)
         self.pending = None
         self.messages_by_module.clear()
@@ -750,6 +755,8 @@ class ChatPage(QWidget):
 
     def clear_graph(self):
         self.view = RunView()
+        self.seen_events = []
+        self.picked_attempt = None
         self.graph.refresh(self.view)
 
     def stop(self):
@@ -795,6 +802,7 @@ class ChatPage(QWidget):
                 except (OSError, ValueError):
                     pass
         self.view.apply(e)
+        self.seen_events.append(e)
         if self.view.run_id and self.run_dir is None and self.replay is None:
             cand = self.runs_dir / self.view.run_id
             if cand.is_dir():
@@ -990,11 +998,27 @@ class ChatPage(QWidget):
 
     # ------------------------------------------------------------ 右下详情
 
-    def select_module(self, mid: str):
+    def select_module(self, mid: str, attempt: int | None = None):
+        """attempt：在修正过程里点了某一次尝试，下面各标签换成那一次的内容；不给就是最新一次。"""
+        if self.graph.selected != mid:
+            self.picked_attempt = None
+        if attempt is not None:
+            self.picked_attempt = attempt
         self.graph.selected = mid
         mv = self.view.modules.get(mid)
         if mv is None:
             return
+        steps = bv.repair_timeline(self.seen_events, mid, self.run_dir)
+        att = self.picked_attempt or mv.attempt
+        self.timeline.show_steps(mid, steps, att)
+        if att and att != mv.attempt:                    # 看的是以前的某一次：检查结果按那一次的事件显示
+            from copy import copy
+            st = next((s for s in steps if s.kind == "attempt" and s.attempt == att), None)
+            mv = copy(mv)
+            mv.attempt = att
+            if st is not None and self.view.embedded:
+                got = {("test" if k in ("board_test", "host_test") else k): v for k, v in st.layers.items()}
+                mv.layers = {k: got.get(k, "") for k in mv.layer_keys}
         while self.layer_pills.count():
             w = self.layer_pills.takeAt(0).widget()
             if w:

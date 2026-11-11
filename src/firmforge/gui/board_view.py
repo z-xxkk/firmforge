@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import html
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QScrollArea, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget
 
 from ..target.harness import parse_board_output
-from .widgets import Dot, GripSplitter, T, hbox, label
+from .widgets import Dot, FlowLayout, GripSplitter, T, hbox, label
 
 
 def attempt_dir(run_dir: Path | None, module: str, attempt: int) -> Path | None:
@@ -231,3 +232,209 @@ def export_run(run_dir: Path, dest: Path) -> list[Path]:
                 shutil.copy2(f, to)
                 copied.append(to)
     return copied
+
+
+# ---------------------------------------------------------------- 修正时间线（DECISIONS 第 105 条）
+# 一个模块从第一次检查到结束的每一步排成一行：每次尝试的检查结果 → 诊断归因 → 交给谁改 → 下一次尝试。
+# 参考 GitHub Actions 一次运行有多次尝试时可以在尝试之间切换、对比各次失败；点某一次尝试，下面各标签换成那一次的内容。
+
+SCOPE_NAMES = {"compliance": "合规", "build": "编译", "board_test": "上板", "host_test": "电脑测试", "module": "检查",
+               "all": "集成"}
+BLAME_NAMES = {"code": "代码", "test": "测试", "rule": "规则", "hardware": "硬件或接线", "spec": "需求"}
+FIXER_NAMES = {"coder": "编码 Agent", "tester": "测试 Agent", "reviewer": "审查 Agent", "researcher": "查资料 Agent"}
+
+
+@dataclass
+class TimelineStep:
+    kind: str                        # attempt / diagnosis / fix / escalated / rollback / human / end
+    attempt: int
+    title: str
+    lines: list[str] = field(default_factory=list)
+    status: str = "info"             # pass / fail / skipped / running / warn / info
+    layers: dict[str, str] = field(default_factory=dict)      # 尝试：层 → pass / fail / skipped
+
+
+def _changed_lines(a: Path | None, b: Path | None) -> tuple[int, int]:
+    """两次尝试之间改了多少行：（实现代码，测试代码）。"""
+    import difflib
+
+    def files(d: Path | None) -> dict[str, list[str]]:
+        if d is None or not (d / "main").is_dir():
+            return {}
+        return {f.relative_to(d / "main").as_posix(): f.read_text(encoding="utf-8", errors="replace").splitlines()
+                for f in (d / "main").rglob("*") if f.is_file() and f.suffix in (".c", ".h")}
+    fa, fb = files(a), files(b)
+    code = test = 0
+    for name in set(fa) | set(fb):
+        n = sum(1 for ln in difflib.unified_diff(fa.get(name, []), fb.get(name, []), lineterm="", n=0)
+                if ln[:1] in "+-" and not ln.startswith(("+++", "---")))
+        if name.startswith("test"):
+            test += n
+        else:
+            code += n
+    return code, test
+
+
+def repair_timeline(events: list[dict], module: str, run_dir: Path | None = None) -> list[TimelineStep]:
+    """从事件流拼出一个模块的修正过程。run_dir 给了就补上每次上板通过几个用例、两次之间改了多少行。"""
+    steps: list[TimelineStep] = []
+    attempts: dict[int, TimelineStep] = {}
+    for e in events:
+        if e.get("node_id") != module:
+            continue
+        t, d = e.get("type"), e.get("data") or {}
+        n = int(d.get("attempt") or 0)
+        if t == "verify_started" and n:
+            st = attempts.get(n)
+            if st is None:
+                st = attempts[n] = TimelineStep("attempt", n, f"第 {n} 次尝试", status="running")
+                steps.append(st)
+            st.layers.setdefault(d.get("scope", "module"), "running")
+        elif t == "verify_finished" and n:
+            st = attempts.get(n)
+            if st is None:
+                st = attempts[n] = TimelineStep("attempt", n, f"第 {n} 次尝试", status="running")
+                steps.append(st)
+            ok = d["ok"] if "ok" in d else d.get("verdict") == "pass"
+            layer = d.get("failed_layer")
+            res = "pass" if ok else ("skipped" if layer == "skipped" or d.get("verdict") == "skipped" else "fail")
+            st.layers[d.get("scope", "module")] = res
+            if res == "fail":
+                st.status = "fail"
+            elif res == "skipped" and st.status != "fail":
+                st.status = "skipped"
+            elif st.status == "running" and d.get("scope", "module") in ("board_test", "host_test", "module", "all"):
+                st.status = "pass"
+        elif t == "diagnosis":
+            blame = BLAME_NAMES.get(d.get("blame"), d.get("blame") or "?")
+            lines = [x for x in (d.get("instruction") or "", d.get("evidence") or "") if x][:1]
+            if d.get("rule"):
+                lines.append(f"涉及规则 {d['rule']}")
+            steps.append(TimelineStep("diagnosis", n, f"诊断：错在{blame}",
+                                      [ln if len(ln) <= 70 else ln[:68] + "…" for ln in lines],
+                                      "warn" if d.get("blame") != "hardware" else "fail"))
+        elif t == "agent_started" and n > 1 and str(d.get("purpose", "")).startswith("改"):
+            who = FIXER_NAMES.get(d.get("role"), d.get("agent") or "Agent")
+            steps.append(TimelineStep("fix", n, f"交给{who}", [f"{d.get('purpose')}（{d.get('agent', '')}）"]))
+        elif t == "escalated":
+            steps.append(TimelineStep("escalated", n, "升级处理", [str(d.get("note") or d.get("level") or "")[:90]], "warn"))
+        elif t == "rollback":
+            steps.append(TimelineStep("rollback", n, f"回到第 {d.get('to_attempt')} 次的代码",
+                                      ["这次改得更差了"], "warn"))
+        elif t == "human_wait":
+            steps.append(TimelineStep("human", n, "停下等人", [str(d.get("reason") or "")[:90]], "fail"))
+        elif t in ("node_done", "node_failed"):
+            v = d.get("verdict") or ("pass" if t == "node_done" else "fail")
+            names = {"pass": "通过", "fail": "没修好", "skipped": "跳过", "hardware": "等人检查硬件"}
+            steps.append(TimelineStep("end", int(d.get("attempts") or 0), f"结果：{names.get(v, v)}",
+                                      [f"共 {d['attempts']} 次尝试"] if d.get("attempts") else [],
+                                      "pass" if v == "pass" else ("skipped" if v == "skipped" else "fail")))
+    for n, st in attempts.items():
+        st.lines = [" ".join(f"{SCOPE_NAMES.get(k, k)}{'✓' if v == 'pass' else '✗' if v == 'fail' else '…' if v == 'running' else '－'}"
+                             for k, v in st.layers.items())]
+        adir = attempt_dir(run_dir, module, n)
+        if adir is not None and (adir / "serial.log").is_file():
+            res = parse_board_output((adir / "serial.log").read_text(encoding="utf-8", errors="replace"))
+            if res.cases:
+                ok = sum(1 for c in res.cases if c.status == "pass")
+                st.lines.append(f"上板用例 {ok} / {len(res.cases)}" + ("，芯片崩溃" if res.crash else ""))
+                if res.failed:
+                    st.lines.append("没过：" + res.failed[0].name[:40] + (f" 等 {len(res.failed)} 个" if len(res.failed) > 1 else ""))
+        if n > 1 and run_dir is not None:
+            code, test = _changed_lines(attempt_dir(run_dir, module, n - 1), adir)
+            if code or test:
+                st.lines.append(f"比上次改了代码 {code} 行、测试 {test} 行")
+    return steps
+
+
+def soft_wrap(text: str) -> str:
+    """在下划线、斜杠、括号、逗号后面插零宽空格：长标识符和路径中间没有空格，QLabel 换不了行。"""
+    out = []
+    for ch in text:
+        out.append(ch)
+        if ch in "_/(),.=;":
+            out.append("\u200b")
+    return "".join(out)
+
+
+CARD_W = 176
+
+
+class RepairTimeline(QWidget):
+    """横向排开的修正过程；点某一次尝试发出 attempt_clicked(n)。"""
+    attempt_clicked = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 8, 0, 0)
+        lay.setSpacing(6)
+        self.title = label("点一个模块看它的修正过程", "Muted", wrap=True)
+        self.title.setMinimumWidth(10)
+        lay.addWidget(self.title)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.row = QWidget()
+        self.row_lay = FlowLayout(self.row, spacing=6)      # 放不下就折行，窄面板上也能一眼看完
+        self.scroll.setWidget(self.row)
+        self.scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }")
+        lay.addWidget(self.scroll, 1)
+        self.hint = label("", "Faint", wrap=True)
+        self.hint.setMinimumWidth(10)
+        lay.addWidget(self.hint)
+        self.steps: list[TimelineStep] = []
+        self.selected = 0
+
+    def show_steps(self, module: str, steps: list[TimelineStep], selected: int = 0) -> None:
+        self.steps, self.selected = steps, selected
+        while self.row_lay.count():
+            w = self.row_lay.takeAt(0).widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+        n_att = sum(1 for s in steps if s.kind == "attempt")
+        self.title.setText(f"{module}：{n_att} 次尝试" if steps else f"{module}：还没有开始检查")
+        self.hint.setText("点一次尝试，下面的检查、上板、代码标签换成那一次的内容" if n_att > 1 else "")
+        c = T()
+        tint = {"pass": ("pass_soft", "pass"), "fail": ("fail_soft", "fail"), "warn": ("run_soft", "run"),
+                "running": ("run_soft", "run"), "skipped": ("bg", "ink2"), "info": ("surface", "ink")}
+        for i, s in enumerate(steps):
+            bg, fg = tint.get(s.status, ("surface", "ink"))
+            card = QFrame()
+            card.setObjectName("TimelineCard")
+            sel = s.kind == "attempt" and s.attempt == selected
+            border = f"2px solid {c['accent']}" if sel else f"1px solid {c['line']}"
+            card.setStyleSheet(f"#TimelineCard {{ background: {c.c.get(bg, c['surface'])}; border: {border}; border-radius: 12px; }}"
+                               f" QLabel {{ background: transparent; color: {c[fg] if fg != 'ink' else c['ink']}; }}")
+            v = QVBoxLayout(card)
+            v.setContentsMargins(10, 8, 10, 8)
+            v.setSpacing(2)
+            head = QLabel(soft_wrap(s.title))
+            head.setWordWrap(True)
+            head.setStyleSheet("font-weight: 600; font-size: 13px;")
+            v.addWidget(head)
+            for ln in s.lines:
+                q = QLabel(soft_wrap(ln))
+                q.setWordWrap(True)
+                q.setStyleSheet("font-size: 12px;")
+                v.addWidget(q)
+            for q in card.findChildren(QLabel):          # 折行布局按 sizeHint 排，先按固定宽度算好换行后的高度
+                q.setMinimumHeight(q.heightForWidth(CARD_W - 22))
+            card.setFixedWidth(CARD_W)        # 宽度固定，自动换行的文字才算得对高度
+            card.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Maximum)         # 按内容高度，不拉满面板
+            if s.kind == "attempt":
+                card.setCursor(Qt.PointingHandCursor)
+                card.setToolTip(f"看第 {s.attempt} 次的检查报告、上板测试和代码")
+                card.mousePressEvent = lambda ev, n=s.attempt: self.attempt_clicked.emit(n)
+            if i:                                         # 箭头和后一步放在一起：折行时箭头在行首，表示接着上一行
+                pair = QWidget()
+                arrow = QLabel("→")
+                arrow.setStyleSheet(f"color: {c['ink3']}; font-size: 16px; background: transparent;")
+                pair.setLayout(hbox(arrow, card, spacing=4, margins=(0, 0, 0, 0)))
+                pair.layout().setAlignment(arrow, Qt.AlignTop)
+                arrow.setContentsMargins(0, 10, 0, 0)
+                self.row_lay.addWidget(pair)
+            else:
+                self.row_lay.addWidget(card)

@@ -10,13 +10,13 @@ from dataclasses import dataclass
 LIGHT = {
     "bg": "#F3F4F6", "surface": "#FFFFFF", "ink": "#1C2026", "ink2": "#6E7580", "ink3": "#9AA0A8",
     "line": "#E4E6EA", "accent": "#2F6F68", "accent_soft": "#E6F0EE", "run": "#C98A2B", "run_soft": "#F7EEDD",
-    "fail": "#C8483D", "fail_soft": "#F8E6E4", "pass": "#3E8E63", "grip": "#D3D7DC", "canvas": "#FBFBFC",
+    "fail": "#C8483D", "fail_soft": "#F8E6E4", "pass": "#3E8E63", "pass_soft": "#E5F2EA", "grip": "#D3D7DC", "canvas": "#FBFBFC",
     "dot": "#E3E6EA", "button": "#1C2026", "button_text": "#FFFFFF",
 }
 DARK = {
     "bg": "#16191D", "surface": "#1F2328", "ink": "#E8EAED", "ink2": "#A3AAB3", "ink3": "#737B85",
     "line": "#30353C", "accent": "#5FB3A8", "accent_soft": "#22403C", "run": "#E0A54A", "run_soft": "#3B3020",
-    "fail": "#E06A5F", "fail_soft": "#402523", "pass": "#5DB585", "grip": "#454B53", "canvas": "#1B1E22",
+    "fail": "#E06A5F", "fail_soft": "#402523", "pass": "#5DB585", "pass_soft": "#203A2C", "grip": "#454B53", "canvas": "#1B1E22",
     "dot": "#2B3036", "button": "#E8EAED", "button_text": "#16191D",
 }
 STATUS = {"pass": "pass", "done": "pass", "fail": "fail", "failed": "fail", "error": "fail", "rejected": "fail",

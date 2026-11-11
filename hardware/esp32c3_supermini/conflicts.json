@@ -1,0 +1,16 @@
+[
+  {
+    "id": "C-001",
+    "title": "MPU 模块的芯片编号 WHO_AM_I",
+    "document": {"doc": "mpu6050-rm", "page": 46, "quote": "The default value of the register is 0x68.", "claim": "0x68"},
+    "measured": {"record": "M-002", "claim": "0x70"},
+    "resolution": "模块实为 MPU-6500 兼容芯片。以实测为准：硬件档案记 0x70，题目接受 0x68 或 0x70，温度按 MPU-6500 公式换算（DECISIONS 第 89 条）"
+  },
+  {
+    "id": "C-002",
+    "title": "MAX30102 片内测温什么时候算测完",
+    "document": {"doc": "max30102-ds", "page": 22, "quote": "This bit clears automatically back to zero at the conclusion of the temperature reading when the bit is set to one.", "claim": "TEMP_EN 自动清零就是测完了"},
+    "measured": {"record": "M-003", "claim": "TEMP_EN 0.26 ms 就清零，温度数据 27.5 ms 后才出来"},
+    "resolution": "以实测为准：规则改为置 DIE_TEMP_RDY_EN 后等 DIE_TEMP_RDY（DECISIONS 第 90 条）"
+  }
+]

@@ -21,7 +21,11 @@ TOOL_SPECS: dict[str, tuple[str, str, str]] = {
     "cross_size": ("FF_CROSS_SIZE", "arm-none-eabi-size", "目标文件尺寸统计（L3）"),
     "cross_nm": ("FF_CROSS_NM", "arm-none-eabi-nm", "交叉符号表工具（L4）"),
     "cppcheck": ("FF_CPPCHECK", "cppcheck", "静态分析（L4）"),
+    "pdftoppm": ("FF_PDFTOPPM", "pdftoppm", "把手册页渲染成图片（界面上显示规则引用的原页；没有也不影响判定）"),
+    "pdftotext": ("FF_PDFTOTEXT", "pdftotext", "取手册页上每个单词的位置（界面上框出引用原文；没有也不影响判定）"),
 }
+
+OPTIONAL_TOOLS = frozenset({"pdftoppm", "pdftotext"})     # 只用于界面显示，没有不影响任何判定
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,8 @@ class Toolchain:
     cross_size: str = "arm-none-eabi-size"
     cross_nm: str = "arm-none-eabi-nm"
     cppcheck: str = "cppcheck"
+    pdftoppm: str = "pdftoppm"
+    pdftotext: str = "pdftotext"
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Toolchain":
@@ -53,10 +59,10 @@ class Toolchain:
         return [f.name for f in fields(self)]
 
 
-def tool_version(path: str) -> str:
-    """取工具 --version 输出的第一行，失败时返回空字符串。"""
+def tool_version(path: str, flag: str = "--version") -> str:
+    """取工具 --version（poppler 的工具是 -v）输出的第一行，失败时返回空字符串。"""
     try:
-        proc = subprocess.run([path, "--version"], capture_output=True, text=True,
+        proc = subprocess.run([path, flag], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=10)
     except (OSError, subprocess.SubprocessError):
         return ""
