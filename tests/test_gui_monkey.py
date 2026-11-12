@@ -247,6 +247,7 @@ class TryRunTest(unittest.TestCase):
         w.close()
 
 
+@unittest.skipUnless(HAS_QT, "需要 PySide6（在 firmforge-gui 镜像里跑）")
 class BackendTest(unittest.TestCase):
     """对话页、硬件页、评测页的后台运行（覆盖率最低的一块）。"""
 

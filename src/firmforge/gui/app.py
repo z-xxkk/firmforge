@@ -211,8 +211,25 @@ class MainWindow(QMainWindow):
         self.designer.ask_ai(instruction or None)
 
     def _try_run(self, wf):
-        """设计器里的工作流跑的是纯逻辑流程：题目只能从 tasks/ 里选（对话页选着"上板"时，题目下拉框里是上板题）。"""
+        """设计器里试运行。上板工作流（DECISIONS 第 110 条）：写一句需求，在对话页按这个工作流跑一次；
+        纯逻辑工作流：题目只能从 tasks/ 里选（对话页选着"上板"时，题目下拉框里是上板题）。"""
         from PySide6.QtWidgets import QMessageBox
+        if wf.engine == "firmware":
+            text, ok = QInputDialog.getMultiLineText(
+                self, "试运行上板流程", f"用 {wf.name} {wf.version} 跑什么需求？",
+                "读 MAX30102 片内温度，调用方传入 I2C 总线句柄，返回摄氏度")
+            if not ok or not text.strip():
+                return
+            if not self.chat.embedded:
+                self.chat.flow_combo.setCurrentIndex(self.chat.flow_combo.findData("embedded"))
+            if self.chat.rule_combo.currentData() == "single":         # 单 Agent 只给评测题用
+                self.chat.rule_combo.setCurrentIndex(max(0, self.chat.rule_combo.findData("verified")))
+            self.go("chat")
+            self.chat.new_chat()
+            self.chat.workflow = wf
+            self.chat.add_user(f"用工作流 {wf.name} {wf.version} 试运行：{text.strip()}")
+            self.chat.start_embedded(spec=text.strip())
+            return
         from ..tasks import discover_tasks, load_task
         ids = [t.id for t in discover_tasks(self.project / "tasks")] if (self.project / "tasks").is_dir() else []
         tid = self.chat.task_combo.currentData() if not self.chat.embedded else ""

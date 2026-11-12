@@ -93,7 +93,9 @@ class Monkey:
 
     # ------------------------------------------------------------ 随机操作
     def op_drop_new(self):
-        kind = self.rng.choice(KINDS)
+        d = self.w.designer if hasattr(self, "w") else None
+        pal = [d.palette.item(i).data(0x0100) for i in range(d.palette.count())] if d is not None else []
+        kind = self.rng.choice([k for k in pal if k] or KINDS)          # 照当前工作流的步骤箱拖（上板流程的步骤箱不一样）
         where, pt = self._target_point()
         md = QMimeData()
         md.setData(self.MIME, kind.encode())
@@ -287,16 +289,17 @@ class Monkey:
         return []
 
 
-def reset(window):
+def reset(window, name: str = "module_dev"):
     from firmforge.orchestrator.workflow import load_workflow
     d = window.designer
-    d.wf = load_workflow()
+    d.wf = load_workflow(name)
     d.saved = d.wf
     d.undo.clear()
     d.new_ids.clear()
     d.selected = None
     d.current_sub = next(iter(d.wf.subflows), None)
     d.canvas.user_view = False
+    d._fill_palette()
     d.render_all()
 
 
@@ -310,6 +313,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", default="0-9")
     ap.add_argument("--steps", type=int, default=300)
+    ap.add_argument("--workflow", default="module_dev", help="在哪个工作流上随机操作：module_dev 或 firmware_dev")
     a = ap.parse_args(argv)
     lo, _, hi = a.seeds.partition("-")
     seeds = range(int(lo), int(hi or lo) + 1)
@@ -325,7 +329,7 @@ def main(argv=None):
     w.show()
     bad = 0
     for s in seeds:
-        reset(w)
+        reset(w, a.workflow)
         m = Monkey(w, s)
         found = m.run(a.steps)
         print(f"种子 {s}：{'没发现问题' if not found else '发现问题'}（做了 {len(m.history)} 步）")

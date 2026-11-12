@@ -501,11 +501,10 @@ class ChatPage(QWidget):
                                           "也可以 /task flash_kv 直接选一道评测题")
         self.rule_combo.setVisible(emb)
         self.cfg_combo.setVisible(not emb)
-        self.review_box.setVisible(not emb)
-        self.review_label.setVisible(not emb)
+        self.review_label.setText("设计后等我确认" if emb else "规划后等我确认")    # 两种流程都能停下等确认
+        self.tabs.setTabVisible(self.tabs.indexOf(self.why_box), True)          # 上板流程也经过调度器（第 110 条）
         for w in (self.board_view, self.rules_view):
             self.tabs.setTabVisible(self.tabs.indexOf(w), emb)
-        self.tabs.setTabVisible(self.tabs.indexOf(self.why_box), not emb)
         QSettings().setValue("chat/flow", self.flow_combo.currentData())
         self.refresh_status()
 
@@ -646,6 +645,7 @@ class ChatPage(QWidget):
             return
         self.clear()
         self.conv, self.task, self.run_dir = None, None, None
+        self.workflow = None                             # 不沿用上一次试运行的工作流草稿
         self.title.setText("新对话")
         self.head_pills.setText("")
         self._flow_changed()                            # 恢复这个流程的提示文字
@@ -785,7 +785,8 @@ class ChatPage(QWidget):
         self.head_pills.setText(f"{cfg}　{'docker' if use_docker else '本机'}")
         self.stop_btn.setVisible(True)
         from ..orchestrator.workflow import load_workflow
-        self.workflow = self.workflow or load_workflow()
+        if self.workflow is None or self.workflow.engine != "module":    # 上板流程的工作流纯逻辑流程跑不了
+            self.workflow = load_workflow()
         self.flow.show_workflow(self.workflow)
         kw = dict(runs_dir=self.runs_dir, human_review=self.review_box.isChecked(),
                   tier=self.tier_combo.currentData() or None, thinking=self.think_combo.currentData() or None,
@@ -825,7 +826,9 @@ class ChatPage(QWidget):
             if task_id:
                 self.backend.start(task_id=task_id, config_name=config_name, **kw)
             else:
-                self.backend.start(spec=spec, name="gui", rule_mode=mode, **kw)
+                wf = self.workflow if (self.workflow is not None and self.workflow.engine == "firmware") else None
+                self.backend.start(spec=spec, name="gui", rule_mode=mode, workflow=wf,
+                                   human_review=self.review_box.isChecked(), **kw)
         except Exception as exc:
             from .runner import BOARD_USERS
             BOARD_USERS.discard(self.backend)
@@ -907,7 +910,8 @@ class ChatPage(QWidget):
     def _update_flow_states(self, e):
         t, d = e.get("type"), e.get("data", {})
         step = {"agent_started": {"planner": "plan", "coder": "code", "tester": "test", "reviewer": "review",
-                                  "diagnoser": "repair"}.get(d.get("role")),
+                                  "diagnoser": "repair", "designer": "design", "researcher": "rules"}.get(d.get("role")),
+                "rules_started": "rules",
                 "verify_started": "integrate" if d.get("scope") == "all" else "check",
                 "human_wait": d.get("step") or "confirm_plan"}.get(t)
         if step and self.flow.items_by_id:
@@ -1021,6 +1025,13 @@ class ChatPage(QWidget):
             self.add_line(f"设计第 {d.get('attempt')} 次没通过检查，带着问题重做：" + "；".join(d.get("problems", [])[:3]), bg=True)
         elif t == "format_retry":
             self.add_line(f"{d.get('agent')} 没按格式交文件（缺 {'、'.join(d.get('missing', []))}），再要一次", bg=True)
+        elif t == "human_wait" and node == "design":
+            pass                                         # 对话里会出现"设计好了，请确认"
+        elif t == "node_assigned" and d.get("role") == "coder":
+            sc = d.get("scores") or {}
+            self.add_line(f"{node} 第 {d.get('attempt')} 次编码交给 {d.get('agent')}：{sc.get('reason', '')}")
+        elif t == "experience_used":
+            self.add_line(f"{node} 编码前参考了 {len(d.get('ids', []))} 条过往经验")
         elif t == "human_wait" and node != "rules":
             self.add_agent("FirmForge", "reviewer", f"模块 **{node}** 停下了：{d.get('reason', '')}\n\n{d.get('instruction', '')}")
         elif t == "escalated" and d.get("level") == "rule":
@@ -1051,7 +1062,15 @@ class ChatPage(QWidget):
     # ------------------------------------------------------------ 需要人回答
 
     def on_ask(self, kind: str, payload: dict):
-        if kind == "plan":
+        if kind == "plan" and payload.get("embedded"):
+            rows = "\n".join(f"- `{x['id']}`　{UNIT_NAMES.get(x.get('layer'), x.get('layer', ''))}"
+                             + (f"，依赖 {'、'.join(x['depends_on'])}" if x.get("depends_on") else "")
+                             for x in payload.get("modules", []))
+            m = self.add_agent("designer", "designer", f"设计好了，请确认：\n\n{rows}\n\n确认后开始编写；有意见就写在下面输入框里发送，"
+                               "让设计 Agent 重做。")
+            m.add_action("提修改意见", lambda: self._focus_input("写下对设计的修改意见，发送后让设计 Agent 重做"))
+            m.add_action("确认，开始写", lambda: self._resolve("", m, "你已确认"), primary=True)
+        elif kind == "plan":
             m = self.add_agent("planner", "planner", "规划好了，请确认。确认后开始编写；有意见就写在下面输入框里发送，让规划 Agent 重做。")
             m.add_action("提修改意见", lambda: self._focus_input("写下对规划的修改意见，发送后让规划 Agent 重做"))
             m.add_action("确认，开始写", lambda: self._resolve("", m, "你已确认"), primary=True)
@@ -1247,7 +1266,9 @@ class ChatPage(QWidget):
         self.graph_stack.setCurrentIndex(0 if v == "modules" else 1)
         if v == "flow" and not self.flow.items_by_id:
             from ..orchestrator.workflow import load_workflow
-            self.flow.show_workflow(self.workflow or load_workflow())
+            want = "firmware" if self.embedded else "module"           # 上板流程看 firmware_dev（第 110 条）
+            wf = self.workflow if (self.workflow is not None and self.workflow.engine == want) else None
+            self.flow.show_workflow(wf or load_workflow("firmware_dev" if self.embedded else "module_dev"))
 
     # ------------------------------------------------------------ 回放
 

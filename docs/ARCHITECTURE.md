@@ -511,6 +511,14 @@ registry.get(name, version=None)
 
 ## 6. 编排与执行引擎
 
+> **两种执行方式（DECISIONS 第 110 条）**：纯逻辑流程由下面的通用引擎（`orchestrator/engine.py`）执行 `workflows/module_dev.toml`；
+> 上板流程由 `embedded/flow.py` 执行 `workflows/firmware_dev.toml`（工作流文件里 `engine = "firmware"`）。
+> `embedded/firmware_workflow.py` 把上板工作流翻译成执行参数（要不要查资料、确认规则、设计后停不停、编码和写测试是否并行、
+> 指定的编码 Agent、最多尝试几次），并检查设计器画出来的东西执行代码能不能照做（`engine_problems` 按 engine 分派）。
+> 上板流程里编码交给谁由同一个 smart 调度器打分，成绩按 `fw-<层>-<first|repair>` 分组记在 SQLite 的 agent_stats；
+> 修好的问题存进经验库（类别 `firmware-<层>`）。评测（`board_eval.py`）不传工作流，保持原来的固定做法。
+> 决赛阶段计划让通用引擎直接执行上板工作流（完整接入）。
+
 - 用 `asyncio` 实现。LLM 调用和判定都是阻塞调用，通过 `asyncio.to_thread` 执行，用两个信号量分别限制并发数（`concurrency.llm` 和 `concurrency.verify`）。
 - 节点状态：`pending → ready → running → done | failed | skipped`。每次状态变化都发事件。
 - **模块并行与隔离**：

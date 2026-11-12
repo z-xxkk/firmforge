@@ -231,7 +231,7 @@ class ModuleGraph(DotGridView):
 KIND_NAMES = {"agent": "Agent", "verify": "检查", "parallel": "并行", "condition": "条件", "loop": "循环",
               "subflow": "子流程", "foreach": "每个模块各跑", "human": "等人确认"}
 ROLE_NAMES = {"planner": "规划", "coder": "编码", "tester": "测试", "reviewer": "审查", "diagnoser": "诊断",
-              "analyst": "需求分析"}
+              "analyst": "需求分析", "researcher": "查资料提炼规则", "designer": "设计分层", "rule_checker": "核对规则"}
 COND_NAMES = {"verify_passed": "检查通过了", "signature_repeated": "同一错误反复出现", "attempts_exhausted": "次数用完",
               "review_needs_fix": "审查要求修改", "human_review": "开启了人工确认"}
 STEP_W, STEP_H = 160, 42

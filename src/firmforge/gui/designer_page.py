@@ -33,6 +33,12 @@ from .widgets import FlowLayout, Panel, T, label
 PALETTE = [("干活", [("agent", "Agent 干活"), ("verify", "检查"), ("human", "等人确认")]),
            ("控制", [("parallel", "并行"), ("condition", "条件"), ("loop", "循环")]),
            ("嵌套", [("subflow", "子流程"), ("foreach", "每个模块各跑")])]
+# 上板流程的步骤箱：只放执行代码支持的步骤（DECISIONS 第 110 条，可改项见 embedded/firmware_workflow.py）
+FIRMWARE_PALETTE = [("干活", [("agent:researcher", "查资料提炼规则"), ("agent:designer", "设计分层"),
+                              ("agent:coder", "编码"), ("agent:tester", "写测试"), ("verify", "检查"),
+                              ("human", "等人确认")]),
+                    ("控制", [("parallel", "并行"), ("loop", "修正循环")]),
+                    ("嵌套", [("foreach", "每个模块各跑")])]
 
 
 class PaletteList(QListWidget):
@@ -82,6 +88,38 @@ class DesignerPage(QMainWindow):
 
     # ------------------------------------------------------------ 布局
 
+    def _fill_palette(self) -> None:
+        """步骤箱按工作流类型换：上板流程只放它支持的步骤（DECISIONS 第 110 条）。"""
+        self.palette.clear()
+        for group, items in (FIRMWARE_PALETTE if self.wf.engine == "firmware" else PALETTE):
+            hdr = QListWidgetItem(group)
+            hdr.setFlags(Qt.NoItemFlags)                 # 分组标题：浅色小字，不能拖、不能选
+            f = hdr.font()
+            f.setPointSizeF(f.pointSizeF() * 0.85)
+            hdr.setFont(f)
+            hdr.setForeground(Qt.gray)
+            self.palette.addItem(hdr)
+            for kind, text in items:
+                it = QListWidgetItem(text)
+                it.setData(Qt.UserRole, kind)
+                self.palette.addItem(it)
+
+    def open_workflow(self, name: str) -> None:
+        """换一个工作流来编辑；当前有没保存的改动先问一声。"""
+        if not name or name == self.wf.name:
+            return
+        if self.wf != self.saved and QMessageBox.question(
+                self, "还没保存", f"{self.wf.name} 有没保存的改动，换工作流会丢掉这些改动。继续吗？") != QMessageBox.Yes:
+            self.render_all(fit=False)
+            return
+        self.wf = self.saved = load_workflow(name)
+        self.undo.clear()
+        self.new_ids.clear()
+        self.selected = None
+        self.current_sub = next(iter(self.wf.subflows), None)
+        self._fill_palette()
+        self.render_all()
+
     def _dock(self, title: str, widget: QWidget, area, name: str) -> QDockWidget:
         d = QDockWidget(title, self)
         d.setObjectName(name)
@@ -98,6 +136,10 @@ class DesignerPage(QMainWindow):
         top = FlowLayout(bar, spacing=8)
         bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.name_label = label("", "H2")
+        self.wf_combo = QComboBox()                      # 打开哪个工作流：纯逻辑流程 module_dev、上板流程 firmware_dev
+        self.wf_combo.setObjectName("Pill")
+        self.wf_combo.setToolTip("切换要编辑的工作流")
+        self.wf_combo.activated.connect(lambda: self.open_workflow(self.wf_combo.currentData()))
         self.version_combo = QComboBox()
         self.version_combo.setObjectName("Pill")
         self.version_combo.activated.connect(self._load_version)
@@ -105,7 +147,7 @@ class DesignerPage(QMainWindow):
         self.sub_combo = QComboBox()
         self.sub_combo.setObjectName("Pill")
         self.sub_combo.activated.connect(lambda: self._set_sub(self.sub_combo.currentData()))
-        top.addWidget(self.name_label)
+        top.addWidget(self.wf_combo)
         top.addWidget(self.version_combo)
         top.addWidget(self.based_label)
         top.addWidget(self.sub_combo)
@@ -140,18 +182,7 @@ class DesignerPage(QMainWindow):
 
         self.palette = PaletteList()
         self.palette.setMinimumWidth(150)
-        for group, items in PALETTE:
-            hdr = QListWidgetItem(group)
-            hdr.setFlags(Qt.NoItemFlags)                 # 分组标题：浅色小字，不能拖、不能选
-            f = hdr.font()
-            f.setPointSizeF(f.pointSizeF() * 0.85)
-            hdr.setFont(f)
-            hdr.setForeground(Qt.gray)
-            self.palette.addItem(hdr)
-            for kind, text in items:
-                it = QListWidgetItem(text)
-                it.setData(Qt.UserRole, kind)
-                self.palette.addItem(it)
+        self._fill_palette()
         self.palette.itemDoubleClicked.connect(lambda it: it.data(Qt.UserRole) and self.add_step(it.data(Qt.UserRole)))
         tip = label("把步骤拖进画布：放到连线上就插进去，放到某个步骤下面就接在它后面，放到并行分支的左右就并列成为分支；"
                     "也可以双击加到选中步骤后面。鼠标移到连线上点 × 断开。", "Faint", wrap=True)
@@ -217,6 +248,12 @@ class DesignerPage(QMainWindow):
         if self.current_sub not in self.wf.subflows:
             self.current_sub = next(iter(self.wf.subflows), None)
         self.name_label.setText(self.wf.name)
+        from ..orchestrator.workflow import list_workflows
+        self.wf_combo.clear()
+        names = list_workflows() or [self.wf.name]
+        for n in names if self.wf.name in names else [self.wf.name, *names]:
+            self.wf_combo.addItem({"module_dev": "纯逻辑流程 module_dev", "firmware_dev": "上板流程 firmware_dev"}.get(n, n), n)
+        self.wf_combo.setCurrentIndex(max(0, self.wf_combo.findData(self.wf.name)))
         self.version_combo.clear()
         versions = list_versions(self.wf.name)
         draft = self.wf.version not in versions or self.wf != self.saved
@@ -352,7 +389,21 @@ class DesignerPage(QMainWindow):
         return f"{base}_{n}"
 
     def _new_step(self, kind: str, where: str) -> Step:
-        defaults = {"agent": dict(role="coder" if where != "main" else "planner"),
+        role = None
+        if kind.startswith("agent:"):                     # 上板流程的步骤箱直接给出角色
+            kind, role = "agent", kind.split(":", 1)[1]
+        if self.wf.engine == "firmware":
+            fw = {"agent": dict(role=role or ("coder" if where != "main" else "designer"),
+                                note={"researcher": "查资料提炼规则", "designer": "设计分层", "coder": "编码",
+                                      "tester": "写测试"}.get(role or "", "")),
+                  "verify": dict(scope="module", note="合规 → 编译 → 测试"),
+                  "loop": dict(body="repair_round", until="verify_passed", max=4, note="诊断后交给对应的 Agent 修改"),
+                  "human": dict(note="等人确认"), "parallel": dict(branches=()),
+                  "foreach": dict(over="design.modules", subflow=self.current_sub or "")}
+            sid = self._unique({"agent": {"researcher": "rules", "designer": "design", "coder": "code",
+                                          "tester": "test"}.get(role or "", "agent"), "human": "confirm"}.get(kind, kind))
+            return Step(id=sid, kind=kind, **fw.get(kind, {}))
+        defaults = {"agent": dict(role=role or ("coder" if where != "main" else "planner")),
                     "verify": dict(scope="all" if where == "main" else "module"),
                     "loop": dict(body="repair_round", until="verify_passed", max=6),
                     "condition": dict(cond="verify_passed"), "human": dict(enabled_by="human_review", note="等人确认"),
@@ -363,7 +414,7 @@ class DesignerPage(QMainWindow):
 
     def add_step(self, kind: str):
         where = (self._where(self.selected)[0] if self.selected else "") or (self.current_sub or "main")
-        if kind == "foreach":
+        if kind == "foreach" or kind in ("agent:researcher", "agent:designer"):
             where = "main"
         step = self._new_step(kind, where)
         sid = step.id
@@ -647,7 +698,12 @@ class DesignerPage(QMainWindow):
         self.form.addRow("类型", QLabel(KIND_NAMES.get(s.kind, s.kind)))
         conds = [(None, "（无）")] + [(c, COND_NAMES[c]) for c in CONDITIONS]
         if s.kind == "agent":
-            roles = [("planner", "规划")] if self._where(s.id)[0] == "main" else [(r, ROLE_NAMES[r]) for r in ("coder", "tester", "reviewer")]
+            in_main = self._where(s.id)[0] == "main"
+            if self.wf.engine == "firmware":
+                roles = ([("researcher", "查资料提炼规则"), ("designer", "设计分层")] if in_main else
+                         [("coder", ROLE_NAMES["coder"]), ("tester", ROLE_NAMES["tester"])])
+            else:
+                roles = [("planner", "规划")] if in_main else [(r, ROLE_NAMES[r]) for r in ("coder", "tester", "reviewer")]
             self.form.addRow("角色", combo(roles, s.role, "role"))
             agents = [(None, "调度器挑")] + [(a.name, a.name) for a in reg.find(s.role or "coder")]
             self.form.addRow("指定 Agent", combo(agents, s.agent, "agent"))
@@ -657,7 +713,7 @@ class DesignerPage(QMainWindow):
             self.form.addRow("每一轮", QLabel("修正一轮：诊断 → 交给编码或测试 Agent 改 → 再检查"))
             self.form.addRow("停止条件", combo([(c, COND_NAMES[c]) for c in CONDITIONS], s.until, "until"))
             sp = QSpinBox()
-            sp.setRange(1, 20)
+            sp.setRange(1, 10 if self.wf.engine == "firmware" else 20)
             sp.setValue(int(s.max) if str(s.max).isdigit() or isinstance(s.max, int) else 6)
             sp.editingFinished.connect(lambda: self._set_field("max", sp.value()))
             self.form.addRow("最多几次", sp)

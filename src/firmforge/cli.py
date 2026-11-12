@@ -841,6 +841,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="规则模式：verified 完整流程（默认）；unverified 不核对；none 不给规则")
     s.add_argument("--port", help="板子串口（默认自动找）")
     s.add_argument("--no-board", action="store_true", help="不上板，硬件层只做到编译和合规检查")
+    s.add_argument("--workflow", default="firmware_dev", help="上板工作流（workflows/ 下的名字或 .toml 路径），默认 firmware_dev")
+    s.add_argument("--human-review", action="store_true", help="设计好后停下等你确认（工作流里的\"确认设计\"步骤）")
     s.add_argument("--runs-dir", default=DEFAULT_RUNS_DIR)
     s.set_defaults(func=cmd_firmware)
     s = sub.add_parser("board-eval", help="上板评测：上板题 × 配置（single/none/unverified/verified）× 次数（调用模型）")
@@ -1025,13 +1027,23 @@ def cmd_firmware(args) -> int:
     board = BoardRunner(idf, args.port) if (idf is not None and not args.no_board) else None
     printer = LivePrinter()
     hwc = HwContext(hwdir, profile, library, store, hwdir / "rules.json", idf_tree, svd)
+    db = Store()
+
+    def confirm_design(design) -> str:
+        print("\n设计好了：")
+        for m in design.modules:
+            print(f"  - {m.id}（{m.layer}）：{m.title}" + (f"，依赖 {'、'.join(m.depends_on)}" if m.depends_on else ""))
+        return input("直接回车表示确认；有意见就写一句再回车，让设计 Agent 重做：").strip()
     flow = make_firmware_flow(hwc, spec_path.read_text(encoding="utf-8"), llm=llm, settings=settings,
                               rule_mode=args.rules, idf=idf, board=board, runs_root=Path(args.runs_dir),
-                              name=spec_path.stem, human=terminal_rules_human, subscribers=(printer,))
+                              name=spec_path.stem, human=terminal_rules_human, subscribers=(printer,),
+                              workflow=args.workflow, store=db, human_review=args.human_review,
+                              confirm_design=confirm_design)
     try:
         res = flow.run()
     finally:
         printer.close()
+        db.close()
     if args.rules == "verified":
         store.save(hwdir / "rules.json")
     print(f"\n运行目录：{res.run_dir}\n结论：{res.verdict}" + (f"（{res.error}）" if res.error else ""))

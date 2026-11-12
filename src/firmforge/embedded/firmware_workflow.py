@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..orchestrator.workflow import Step, Workflow
+from ..orchestrator.workflow import Step, Workflow, WorkflowError
 
 FIRMWARE_ENGINE = "firmware"
 DEFAULT_WORKFLOW = "firmware_dev"
@@ -161,7 +161,7 @@ def firmware_plan(wf: Workflow, settings_loop: dict | None = None, registry=None
         registry = default_registry()
     probs = firmware_problems(wf, registry)
     if probs:
-        raise ValueError("上板工作流执行不了：" + "；".join(probs))
+        raise WorkflowError(f"上板工作流 {wf.name} {wf.version} 执行不了：" + "；".join(probs))
     main = _order(wf.main)
     kinds = ["rules" if s.kind == "agent" and s.role == "researcher" else
              "design" if s.kind == "agent" and s.role == "designer" else s.kind for s in main]
