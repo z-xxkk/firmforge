@@ -201,6 +201,9 @@ class Engine:
         self.tier_override, self.thinking = tier_override, thinking     # 这一次运行的覆盖（对话框下方的选择）
         self.workflow = workflow or load_workflow(cfg.workflow)
         self.wf_label = f"工作流 {self.workflow.name} {self.workflow.version}"     # 任务单的「当前位置」
+        if self.workflow.engine != "module":
+            raise WorkflowError(f"工作流 {self.workflow.name} 是上板流程用的（engine = {self.workflow.engine}），"
+                                "纯逻辑流程跑不了；在对话页选\"上板\"流程用它")
         problems = engine_problems(self.workflow, self.registry)
         if problems:
             raise WorkflowError(f"工作流 {self.workflow.name} {self.workflow.version} 引擎不能执行：" + "；".join(problems))

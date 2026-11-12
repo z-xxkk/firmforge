@@ -24,6 +24,7 @@ KINDS = ("agent", "verify", "parallel", "condition", "loop", "subflow", "foreach
 CONDITIONS = ("verify_passed", "signature_repeated", "attempts_exhausted", "review_needs_fix", "human_review")
 LOOP_BODIES = ("repair_round",)
 SCOPES = ("module", "all")
+ENGINES = ("module", "firmware")
 
 
 class WorkflowError(ValueError):
@@ -61,6 +62,7 @@ class Workflow:
     subflows: dict[str, tuple[Step, ...]]
     description: str = ""
     based_on: str = ""                # 改自哪个版本
+    engine: str = "module"            # 谁来执行：module（旧流程引擎）或 firmware（上板流程，DECISIONS 第 110 条）
 
     @staticmethod
     def top_level(steps: tuple[Step, ...]) -> list[Step]:
@@ -133,8 +135,11 @@ def parse_workflow(data: dict, source: str = "") -> Workflow:
     _check_refs(main, f"{source} main", subflows)
     for name, steps in subflows.items():
         _check_refs(steps, f"{source} 子流程 {name}", subflows)
+    engine = str(data.get("engine", "module"))
+    if engine not in ENGINES:
+        raise WorkflowError(f"{source}：engine 只能是 {', '.join(ENGINES)}")
     return Workflow(str(data.get("name", "")), str(data.get("version", "")), main, subflows,
-                    str(data.get("description", "")), str(data.get("based_on", "")))
+                    str(data.get("description", "")), str(data.get("based_on", "")), engine)
 
 
 def load_workflow(name_or_path: str | Path = "module_dev", version: str | None = None) -> Workflow:
@@ -191,6 +196,8 @@ def dump_workflow(wf: Workflow) -> str:
         head.append(f"description = {_toml_value(wf.description)}")
     if wf.based_on:
         head.append(f"based_on = {_toml_value(wf.based_on)}")
+    if wf.engine != "module":
+        head.append(f"engine = {_toml_value(wf.engine)}")
     parts = ["\n".join(head)]
     parts += [step_toml(s, "main") for s in wf.main]
     for name, steps in wf.subflows.items():
@@ -214,6 +221,12 @@ def save_workflow(wf: Workflow, directory: Path | None = None) -> Path:
     return path
 
 
+def list_workflows(directory: Path | None = None) -> list[str]:
+    """workflows/ 下的工作流名字（不含历史版本）。"""
+    directory = Path(directory) if directory else config.workflows_dir()
+    return sorted(p.stem for p in directory.glob("*.toml")) if directory.is_dir() else []
+
+
 def list_versions(name: str, directory: Path | None = None) -> list[str]:
     directory = Path(directory) if directory else config.workflows_dir()
     out = []
@@ -233,6 +246,9 @@ SUB_ROLES = ("coder", "tester", "reviewer")
 
 def engine_problems(wf: Workflow, registry=None) -> list[str]:
     """设计器画的流程，引擎能不能执行。返回问题列表（空表示没问题）。"""
+    if wf.engine == "firmware":                      # 上板流程有自己的一套规则（embedded/firmware_workflow.py）
+        from ..embedded.firmware_workflow import firmware_problems
+        return firmware_problems(wf, registry)
     problems: list[str] = []
     for s in (*wf.main, *[x for ss in wf.subflows.values() for x in ss]):
         if s.detached:

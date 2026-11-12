@@ -1,0 +1,67 @@
+# 上板流程工作流（DECISIONS 第 110 条）。执行代码是 embedded/flow.py，它按这个文件决定走哪些步骤、
+# 在哪停下等人、最多试几次；设计器里能改的项见 embedded/firmware_workflow.py 开头的说明。
+name = "firmware_dev"
+version = "1.0.0"
+engine = "firmware"
+description = "上板流程：查资料提炼规则 → 设计分层 → 每个模块编码、写测试 → 合规、编译、上板测试 → 诊断修正"
+
+[[main]]
+id = "rules"
+kind = "agent"
+role = "researcher"
+note = "知识库缺某个外设的规则时查手册提炼，经规则判定器核对"
+
+[[main]]
+id = "confirm_rules"
+kind = "human"
+note = "新规则等你逐条确认；没确认的规则不给编码 Agent"
+
+[[main]]
+id = "design"
+kind = "agent"
+role = "designer"
+note = "把需求拆成模块：硬件层上板测试，逻辑层在电脑上测试"
+
+[[main]]
+id = "confirm_design"
+kind = "human"
+enabled_by = "human_review"
+note = "开了\"设计后等我确认\"时，设计好先停下等你确认"
+
+[[main]]
+id = "modules"
+kind = "foreach"
+over = "design.modules"
+subflow = "board_module"
+note = "按依赖顺序，每个模块各跑一遍"
+
+[[subflow.board_module.steps]]
+id = "write"
+kind = "parallel"
+branches = ["code", "test"]
+note = "编码和写测试同时进行：测试 Agent 只看接口，不看实现"
+
+[[subflow.board_module.steps]]
+id = "code"
+kind = "agent"
+role = "coder"
+note = "不指定 Agent 时由调度器按得分挑"
+
+[[subflow.board_module.steps]]
+id = "test"
+kind = "agent"
+role = "tester"
+
+[[subflow.board_module.steps]]
+id = "check"
+kind = "verify"
+scope = "module"
+note = "合规 → 编译 → 测试（硬件层烧到板子上）"
+
+[[subflow.board_module.steps]]
+id = "repair"
+kind = "loop"
+until = "verify_passed"
+body = "repair_round"
+max = 4
+note = "诊断错在代码、测试、规则还是硬件，交给对应的 Agent；硬件问题停下等人"

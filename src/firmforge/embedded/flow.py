@@ -22,7 +22,9 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
@@ -47,6 +49,7 @@ from ..target.host_test import run_host_tests
 from ..tools import ToolContext, ToolPipeline, default_registry as default_tools
 from ..tools.loop import call_with_tools
 from .design import Design, DesignModule, design_from_text, designer_messages, designer_retry_message
+from .firmware_workflow import FirmwarePlan, firmware_plan
 from .roles import (coder_messages, coder_repair_message, diagnoser_messages, format_reminder, parse_diagnosis,
                     parse_output, test_file, tester_messages, tester_repair_message)
 
@@ -87,6 +90,7 @@ class _Agents:
                  result: FlowResult, library: SourceLibrary | None):
         self.llm, self.settings, self.registry, self.bus, self.logger = llm, settings, registry, bus, logger
         self.result, self.library = result, library
+        self._lock = threading.Lock()                # 编码和写测试并行时，两边同时累加 token 和费用
 
     def call(self, name: str, messages: list[dict], node: str, *, attempt: int = 1, purpose: str = "",
              tools: bool = False) -> LLMResponse:
@@ -106,10 +110,11 @@ class _Agents:
                                    max_rounds=int(self.settings.tools.get("max_rounds", 5)))
         else:
             resp = client.complete(messages, **params)
-        self.result.prompt_tokens += resp.prompt_tokens
-        self.result.completion_tokens += resp.completion_tokens
-        self.result.cost += tier.cost(resp.prompt_tokens, resp.completion_tokens, ts=time.time(),
-                                      schedule=self.settings.pricing)
+        with self._lock:
+            self.result.prompt_tokens += resp.prompt_tokens
+            self.result.completion_tokens += resp.completion_tokens
+            self.result.cost += tier.cost(resp.prompt_tokens, resp.completion_tokens, ts=time.time(),
+                                          schedule=self.settings.pricing)
         self.bus.emit("agent_finished", node, agent=agent.name, role=agent.role, attempt=attempt,
                       tokens=resp.prompt_tokens + resp.completion_tokens, latency_s=round(resp.latency_s, 3))
         return resp
@@ -122,13 +127,33 @@ class EmbeddedFlow:
                  board: BoardRunner | None = None, registry: Registry | None = None, max_attempts: int = 6,
                  subscribers: tuple[Callable[[dict], None], ...] = (), secrets: tuple[str, ...] = (),
                  coder: str = "coder-strong", design: Design | None = None, locked: dict[str, str] | None = None,
-                 extra_requires: tuple[str, ...] = (), build_rules: bool = True):
+                 extra_requires: tuple[str, ...] = (), build_rules: bool = True, workflow=None, store=None,
+                 human_review: bool = False, confirm_design: Callable[[Design], str | None] | None = None):
+        """workflow：上板工作流（firmware_dev.toml，DECISIONS 第 110 条）决定走哪些步骤、在哪停下、最多试几次、
+        编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder，不经调度器、不用经验库。"""
         if rule_mode not in RULE_MODES:
             raise ValueError(f"规则模式只能是 {', '.join(RULE_MODES)}")
         self.profile, self.spec, self.rules, self.library, self.verifier = profile, spec, rules, library, verifier
-        self.rule_mode, self.human, self.idf, self.board, self.max_attempts = rule_mode, human, idf, board, max_attempts
+        self.plan = (firmware_plan(workflow, settings.loop, registry or default_registry()) if workflow is not None else
+                     FirmwarePlan(build_rules=build_rules, confirm_rules=True, coder=coder, tester="tester",
+                                  max_attempts=max_attempts))
+        self.rule_mode, self.idf, self.board = rule_mode, idf, board
+        self.human = human if self.plan.confirm_rules else None
+        self.max_attempts = self.plan.max_attempts
         self.coder, self.fixed_design, self.locked = coder, design, dict(locked or {})
-        self.extra_requires, self.build_rules = tuple(extra_requires), build_rules
+        self.extra_requires, self.build_rules = tuple(extra_requires), self.plan.build_rules
+        self.store, self.human_review, self.confirm_design = store, human_review, confirm_design
+        self.exp = None
+        if workflow is not None and store is not None:
+            from ..memory.experience import ExperienceBase
+            self.exp = ExperienceBase(store)
+        from ..orchestrator.scheduler import make_strategy
+
+        def list_price(agent: AgentDef) -> float:
+            t = settings.models.get(agent.model_tier)
+            return (t.price_in_per_mtok + t.price_out_per_mtok) if t else 1.0
+        self.strategy = make_strategy("smart", scheduler_cfg=settings.scheduler, concurrency=2, list_price=list_price)
+        self._fails: dict[str, dict[str, int]] = {}      # 模块 → 编码 Agent → 连续没修好的次数
         self.on_builder: Callable | None = None
         self.rd = RunDir.create(runs_root, name)
         self.bus = EventBus(self.rd.run_id, self.rd.events_path)
@@ -183,16 +208,32 @@ class EmbeddedFlow:
                           app=self.fixed_design.app, fixed=True)
             return self.fixed_design
         msgs = designer_messages(self.spec, self.profile, rules)
-        for k in range(1, MAX_DESIGN_TRIES + 1):
-            resp = self.agents.call("designer", msgs, "design", attempt=k, purpose="设计分层")
+        tries = revisions = 0
+        k = 0
+        while tries < MAX_DESIGN_TRIES:
+            k += 1
+            resp = self.agents.call("designer", msgs, "design", attempt=k, purpose="设计分层" if k == 1 else "改设计")
             design, problems = design_from_text(resp.text, self.profile)
-            if design is not None:
-                self.rd.write_json("design.json", design.to_dict())
-                self.bus.emit("plan_ready", "design", modules=[m.to_dict() for m in design.modules], app=design.app)
-                return design
-            self.bus.emit("design_rejected", "design", attempt=k, problems=problems[:10])
-            msgs = msgs + [{"role": "assistant", "content": resp.text},
-                           {"role": "user", "content": designer_retry_message(problems)}]
+            if design is None:
+                tries += 1
+                self.bus.emit("design_rejected", "design", attempt=k, problems=problems[:10])
+                msgs = msgs + [{"role": "assistant", "content": resp.text},
+                               {"role": "user", "content": designer_retry_message(problems)}]
+                continue
+            self.rd.write_json("design.json", design.to_dict())
+            self.bus.emit("plan_ready", "design", modules=[m.to_dict() for m in design.modules], app=design.app)
+            if (self.plan.stop_after_design(self.human_review) and self.confirm_design is not None
+                    and revisions < MAX_DESIGN_TRIES):
+                self.bus.emit("human_wait", "design", step="confirm_design", reason="设计好了，等你确认")
+                comment = (self.confirm_design(design) or "").strip()
+                if comment:                                # 负责人有意见：带着意见重做
+                    revisions += 1
+                    self.bus.emit("design_rejected", "design", attempt=k, problems=[f"负责人的意见：{comment}"])
+                    msgs = msgs + [{"role": "assistant", "content": resp.text},
+                                   {"role": "user", "content": f"负责人看了这个设计，意见如下，请按意见重做设计，"
+                                                               f"格式和要求不变：\n{comment}"}]
+                    continue
+            return design
         return None
 
     # ---------------------------------------------------------------- 模块
@@ -255,6 +296,84 @@ class EmbeddedFlow:
             p.write_text(c, encoding="utf-8")
         (d / "report.txt").write_text(report, encoding="utf-8")
 
+    # ---------------------------------------------------------------- 调度与经验（DECISIONS 第 110 条）
+    def _pick_coder(self, m: DesignModule, attempt: int) -> tuple[str, str]:
+        """这一轮编码交给谁。返回 (Agent 名, 统计分组)。分组按任务特征：硬件层还是逻辑层、第一次写还是修改。"""
+        bucket = f"fw-{m.layer}-{'first' if attempt == 1 else 'repair'}"
+        if self.plan.coder:
+            self.bus.emit("node_assigned", m.id, agent=self.plan.coder, role="coder", attempt=attempt, bucket=bucket,
+                          scores={"strategy": "workflow" if self.plan.source else "fixed",
+                                  "reason": f"{'工作流' if self.plan.source else '评测配置'}指定 {self.plan.coder}"})
+            return self.plan.coder, bucket
+        fails = self._fails.get(m.id, {})
+        cands = self.agents.registry.find("coder")
+        keep = [a for a in cands if fails.get(a.name, 0) < 2] or cands     # 连续两次没修好就换人（只剩它时照用）
+        stats = self.store.agent_stats(bucket) if self.store is not None else {}
+        agent, scores = self.strategy.choose(m.id, keep, stats, {})
+        dropped = [a.name for a in cands if a not in keep]
+        if dropped:
+            scores = {**scores, "reason": scores.get("reason", "") + f"；{'、'.join(dropped)} 在这个模块上连续两次没修好，先不用"}
+        self.bus.emit("node_assigned", m.id, agent=agent.name, role="coder", attempt=attempt, bucket=bucket, scores=scores)
+        return agent.name, bucket
+
+    def _record(self, turn: dict | None, attempt: int, verdict: str) -> None:
+        """一轮编码之后检查的结果，记进这个 Agent 在这类任务上的成绩（调度器下次按它打分）。"""
+        if turn is None:
+            return
+        ok = verdict == "pass"
+        fails = self._fails.setdefault(turn["module"], {})
+        fails[turn["agent"]] = 0 if ok else fails.get(turn["agent"], 0) + 1
+        if self.store is None or verdict == "skipped":
+            return
+        a = self.agents.registry.get(turn["agent"])
+        self.store.add_agent_stat(a.name, a.version, turn["bucket"], first_pass=ok and attempt == 1, success=ok,
+                                  tokens=turn["tokens"], latency_s=turn["seconds"], cost=turn["cost"])
+
+    def _experience_text(self, m: DesignModule) -> str:
+        """同类模块以前修好过的问题（经验库），编码前附在提示词后面；没有就是空字符串。"""
+        if self.exp is None:
+            return ""
+        cat = f"firmware-{m.layer}"
+        if not self.exp.all(cat):                          # 没有上板流程的经验时不拿别的流程的来凑
+            return ""
+        found = self.exp.search(f"{m.title} {' '.join(m.scopes)} {' '.join(m.provides)}", k=3, category=cat)
+        if not found:
+            return ""
+        self.exp.mark_used([e.id for e in found])
+        self.bus.emit("experience_used", m.id, ids=[e.id for e in found], where="首次编码", patterns=[e.pattern for e in found])
+        return ("\n\n## 过往经验（同类模块以前出过的问题和修好的办法，仅供参考）\n" +
+                "\n".join(e.render() for e in found))
+
+    def _save_experience(self, m: DesignModule, layer: str, report: str, diag: dict) -> None:
+        if self.exp is None or not diag.get("instruction"):
+            return
+        lines = [ln.strip() for ln in report.splitlines() if ln.strip().startswith(("失败", "违规", "芯片崩溃"))]
+        pattern = "；".join(lines[:3]) or report.strip().splitlines()[0][:200] if report.strip() else layer
+        self.exp.save(f"firmware-{m.layer}", layer, pattern[:300], diag["instruction"], self.rd.run_id)
+
+    def _write_both(self, m: DesignModule, rules: RuleSet, deps_h: dict, c_msgs: list[dict], coder: str):
+        """第一次编码和写测试。工作流里两者并行时同时进行：测试 Agent 只看接口（锁定的头文件，或设计给出的函数原型）。"""
+        writable = set(m.files)
+        need_code = {f for f in writable if f.endswith(".c")} or writable     # 第一次要交齐全部 .c 文件
+        tester = self.plan.tester or "tester"
+
+        def code():
+            return self._ask_files(coder, c_msgs, m.id, writable, need_code, attempt=1, purpose="编码",
+                                   tools=self.rule_mode != "none")
+
+        def test(header: str):
+            t_msgs = tester_messages(self.spec, self.profile, rules, m, header, deps_h)
+            return self._ask_files(tester, t_msgs, m.id, {test_file(m)}, {test_file(m)}, attempt=1, purpose="写测试")
+        if self.plan.parallel_write:
+            header = self.locked.get(m.header) or (
+                "/* 设计给出的接口（编码 Agent 写的头文件以它为准） */\n#pragma once\n#include <stdint.h>\n#include <stdbool.h>\n"
+                + "\n".join(p if p.rstrip().endswith(";") else p.rstrip() + ";" for p in m.provides) + "\n")
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                fc, ft = ex.submit(code), ex.submit(test, header)
+                return fc.result(), ft.result()
+        c = code()
+        return c, test(self.locked.get(m.header) or c[1].files.get(m.header, ""))
+
     def _module(self, design: Design, m: DesignModule, rules: RuleSet) -> ModuleResult:
         mr = ModuleResult(m.id, m.layer)
         self.result.modules[m.id] = mr
@@ -262,22 +381,27 @@ class EmbeddedFlow:
         deps_h = self._dep_headers(design, m)
         c_msgs = coder_messages(self.spec, self.profile, rules, design, m, deps_h,
                                 locked_header=self.locked.get(m.header))
+        tip = self._experience_text(m)
+        if tip and c_msgs and c_msgs[-1].get("role") == "user":
+            c_msgs = c_msgs[:-1] + [{**c_msgs[-1], "content": (c_msgs[-1].get("content") or "") + tip}]
         writable = set(m.files)
-        need_code = {f for f in writable if f.endswith(".c")} or writable     # 第一次要交齐全部 .c 文件
-        c_conv, out = self._ask_files(self.coder, c_msgs, m.id, writable, need_code, attempt=1, purpose="编码",
-                                      tools=self.rule_mode != "none")
+        coder, bucket = self._pick_coder(m, 1)
+        before = (self.result.prompt_tokens + self.result.completion_tokens, self.result.cost, time.time())
+        (c_conv, out), (t_conv, tout) = self._write_both(m, rules, deps_h, c_msgs, coder)
+        turn = self._turn(m, coder, bucket, before)
         mr.files.update(out.files)
         self._new_facts(out.facts)
-        header = self.locked.get(m.header) or mr.files.get(m.header, "")
-        t_msgs = tester_messages(self.spec, self.profile, rules, m, header, deps_h)
-        t_conv, tout = self._ask_files("tester", t_msgs, m.id, {test_file(m)}, {test_file(m)}, attempt=1,
-                                       purpose="写测试")
         mr.tests.update(tout.files)
+        last: tuple[str, str, dict] | None = None             # 上一轮没过的层、报告、诊断（修好后存经验）
         for attempt in range(1, self.max_attempts + 1):
             mr.attempts = attempt
             verdict, layer, report = self._check(design, m, mr, rules, attempt)
             mr.last_report = report
             self._write_snapshot(m, mr, attempt, report)
+            self._record(turn, attempt, verdict)
+            turn = None
+            if verdict == "pass" and last is not None and last[2].get("blame") == "code":
+                self._save_experience(m, *last)
             if verdict in ("pass", "skipped"):
                 mr.verdict = verdict
                 self.bus.emit("node_done" if verdict == "pass" else "node_failed", m.id, verdict=verdict,
@@ -286,6 +410,7 @@ class EmbeddedFlow:
             if attempt == self.max_attempts:
                 break
             diag = self._diagnose(m, mr, rules, layer, report, attempt)
+            last = (layer, report, diag)
             if diag["blame"] == "hardware":
                 mr.verdict = "hardware"
                 self.bus.emit("human_wait", m.id, reason="诊断为硬件或接线问题，请检查板子和接线",
@@ -296,19 +421,28 @@ class EmbeddedFlow:
                 rules = self._dispute_rule(rules, diag)
             if diag["blame"] == "test":
                 msg = tester_repair_message(attempt, self.max_attempts, report, mr.files, diag)
-                t_conv, tout = self._ask_files("tester", t_conv + [{"role": "user", "content": msg}], m.id,
+                t_conv, tout = self._ask_files(self.plan.tester or "tester", t_conv + [{"role": "user", "content": msg}], m.id,
                                                {test_file(m)}, {test_file(m)}, attempt=attempt + 1, purpose="改测试")
                 mr.tests.update(tout.files)
             else:
                 msg = coder_repair_message(attempt, self.max_attempts, report, diag)
+                coder, bucket = self._pick_coder(m, attempt + 1)        # 修改轮重新挑：成绩差的会被换掉
+                before = (self.result.prompt_tokens + self.result.completion_tokens, self.result.cost, time.time())
                 # 修改轮可以只交改动的文件，但至少要交一个
-                c_conv, o = self._ask_files(self.coder, c_conv + [{"role": "user", "content": msg}], m.id, writable,
+                c_conv, o = self._ask_files(coder, c_conv + [{"role": "user", "content": msg}], m.id, writable,
                                             None, attempt=attempt + 1, purpose="改代码", tools=self.rule_mode != "none")
+                turn = self._turn(m, coder, bucket, before)
                 mr.files.update(o.files)
                 self._new_facts(o.facts)
         mr.verdict = "fail"
         self.bus.emit("node_failed", m.id, verdict="fail", attempts=mr.attempts, note=mr.last_report[-300:])
         return mr
+
+    def _turn(self, m: DesignModule, agent: str, bucket: str, before: tuple) -> dict:
+        tokens, cost, t0 = before
+        return {"module": m.id, "agent": agent, "bucket": bucket, "seconds": round(time.time() - t0, 2),
+                "tokens": self.result.prompt_tokens + self.result.completion_tokens - tokens,
+                "cost": round(self.result.cost - cost, 6)}
 
     def _ask_files(self, agent: str, conv: list[dict], node: str, allowed: set[str], need: set[str] | None, *,
                    attempt: int, purpose: str, tools: bool = False):
@@ -364,7 +498,7 @@ class EmbeddedFlow:
     def run(self) -> FlowResult:
         res = self.result
         self.bus.emit("run_started", None, task=self.rd.run_id, config=f"embedded/{self.rule_mode}",
-                      board=self.profile.board.value)
+                      board=self.profile.board.value, workflow=self.plan.source)
         t0 = time.time()
         try:
             rules = self._rules_for_flow()
@@ -396,6 +530,7 @@ class EmbeddedFlow:
 
     def _finish(self, res: FlowResult, t0: float) -> None:
         self.rd.write_json("run.json", {"verdict": res.verdict, "error": res.error, "rule_mode": self.rule_mode,
+                                        "workflow": self.plan.source,
                                         "rules_used": res.rules_used,
                                         "modules": {k: v.verdict for k, v in res.modules.items()},
                                         "tokens": res.prompt_tokens + res.completion_tokens,
