@@ -70,6 +70,10 @@ class Bubble(QFrame):
         lay.addWidget(lab)
 
 
+MAP_EVENTS = {"plan_ready", "wiring_ready", "wiring_checked", "verify_finished", "node_ready", "node_done",
+              "node_failed", "agent_started", "run_finished"}
+
+
 class RunBlock(QFrame):
     """一段运行过程折叠成一行（DECISIONS 第 107 条，照 Claude、ChatGPT 把思考和工具调用收起来的做法）：
     收起时只显示最新一步和步数，点一下展开看各个 Agent 的消息和工具调用。"""
@@ -395,10 +399,20 @@ class ChatPage(QWidget):
         self.graph_sub = label("", "Faint")
         self.view_seg = Segmented([("modules", "模块图"), ("flow", "流程图")])
         self.view_seg.changed.connect(self._switch_view)
+        # 上板流程：工程图、接线图、流程图共用这一块（DECISIONS 第 113 条）
+        self.view_seg_emb = Segmented([("map", "工程图"), ("wiring", "接线图"), ("flow", "流程图")])
+        self.view_seg_emb.changed.connect(self._switch_view)
+        self.expand_btn = QPushButton("展开")
+        self.expand_btn.setObjectName("Ghost")
+        self.expand_btn.setToolTip("工程图铺满：会话列表收起、对话收成窄栏，积木里列出接口、连线上写出用到的函数")
+        self.expand_btn.clicked.connect(self.toggle_expand)
+        self.expanded = False
         gtop.addWidget(self.graph_title)
         gtop.addWidget(self.graph_sub)
         gtop.addStretch(1)
+        gtop.addWidget(self.expand_btn)
         gtop.addWidget(self.view_seg)
+        gtop.addWidget(self.view_seg_emb)
         gpanel.lay.addLayout(gtop)
         self.graph_stack = QStackedWidget()
         self.graph = ModuleGraph()
@@ -406,6 +420,17 @@ class ChatPage(QWidget):
         self.flow = FlowCanvas(editable=False)
         self.graph_stack.addWidget(self.graph)
         self.graph_stack.addWidget(self.flow)
+        from .project_map_view import ProjectMapView, WiringView
+        self.pmap = ProjectMapView()
+        self.pmap.module_clicked.connect(self.select_module)
+        self.wiring_view = WiringView()
+        self.graph_stack.addWidget(self.pmap)            # 2：工程图
+        self.graph_stack.addWidget(self.wiring_view)     # 3：接线图
+        self.project_map = None
+        self._map_timer = QTimer(self)
+        self._map_timer.setSingleShot(True)
+        self._map_timer.setInterval(150)                 # 一串事件合并成一次重画
+        self._map_timer.timeout.connect(self._refresh_map)
         gpanel.lay.addWidget(self.graph_stack, 1)
         ipanel = Panel(margins=(16, 8, 16, 12))
         self.tabs = QTabWidget()
@@ -461,6 +486,11 @@ class ChatPage(QWidget):
                              (why_box, "调度", "为什么交给这个 Agent"), (self.brief_view, "发给 AI", "发给 AI 的内容")):
             self.tabs.setTabToolTip(self.tabs.addTab(w, name), tip)
         self.why_box = why_box
+        self.iface_label = label("", "Faint", wrap=True)   # 选中模块的接口概要（不另开"接口"标签，第 113 条）
+        self.iface_label.setMinimumWidth(10)
+        self.iface_label.setTextFormat(Qt.RichText)
+        self.iface_label.setVisible(False)
+        ipanel.lay.addWidget(self.iface_label)
         ipanel.lay.addWidget(self.tabs)
         right.addWidget(gpanel)
         right.addWidget(ipanel)
@@ -502,6 +532,18 @@ class ChatPage(QWidget):
         self.rule_combo.setVisible(emb)
         self.cfg_combo.setVisible(not emb)
         self.review_label.setText("设计后等我确认" if emb else "规划后等我确认")    # 两种流程都能停下等确认
+        self.view_seg.setVisible(not emb)
+        self.view_seg_emb.setVisible(emb)
+        self.expand_btn.setVisible(emb)
+        self.graph_title.setText("工程" if emb else "模块")
+        if emb:
+            self.view_seg_emb.set_value("map")
+            self._switch_view("map")
+        else:
+            self.view_seg.set_value("modules")
+            self._switch_view("modules")
+            if self.expanded:
+                self.toggle_expand()
         self.tabs.setTabVisible(self.tabs.indexOf(self.why_box), True)          # 上板流程也经过调度器（第 110 条）
         for w in (self.board_view, self.rules_view):
             self.tabs.setTabVisible(self.tabs.indexOf(w), emb)
@@ -848,10 +890,73 @@ class ChatPage(QWidget):
                 return dict(info["pins"])
         return None
 
+    # ------------------------------------------------------------ 工程图、接线图（DECISIONS 第 109、113 条）
+
+    def _hw_profile(self):
+        from ..grounding.profile import HardwareProfile
+        key = self.project / self.hw / "profile.json"
+        if getattr(self, "_prof_key", None) != key:
+            try:
+                self._prof = HardwareProfile.load(key)
+            except Exception:                              # noqa: BLE001  档案读不了就不画芯片和保留引脚
+                self._prof = None
+            self._prof_key = key
+        return self._prof
+
+    def _refresh_map(self):
+        from ..embedded.project_map import build_project_map
+        pm = build_project_map(self.run_dir, self._hw_profile()) if (self.embedded and self.run_dir) else None
+        self.project_map = pm
+        live = {mid: mv.status for mid, mv in self.view.modules.items()}
+        self.pmap.set_map(pm, live, self.graph.selected, self.expanded)
+        self.wiring_view.set_map(pm)
+        if pm is not None:
+            s = pm.summary()
+            self.graph_sub.setText(f"{s['modules']} 个模块 · 测试过 {s['passed']}/{s['tested']} · "
+                                   f"{s['pins']} 个引脚 · {s['devices']} 个器件")
+        self._iface_summary(self.graph.selected)
+
+    def _iface_summary(self, mid: str) -> None:
+        import html as _h
+        m = self.project_map.by_id.get(mid) if (self.project_map is not None and mid) else None
+        self.iface_label.setVisible(m is not None)
+        if m is None:
+            return
+        c = T()
+        parts = [f"<b>{_h.escape(m.id)}</b>　接口 " + ("、".join(_h.escape(n) for n in m.names) or "（设计里没有）")]
+        if m.used_by:
+            parts.append("被 " + "、".join(_h.escape(x) for x in m.used_by) + " 用到")
+        if m.failing_uses:
+            parts.append(f"<span style='color:{c['fail']}'>没过的用例用到 " + "、".join(m.failing_uses) + "</span>")
+        self.iface_label.setText("　·　".join(parts))
+
+    def toggle_expand(self):
+        """展开：会话列表收起、对话收成窄栏，工程图占满右侧上方；再点恢复（DECISIONS 第 113 条）。"""
+        if not self.expanded:
+            self._sizes = (self.split.sizes(), self.right_split.sizes())
+            total = sum(self._sizes[0])
+            self.split.setSizes([0, 260, max(400, total - 260)])
+            rt = sum(self._sizes[1])
+            self.right_split.setSizes([int(rt * 0.72), rt - int(rt * 0.72)])
+            self.expanded = True
+        else:
+            sizes = getattr(self, "_sizes", None)
+            if sizes:
+                self.split.setSizes(sizes[0])
+                self.right_split.setSizes(sizes[1])
+            self.expanded = False
+        self.expand_btn.setText("收起" if self.expanded else "展开")
+        self._refresh_map()
+
     def clear_graph(self):
         self.view = RunView()
         self.seen_events = []
         self.picked_attempt = None
+        self.project_map = None
+        if hasattr(self, "pmap"):
+            self.pmap.set_map(None)
+            self.wiring_view.set_map(None)
+            self.iface_label.setVisible(False)
         self.graph.refresh(self.view)
 
     def stop(self):
@@ -909,6 +1014,8 @@ class ChatPage(QWidget):
         self._narrate(e)
         if self.graph.selected and e.get("node_id") == self.graph.selected:
             self.select_module(self.graph.selected)
+        if self.embedded and e.get("type") in MAP_EVENTS:
+            self._map_timer.start()
         self.refresh_status(self._run_text())
 
     def _run_text(self) -> str:
@@ -1160,6 +1267,9 @@ class ChatPage(QWidget):
         if mv is None:
             return
         steps = bv.repair_timeline(self.seen_events, mid, self.run_dir)
+        if self.embedded and self.pmap.selected != mid:
+            self.pmap.set_map(self.project_map, {k: v.status for k, v in self.view.modules.items()}, mid, self.expanded)
+        self._iface_summary(mid)
         att = self.picked_attempt or mv.attempt
         self.timeline.show_steps(mid, steps, att)
         if att and att != mv.attempt:                    # 看的是以前的某一次：检查结果按那一次的事件显示
@@ -1288,7 +1398,9 @@ class ChatPage(QWidget):
             self.tabs.setCurrentWidget(self.brief_view)
 
     def _switch_view(self, v: str):
-        self.graph_stack.setCurrentIndex(0 if v == "modules" else 1)
+        self.graph_stack.setCurrentIndex({"modules": 0, "flow": 1, "map": 2, "wiring": 3}.get(v, 0))
+        if v in ("map", "wiring"):
+            self._refresh_map()
         if v == "flow" and not self.flow.items_by_id:
             from ..orchestrator.workflow import load_workflow
             want = "firmware" if self.embedded else "module"           # 上板流程看 firmware_dev（第 110 条）
@@ -1324,6 +1436,8 @@ class ChatPage(QWidget):
             self.setUpdatesEnabled(True)
         if self.run_block is not None:                    # 历史记录不会还在跑（即使当初被强制结束、没有结束事件）
             self.run_block.finish()
+        self._map_timer.stop()
+        self._refresh_map()
         judge = run_dir / "judge_report.txt"              # 评测题：流程自己的结论之外，还有隐藏测试的判定
         if judge.is_file():
             from PySide6.QtWidgets import QMessageBox

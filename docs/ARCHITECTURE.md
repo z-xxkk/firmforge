@@ -660,6 +660,7 @@ firmforge mcp                            以 stdio 方式启动 MCP 服务（可
   - 评测页：选题目、配置、次数、花费上限，先看要跑多少次和预计花费；结果直接读输出目录的 `runs.jsonl`（终端跑的评测也能看），题目 × 配置每次运行一个小方块，点开在对话页回放；"暂停"在正在跑的一次结束后停下，再开始接着跑。
   - 要上板的运行一律用本机后端（`EmbeddedBackend`、`RulesBackend`、`EvalBackend`），不进 docker：Docker Desktop 在 Windows 上不能把 USB 板子交给容器。
   - 命令行和界面共用 `embedded/workspace.py` 读硬件目录、建流程、建评测上下文、建规则流程。
+  - 工程图和接线图（DECISIONS 第 109、113 条）：`embedded/project_map.py` 从运行目录算数据（design.json、wiring.json、每个模块最后交的代码、串口日志和电脑测试报告），`gui/project_map_view.py` 画工程图（ProjectMapView）和接线图（WiringView），对话页上板流程时用"工程图 / 接线图 / 流程图"开关切换，事件来了合并成一次重画，"展开"后积木列出接口、连线写出用到的函数。
   - 亮点展示（DECISIONS 第 105 条）：对话页"过程"标签按已经发生的事件画修正时间线（`board_view.repair_timeline`），点某次尝试切换下面各标签；硬件页"在手册里看原文"打开原页窗口（`page_viewer.py`，图片和单词位置来自 `grounding/pagepic.py` 调 poppler），"手册和板子对不上"对照卡读 `hardware/<板子>/conflicts.json`（`grounding/conflicts.py` 加载时核对原句和实测记录）。
 
 ## 13. 工具与 MCP（DECISIONS 第 63 条）
