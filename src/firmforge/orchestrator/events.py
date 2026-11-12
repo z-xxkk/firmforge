@@ -22,6 +22,8 @@ EVENT_TYPES = {
     "verify_started", "verify_finished", "diagnosis", "escalated", "rollback",
     "format_retry",                 # Agent 没按格式交文件，当场补要（嵌入式新流程）
     "design_rejected",              # 设计分层没通过检查，带着问题重做（嵌入式新流程；界面显示理由）
+    "wiring_ready",                 # 这个项目的接线定下来了（DECISIONS 第 108 条）
+    "wiring_checked",               # 上板时外接器件有没有应答（实测确认接线）
     # 经验库
     "experience_saved", "experience_used",
     # 工具（DECISIONS 第 63 条）

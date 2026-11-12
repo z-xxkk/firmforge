@@ -128,7 +128,8 @@ class EmbeddedFlow:
                  subscribers: tuple[Callable[[dict], None], ...] = (), secrets: tuple[str, ...] = (),
                  coder: str = "coder-strong", design: Design | None = None, locked: dict[str, str] | None = None,
                  extra_requires: tuple[str, ...] = (), build_rules: bool = True, workflow=None, store=None,
-                 human_review: bool = False, confirm_design: Callable[[Design], str | None] | None = None):
+                 human_review: bool = False, confirm_design: Callable[[Design], str | None] | None = None,
+                 prior_wiring: dict[str, int] | None = None):
         """workflow：上板工作流（firmware_dev.toml，DECISIONS 第 110 条）决定走哪些步骤、在哪停下、最多试几次、
         编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder，不经调度器、不用经验库。"""
         if rule_mode not in RULE_MODES:
@@ -143,6 +144,7 @@ class EmbeddedFlow:
         self.coder, self.fixed_design, self.locked = coder, design, dict(locked or {})
         self.extra_requires, self.build_rules = tuple(extra_requires), self.plan.build_rules
         self.store, self.human_review, self.confirm_design = store, human_review, confirm_design
+        self.prior_wiring = dict(prior_wiring or {})       # 同一个项目上一次的接线（DECISIONS 第 108 条）
         self.exp = None
         if workflow is not None and store is not None:
             from ..memory.experience import ExperienceBase
@@ -207,7 +209,7 @@ class EmbeddedFlow:
             self.bus.emit("plan_ready", "design", modules=[m.to_dict() for m in self.fixed_design.modules],
                           app=self.fixed_design.app, fixed=True)
             return self.fixed_design
-        msgs = designer_messages(self.spec, self.profile, rules)
+        msgs = designer_messages(self.spec, self.profile, rules, prior_wiring=self.prior_wiring)
         tries = revisions = 0
         k = 0
         while tries < MAX_DESIGN_TRIES:
@@ -283,6 +285,7 @@ class EmbeddedFlow:
         if self.board is None:
             return "skipped", "board_test", "没有配置板子，硬件层只做到编译和合规检查"
         r = self.board.run(proj, self.rd.attempt_dir(m.id, attempt) / "serial.log")
+        self._check_wiring(r)
         self.bus.emit("verify_finished", m.id, attempt=attempt, scope="board_test", ok=r.ok,
                       failed_layer=None if r.ok else ("skipped" if r.skipped else "board_test"))
         return r.verdict(), "board_test", r.report()
@@ -295,6 +298,50 @@ class EmbeddedFlow:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(c, encoding="utf-8")
         (d / "report.txt").write_text(report, encoding="utf-8")
+
+    # ---------------------------------------------------------------- 接线（DECISIONS 第 108 条）
+    def _use_wiring(self, design: Design) -> None:
+        """设计里给了这个项目的接线：后面的编码、测试、生成 hw_config.h、上板都改用它；没给就沿用硬件档案的默认接线。"""
+        source = "design" if design.wiring else "default"
+        if design.wiring:
+            self.profile = self.profile.with_wiring(design.wiring)
+        used = design.devices_used(self.profile)
+        devices = [{"name": d.name, "part": d.part, "bus": d.bus, "address": d.address}
+                   for d in self.profile.devices if d.name in used]
+        wiring = {s: f.value for s, f in sorted(self.profile.pins.items())}
+        self.rd.write_json("wiring.json", {"source": source, "pins": wiring, "devices": devices})
+        self.bus.emit("wiring_ready", "design", source=source, pins=wiring, devices=devices)
+        self._wiring_used, self._wiring_checked = used, False
+
+    def _check_wiring(self, res) -> None:
+        """第一次真正跑起来的上板测试：测试程序在每个用例前复位外接器件，器件应答了就说明它确实接在这条 I2C 总线上。
+        只能确认 I2C 器件的数据线和地址，确认不了中断等其他引脚。"""
+        if getattr(self, "_wiring_checked", True) or not res.started:
+            return
+        self._wiring_checked = True
+        text = "\n".join(res.logs)
+        out = []
+        for d in self.profile.devices:
+            if d.name not in self._wiring_used or d.reset is None or not d.bus.startswith("i2c"):
+                continue
+            pins = "、".join(f"{s}=GPIO{self.profile.pins[s].value}" for s in (f"{d.bus}.sda", f"{d.bus}.scl")
+                            if s in self.profile.pins)
+            if f"建不了 {d.bus} 总线" in text:
+                out.append({"device": d.name, "part": d.part, "ok": False, "pins": pins, "why": f"建不了 {d.bus} 总线"})
+            elif f"复位 {d.name} 失败" in text:
+                why = next(ln.split("失败：", 1)[-1] for ln in res.logs if f"复位 {d.name} 失败" in ln)
+                out.append({"device": d.name, "part": d.part, "ok": False, "pins": pins, "why": why})
+            else:
+                out.append({"device": d.name, "part": d.part, "ok": True, "pins": pins,
+                            "why": f"在 0x{d.address:02X} 应答了"})
+        if out:
+            self.bus.emit("wiring_checked", "design", devices=out)
+            try:
+                info = json.loads((self.rd.path / "wiring.json").read_text(encoding="utf-8"))
+                info["checked"] = out
+                self.rd.write_json("wiring.json", info)
+            except (OSError, ValueError):
+                pass
 
     # ---------------------------------------------------------------- 调度与经验（DECISIONS 第 110 条）
     def _pick_coder(self, m: DesignModule, attempt: int) -> tuple[str, str]:
@@ -505,6 +552,8 @@ class EmbeddedFlow:
             res.rules_used = [r.id for r in rules.select(None, "approved")]
             design = self._design(rules)
             res.design = design
+            if design is not None:
+                self._use_wiring(design)
             if design is None:
                 res.error = f"设计 {MAX_DESIGN_TRIES} 次都没有通过检查"
             else:

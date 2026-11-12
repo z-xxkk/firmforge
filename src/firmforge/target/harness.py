@@ -106,8 +106,10 @@ void app_main(void)
 
 def _reset_code(profile: HardwareProfile | None) -> tuple[str, str]:
     """外接 I2C 器件的软复位代码：（声明部分，调用语句）。档案里没有可复位的器件就都是空的。"""
+    pins = set(profile.pins) if profile is not None else set()
     devs = [d for d in (profile.devices if profile is not None else ())
-            if d.reset is not None and d.address is not None and d.bus.startswith("i2c")]
+            if d.reset is not None and d.address is not None and d.bus.startswith("i2c")
+            and {f"{d.bus}.sda", f"{d.bus}.scl"} <= pins]        # 项目接线里没有这条总线：不复位（宏也不存在）
     if not devs:
         return "", ""
     lines = ['#include "driver/i2c_master.h"', '#include "hw_config.h"', "",

@@ -259,7 +259,7 @@ class EmbeddedBackend(Backend):
 
     def start(self, *, project: Path, hw: str, runs_dir: Path, spec: str = "", name: str = "gui", rule_mode: str = "verified",
               task_id: str = "", config_name: str = "verified", tier: str | None = None, thinking: str | None = None,
-              port: str | None = None, workflow=None, human_review: bool = False) -> None:
+              port: str | None = None, workflow=None, human_review: bool = False, prior_wiring=None) -> None:
         """workflow：写需求时用的上板工作流（名字、路径或 Workflow 对象，默认 firmware_dev，DECISIONS 第 110 条）；
         human_review：设计好后停下等确认（ask("plan")，回答空字符串表示确认，写了意见就让设计 Agent 重做）。"""
         from ..embedded.workspace import load_hw
@@ -305,7 +305,8 @@ class EmbeddedBackend(Backend):
             db = Store(project / ".ff_data" / "firmforge.db")       # 调度器的成绩、经验库
 
             def confirm_design(design):
-                ans = self._wait("plan", {"modules": [m.to_dict() for m in design.modules], "embedded": True})
+                ans = self._wait("plan", {"modules": [m.to_dict() for m in design.modules], "embedded": True,
+                                          "wiring": dict(design.wiring)})
                 return ans if isinstance(ans, str) else ""
 
             def human(pending, escalated):
@@ -322,7 +323,8 @@ class EmbeddedBackend(Backend):
             flow = make_firmware_flow(hwc, spec, llm=llm, settings=settings, rule_mode=rule_mode, idf=idf, board=board,
                                       runs_root=runs_dir, name=name, human=human, tier=tier, think=thinking,
                                       subscribers=sub, workflow=workflow or "firmware_dev", store=db,
-                                      human_review=human_review, confirm_design=confirm_design)
+                                      human_review=human_review, confirm_design=confirm_design,
+                                      prior_wiring=prior_wiring)
             flow.on_builder = lambda b: holder.__setitem__("builder", b)
 
             def job():

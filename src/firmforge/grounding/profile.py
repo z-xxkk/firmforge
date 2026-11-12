@@ -12,6 +12,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 ORIGINS = ("user", "document", "measured", "default")      # 用户说的 / 资料 / 实测 / 默认值
+# 芯片上有哪些 GPIO（项目接线要在这个范围里，DECISIONS 第 108 条）；没列出的芯片不检查范围
+CHIP_GPIOS = {"esp32c3": range(0, 22), "esp32s3": range(0, 49),
+              "esp32": tuple(g for g in range(0, 40) if g not in (20, 24, 28, 29, 30, 31))}
+_SIGNAL = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 
 
 class ProfileError(ValueError):
@@ -114,6 +118,39 @@ class HardwareProfile:
                 note = f"；{f.note}" if f.note else ""
                 lines.append(f"  {d.name}.{k} = {v}（{_ORIGIN_ZH[f.origin]}{note}，宏 {param_macro(d.name, k)}）")
         return lines
+
+    def with_wiring(self, wiring: dict[str, int], note: str = "本项目的接线") -> "HardwareProfile":
+        """换成某个项目的接线（DECISIONS 第 108 条）：引脚只留这个项目用到的信号；芯片、保留引脚、器件不变。"""
+        from dataclasses import replace
+        return replace(self, pins={s: Fact(int(g), "user", note) for s, g in sorted(wiring.items())})
+
+    def wiring_problems(self, wiring, devices_used: set[str] | None = None) -> list[str]:
+        """检查一套项目接线：信号名、GPIO 在芯片上存在、不用保留引脚、不重复；用到的外接器件的总线引脚要写上。
+        devices_used：项目用到的外接器件名（Device.name）。"""
+        if not isinstance(wiring, dict):
+            return ["wiring 要写成 {\"信号\": GPIO 编号}，例如 {\"i2c0.sda\": 4}"]
+        out, used = [], {}
+        gpios = CHIP_GPIOS.get(str(self.chip.value))
+        for sig, g in sorted(wiring.items()):
+            if not isinstance(sig, str) or not _SIGNAL.match(sig):
+                out.append(f"信号名 {sig!r} 要写成\"外设或器件.引脚\"，小写，例如 i2c0.sda、imu.int")
+                continue
+            if isinstance(g, bool) or not isinstance(g, int):
+                out.append(f"{sig} 的引脚要写成 GPIO 编号（整数），现在是 {g!r}")
+                continue
+            if gpios is not None and g not in gpios:
+                out.append(f"{sig}：{self.chip.value} 没有 GPIO{g}")
+            if g in self.reserved_pins:
+                out.append(f"{sig} 用了不能用的 GPIO{g}（{self.reserved_pins[g]}）")
+            if g in used:
+                out.append(f"GPIO{g} 同时分给了 {used[g]} 和 {sig}")
+            used.setdefault(g, sig)
+        for d in self.devices:
+            if devices_used is not None and d.name not in devices_used:
+                continue
+            if d.bus.startswith("i2c") and not {f"{d.bus}.sda", f"{d.bus}.scl"} <= set(wiring):
+                out.append(f"用到了外接器件 {d.name}（{d.part}），接线里要写上 {d.bus}.sda 和 {d.bus}.scl")
+        return out
 
     def to_dict(self) -> dict:
         d = asdict(self)

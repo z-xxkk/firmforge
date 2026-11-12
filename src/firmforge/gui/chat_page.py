@@ -828,13 +828,25 @@ class ChatPage(QWidget):
             else:
                 wf = self.workflow if (self.workflow is not None and self.workflow.engine == "firmware") else None
                 self.backend.start(spec=spec, name="gui", rule_mode=mode, workflow=wf,
-                                   human_review=self.review_box.isChecked(), **kw)
+                                   human_review=self.review_box.isChecked(), prior_wiring=self._last_wiring(), **kw)
         except Exception as exc:
             from .runner import BOARD_USERS
             BOARD_USERS.discard(self.backend)
             self.add_line(f"没能开始运行：{exc}", bg=True)
             self.backend = None
             self.stop_btn.setVisible(False)
+
+    def _last_wiring(self) -> dict | None:
+        """同一个对话（项目）上一次运行定下的接线，交给设计 Agent 沿用（DECISIONS 第 108 条）。"""
+        for r in reversed(self.conv.runs if self.conv is not None else []):
+            p = Path(r) / "wiring.json"
+            try:
+                info = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if info.get("source") == "design" and info.get("pins"):
+                return dict(info["pins"])
+        return None
 
     def clear_graph(self):
         self.view = RunView()
@@ -925,7 +937,8 @@ class ChatPage(QWidget):
     def _narrate(self, e: dict):
         """过程消息放进折叠块；运行结束的总结和"停下等人"放主线（DECISIONS 第 107 条）。"""
         t = e.get("type")
-        self._in_process = t not in ("run_finished", "human_wait")
+        bad_wiring = t == "wiring_checked" and any(not x.get("ok") for x in e.get("data", {}).get("devices", []))
+        self._in_process = t not in ("run_finished", "human_wait") and not bad_wiring     # 接线没应答要你去查板子：放主线
         try:
             self._narrate_one(e)
         finally:
@@ -1027,6 +1040,15 @@ class ChatPage(QWidget):
             self.add_line(f"{d.get('agent')} 没按格式交文件（缺 {'、'.join(d.get('missing', []))}），再要一次", bg=True)
         elif t == "human_wait" and node == "design":
             pass                                         # 对话里会出现"设计好了，请确认"
+        elif t == "wiring_ready":
+            pins = d.get("pins") or {}
+            src = "设计 Agent 按需求定的" if d.get("source") == "design" else "沿用硬件档案的默认接线"
+            self.add_line(f"接线（{src}）：" + "，".join(f"{s}=GPIO{g}" for s, g in sorted(pins.items())))
+        elif t == "wiring_checked":
+            for x in d.get("devices", []):
+                mark = "已实测确认" if x.get("ok") else "没应答，请检查接线"
+                self.add_line(Dot(T()["pass"] if x.get("ok") else T()["fail"]),
+                              f"{x.get('part')}（{x.get('pins')}）：{mark}，{x.get('why')}")
         elif t == "node_assigned" and d.get("role") == "coder":
             sc = d.get("scores") or {}
             self.add_line(f"{node} 第 {d.get('attempt')} 次编码交给 {d.get('agent')}：{sc.get('reason', '')}")
@@ -1066,8 +1088,11 @@ class ChatPage(QWidget):
             rows = "\n".join(f"- `{x['id']}`　{UNIT_NAMES.get(x.get('layer'), x.get('layer', ''))}"
                              + (f"，依赖 {'、'.join(x['depends_on'])}" if x.get("depends_on") else "")
                              for x in payload.get("modules", []))
-            m = self.add_agent("designer", "designer", f"设计好了，请确认：\n\n{rows}\n\n确认后开始编写；有意见就写在下面输入框里发送，"
-                               "让设计 Agent 重做。")
+            wiring = payload.get("wiring") or {}
+            wires = ("\n\n接线：" + "，".join(f"`{s}` → GPIO{g}" for s, g in sorted(wiring.items()))) if wiring else \
+                "\n\n接线：沿用硬件档案的默认接线"
+            m = self.add_agent("designer", "designer", f"设计好了，请确认：\n\n{rows}{wires}\n\n确认后开始编写；"
+                               "有意见（包括改接线）就写在下面输入框里发送，让设计 Agent 重做。")
             m.add_action("提修改意见", lambda: self._focus_input("写下对设计的修改意见，发送后让设计 Agent 重做"))
             m.add_action("确认，开始写", lambda: self._resolve("", m, "你已确认"), primary=True)
         elif kind == "plan":

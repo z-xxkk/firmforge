@@ -85,7 +85,7 @@ def make_eval_context(hw: HwContext, tasks_root: Path, *, llm, settings: config.
 def make_firmware_flow(hw: HwContext, spec: str, *, llm, settings: config.Settings, rule_mode: str, idf, board,
                        runs_root: Path, name: str, human=None, tier: str | None = None, think: str | None = None,
                        subscribers: tuple[Callable[[dict], None], ...] = (), workflow: str | None = "firmware_dev",
-                       store=None, human_review: bool = False, confirm_design=None):
+                       store=None, human_review: bool = False, confirm_design=None, prior_wiring=None):
     """嵌入式新流程（DECISIONS 第 66 条）：verified 模式带规则判定器，规则缺了会查资料、等人确认。
     workflow：上板工作流的名字或路径（DECISIONS 第 110 条），None 表示照原来的固定做法；
     store：本地数据库（调度器的成绩、经验库），None 时调度器只按标价和探索打分、不用经验库。"""
@@ -111,7 +111,7 @@ def make_firmware_flow(hw: HwContext, spec: str, *, llm, settings: config.Settin
                         library=hw.library if rule_mode != "none" else None, verifier=verifier, runs_root=runs_root,
                         name=name, rule_mode=rule_mode, human=human, idf=idf, board=board, registry=reg,
                         subscribers=subscribers, secrets=secrets_of(settings), workflow=wf, store=store,
-                        human_review=human_review, confirm_design=confirm_design)
+                        human_review=human_review, confirm_design=confirm_design, prior_wiring=prior_wiring)
 
 
 def make_rule_builder(hw: HwContext, *, llm, settings: config.Settings, runs_root: Path, human=None,

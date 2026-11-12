@@ -55,6 +55,7 @@ class Design:
     modules: list[DesignModule]
     app: str = ""                       # app_main 里做什么（集成说明）
     by_id: dict[str, DesignModule] = field(default_factory=dict)
+    wiring: dict[str, int] = field(default_factory=dict)   # 这个项目的接线（DECISIONS 第 108 条）；空表示沿用硬件档案的默认接线
 
     def __post_init__(self):
         self.by_id = {m.id: m for m in self.modules}
@@ -70,7 +71,15 @@ class Design:
         return out
 
     def to_dict(self) -> dict:
-        return {"modules": [m.to_dict() for m in self.modules], "app": self.app}
+        out = {"modules": [m.to_dict() for m in self.modules], "app": self.app}
+        if self.wiring:
+            out["wiring"] = dict(self.wiring)
+        return out
+
+    def devices_used(self, profile: HardwareProfile) -> set[str]:
+        """硬件层模块的 scopes 里写到的外接器件（按器件型号对上，例如 mpu6050 → imu）。"""
+        scopes = {s for m in self.modules if m.layer == "hardware" for s in m.scopes}
+        return {d.name for d in profile.devices if d.part.lower() in scopes or d.name in scopes}
 
 
 def _strs(v, what: str, problems: list[str]) -> tuple[str, ...]:
@@ -141,9 +150,13 @@ def parse_design(data: dict, profile: HardwareProfile, max_modules: int = MAX_MO
                 problems.append(f"逻辑层 {m.id} 不能依赖硬件层 {d}（逻辑层要能在电脑上测试）")
     if not problems and _has_cycle(mods):
         problems.append("模块依赖成环")
+    wiring = data.get("wiring") if isinstance(data, dict) else None
+    if wiring is not None and not problems:                 # 项目接线（DECISIONS 第 108 条）；不写就沿用默认接线
+        used = Design(mods).devices_used(profile)
+        problems += profile.wiring_problems(wiring, used)
     if problems:
         return None, problems
-    return Design(mods, str(data.get("app", "")).strip()), []
+    return Design(mods, str(data.get("app", "")).strip(), wiring=dict(wiring or {})), []
 
 
 def _has_cycle(mods: list[DesignModule]) -> bool:
@@ -168,13 +181,16 @@ def design_from_text(text: str, profile: HardwareProfile) -> tuple[Design | None
 
 
 def designer_messages(requirement: str, profile: HardwareProfile, rules: RuleSet | None,
-                      where: str = "") -> list[dict]:
+                      where: str = "", prior_wiring: dict[str, int] | None = None) -> list[dict]:
     system = system_prompt("designer.md", profile, rules, None, max_modules=str(MAX_MODULES))
     b = Brief(intent="把需求拆成模块，分出硬件层和逻辑层", location=where or "设计 › 设计分层")
     b.constraints += [f"最多 {MAX_MODULES} 个模块", "逻辑层不能依赖硬件层",
                       f"开发框架：{profile.framework.value} {profile.framework_version.value}",
                       "引脚和器件地址一律用 hw_config.h 里的宏（程序按硬件档案生成）"]
     b.attach("需求文档", requirement)
+    if prior_wiring:                                   # 同一个项目上一次的接线：需求没要求改就沿用（第 108 条）
+        b.attach("这个项目上一次的接线（需求没要求改就照抄进 wiring）",
+                 json.dumps(prior_wiring, ensure_ascii=False))
     return [{"role": "system", "content": system}, {"role": "user", "content": b.render()}]
 
 
