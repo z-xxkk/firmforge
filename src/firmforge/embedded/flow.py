@@ -284,6 +284,10 @@ class EmbeddedFlow:
             return "fail", "build", "编译失败：\n" + errs
         if self.board is None:
             return "skipped", "board_test", "没有配置板子，硬件层只做到编译和合规检查"
+        wrong = self._check_chip()
+        if wrong:
+            self.bus.emit("verify_finished", m.id, attempt=attempt, scope="board_test", ok=False, failed_layer="skipped")
+            return "skipped", "board_test", wrong
         r = self.board.run(proj, self.rd.attempt_dir(m.id, attempt) / "serial.log")
         self._check_wiring(r)
         self.bus.emit("verify_finished", m.id, attempt=attempt, scope="board_test", ok=r.ok,
@@ -312,6 +316,20 @@ class EmbeddedFlow:
         self.rd.write_json("wiring.json", {"source": source, "pins": wiring, "devices": devices})
         self.bus.emit("wiring_ready", "design", source=source, pins=wiring, devices=devices)
         self._wiring_used, self._wiring_checked = used, False
+
+    def _check_chip(self) -> str:
+        """第一次上板前识别板子上的芯片（DECISIONS 第 114 条）；和硬件档案对不上返回说明，不烧录。"""
+        if getattr(self, "_chip_checked", None) is not None:
+            return self._chip_checked
+        from ..target.chip_detect import mismatch
+        info = self.board.chip() if hasattr(self.board, "chip") else None
+        self._chip_checked = ""
+        if info is not None:
+            self._chip_checked = mismatch(info, str(self.profile.chip.value))
+            self.bus.emit("chip_detected", None, target=info.target, description=info.description,
+                          flash_mb=info.flash_mb, port=info.port, error=info.error,
+                          expected=str(self.profile.chip.value), mismatch=self._chip_checked)
+        return self._chip_checked
 
     def _check_wiring(self, res) -> None:
         """第一次真正跑起来的上板测试：测试程序在每个用例前复位外接器件，器件应答了就说明它确实接在这条 I2C 总线上。

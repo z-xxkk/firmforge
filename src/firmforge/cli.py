@@ -61,6 +61,30 @@ def _load(path: str) -> Task:
 
 # ---------------------------------------------------------------- doctor
 
+def _doctor_board() -> None:
+    """ESP-IDF 支持哪些芯片、插着的板子是什么芯片（DECISIONS 第 114 条）。不算缺失项。"""
+    from .target.board import find_port
+    from .target.chip_detect import detect_chip
+    from .target.esp_idf import IdfEnv, IdfUnavailable, idf_path
+    from .target.soc_caps import list_targets
+    targets = list_targets(idf_path())
+    print(f"[INFO] ESP-IDF 芯片平台     {', '.join(targets) if targets else '没找到 ESP-IDF（' + str(idf_path()) + '）'}")
+    port = find_port()
+    if not port or not (port.startswith("COM") or Path(port).exists()):
+        print("[INFO] 板子                 没插（插上后会自动识别芯片）")
+        return
+    try:
+        info = detect_chip(IdfEnv.load().python, port)
+    except IdfUnavailable as exc:
+        print(f"[INFO] 板子                 {port}，识别不了：{exc}")
+        return
+    if info.ok:
+        flash = f"，Flash {info.flash_mb} MB" if info.flash_mb else ""
+        print(f"[INFO] 板子                 {port}：{info.description}{flash}")
+    else:
+        print(f"[INFO] 板子                 {port}，没识别出芯片：{info.error[-160:]}")
+
+
 def cmd_doctor(args) -> int:
     tc = Toolchain.from_env()
     print(f"FirmForge {__version__}，Python {sys.version.split()[0]}")
@@ -81,6 +105,7 @@ def cmd_doctor(args) -> int:
     else:
         missing += 1
         print(f"[MISS] Unity                找不到 {unity}")
+    _doctor_board()
     key_set = bool(os.environ.get("DEEPSEEK_API_KEY"))
     print(f"[INFO] DEEPSEEK_API_KEY     {'已设置' if key_set else '未设置'}（阶段 2 才需要）")
     if missing:

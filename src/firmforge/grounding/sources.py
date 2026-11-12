@@ -373,3 +373,59 @@ def load_manifest(manifest: Path, raw_dir: Path, cache_root: Path) -> SourceLibr
     lib.save()
     return lib
 
+
+
+# ---------------------------------------------------------------- 拖进来的资料（DECISIONS 第 114 条）
+
+SUFFIX_KIND = {".pdf": "pdf", ".html": "html", ".htm": "html", ".txt": "text", ".md": "text", ".h": "header",
+               ".svd": "svd"}
+
+
+def _toml_str(s: str) -> str:
+    return json.dumps(s, ensure_ascii=False)          # JSON 字符串也是合法的 TOML 基本字符串
+
+
+def register_source(manifest: Path, raw_dir: Path, cache_root: Path, file: Path, *, title: str = "",
+                    url: str = "", version: str = "") -> tuple[Document, bool]:
+    """把用户给的一份资料登记进资料清单：算指纹、复制原件到 raw_dir、追加到 sources.toml、提取文字。
+    同一份文件（指纹相同）已经登记过就直接返回它，第二个值是 False。用户给的资料等级是 user（不算官方）。"""
+    file = Path(file)
+    kind = SUFFIX_KIND.get(file.suffix.lower())
+    if kind is None:
+        raise SourceError(f"{file.name}：只能登记 {'、'.join(sorted(SUFFIX_KIND))} 文件")
+    if not file.is_file():
+        raise SourceError(f"找不到文件 {file}")
+    digest = file_sha256(file)
+    import tomllib
+    manifest = Path(manifest)
+    text = manifest.read_text(encoding="utf-8") if manifest.is_file() else ""
+    entries = tomllib.loads(text).get("doc", []) if text else []
+    lib = SourceLibrary.load(cache_root)
+    for d in entries:
+        if d.get("sha256") == digest:
+            if d["id"] in lib.docs:
+                return lib.docs[d["id"]], False
+            return load_manifest(manifest, raw_dir, cache_root).get(d["id"]), False
+    base = re.sub(r"[^a-z0-9]+", "-", unicodedata.normalize("NFKD", file.stem).lower()).strip("-")[:40] or "doc"
+    taken = {d.get("id") for d in entries} | set(lib.docs)
+    doc_id, n = base, 2
+    while doc_id in taken:
+        doc_id, n = f"{base}-{n}", n + 1
+    raw_dir = Path(raw_dir)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    name = file.name
+    target = raw_dir / name
+    if target.exists() and file_sha256(target) != digest:
+        name = f"{doc_id}{file.suffix.lower()}"
+        target = raw_dir / name
+    if target.resolve() != file.resolve():
+        import shutil
+        shutil.copyfile(file, target)
+    doc = load_document(target, id=doc_id, title=title or file.stem, kind=kind, tier="user", url=url, version=version)
+    block = (f"\n[[doc]]\n# 用户在对话里拖进来的资料\nid = {_toml_str(doc_id)}\ntitle = {_toml_str(doc.title)}\n"
+             f"kind = {_toml_str(kind)}\ntier = \"user\"\nversion = {_toml_str(version)}\nurl = {_toml_str(url)}\n"
+             f"file = {_toml_str(name)}\nsha256 = {_toml_str(digest)}\n")
+    manifest.write_text(text.rstrip("\n") + ("\n" if text.strip() else "") + block, encoding="utf-8")
+    lib.add(doc)
+    lib.save()
+    return doc, True

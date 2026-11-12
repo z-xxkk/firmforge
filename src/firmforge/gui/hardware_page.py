@@ -22,7 +22,7 @@ from .widgets import Dot, GripSplitter, Panel, Segmented, T, hbox, label
 ORIGIN = {"measured": "实测", "document": "资料", "user": "你填的", "default": "默认"}
 STATUS = {"trusted": "已确认", "approved": "已确认", "checked": "已核对", "draft": "草稿", "pending": "等你确认"}
 TIER_NAMES = {"official_manual": "官方手册", "official_code": "官方代码", "official_example": "官方例程",
-              "official_mirror": "官方原版（镜像）", "community": "社区资料", "user": "实测记录"}
+              "official_mirror": "官方原版（镜像）", "community": "社区资料", "user": "用户提供"}
 KIND_NAMES = {"api": "接口用法", "pin": "引脚", "peripheral": "外设", "register": "寄存器", "device": "外接器件",
               "sequence": "操作顺序", "timing": "时序"}
 CHIP = {"measured": ("accent_soft", "accent"), "document": ("bg", "ink2"), "user": ("bg", "ink2"),

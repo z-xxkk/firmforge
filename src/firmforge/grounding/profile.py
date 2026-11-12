@@ -12,9 +12,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 ORIGINS = ("user", "document", "measured", "default")      # 用户说的 / 资料 / 实测 / 默认值
-# 芯片上有哪些 GPIO（项目接线要在这个范围里，DECISIONS 第 108 条）；没列出的芯片不检查范围
-CHIP_GPIOS = {"esp32c3": range(0, 22), "esp32s3": range(0, 49),
-              "esp32": tuple(g for g in range(0, 40) if g not in (20, 24, 28, 29, 30, 31))}
 _SIGNAL = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 
 
@@ -130,7 +127,8 @@ class HardwareProfile:
         if not isinstance(wiring, dict):
             return ["wiring 要写成 {\"信号\": GPIO 编号}，例如 {\"i2c0.sda\": 4}"]
         out, used = [], {}
-        gpios = CHIP_GPIOS.get(str(self.chip.value))
+        from ..target.soc_caps import chip_gpios          # 芯片有哪些 GPIO 从 ESP-IDF 源码读（DECISIONS 第 114 条）
+        gpios = chip_gpios(str(self.chip.value))
         for sig, g in sorted(wiring.items()):
             if not isinstance(sig, str) or not _SIGNAL.match(sig):
                 out.append(f"信号名 {sig!r} 要写成\"外设或器件.引脚\"，小写，例如 i2c0.sda、imu.int")

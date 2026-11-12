@@ -24,6 +24,7 @@ EVENT_TYPES = {
     "design_rejected",              # 设计分层没通过检查，带着问题重做（嵌入式新流程；界面显示理由）
     "wiring_ready",                 # 这个项目的接线定下来了（DECISIONS 第 108 条）
     "wiring_checked",               # 上板时外接器件有没有应答（实测确认接线）
+    "chip_detected",                # 第一次上板前识别板子上的芯片（esptool 实测），对不上就不烧录
     # 经验库
     "experience_saved", "experience_used",
     # 工具（DECISIONS 第 63 条）

@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..grounding.compliance import strip_c
-from ..grounding.profile import CHIP_GPIOS, HardwareProfile, param_macro
+from ..grounding.profile import HardwareProfile, param_macro
+from ..target.soc_caps import chip_gpios
 from ..orchestrator.dag import declared_functions
 from ..target.harness import parse_board_output
 
@@ -276,6 +277,6 @@ def build_project_map(run_dir: Path, profile: HardwareProfile | None = None) -> 
     chip = str(profile.chip.value) if profile is not None else ""
     reserved = dict(profile.reserved_pins) if profile is not None else {}
     used = set(pins.values())
-    unused = [g for g in CHIP_GPIOS.get(chip, ()) if g not in used and g not in reserved]
+    unused = [g for g in (chip_gpios(chip) or ()) if g not in used and g not in reserved]
     return ProjectMap(mods, edges, peripherals, devices, wiring.get("source", "default") if wiring else "default",
                       pins, unused, reserved, str(profile.board.value) if profile is not None else "", chip)

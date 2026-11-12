@@ -33,6 +33,20 @@ SDKCONFIG_DEFAULTS = {
     "esp32": "# FirmForge 生成：经典 ESP32（4 MB Flash，控制台走 UART0）\n"
              "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\nCONFIG_ESP_CONSOLE_UART_DEFAULT=y\nCONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y\n",
 }
+
+
+def sdkconfig_for(target: str, profile: HardwareProfile | None = None) -> str:
+    """原来支持的三种芯片用固定配置（评测编译结果不变）；其他芯片按 ESP-IDF 的 soc_caps.h 生成（DECISIONS 第 114 条）。"""
+    if target in SDKCONFIG_DEFAULTS:
+        return SDKCONFIG_DEFAULTS[target]
+    from .soc_caps import load_caps, sdkconfig_defaults
+    caps = load_caps(target)
+    if caps is None:
+        raise ValueError(f"不支持的芯片 {target}：ESP-IDF 里没有它的 soc_caps.h（{idf_path()}）")
+    flash = getattr(profile, "flash_mb", None) if profile is not None else None
+    return sdkconfig_defaults(caps, flash.value if hasattr(flash, "value") else flash)
+
+
 _GCC_DIAG = re.compile(r"^(?P<file>[^:\n]+):(?P<line>\d+):(?:(?P<col>\d+):)?\s*(?P<kind>error|warning|fatal error):\s*(?P<msg>.+)$",
                        re.M)
 
@@ -182,9 +196,7 @@ class IdfProject:
         top = (f"cmake_minimum_required(VERSION 3.22)\ninclude($ENV{{IDF_PATH}}/tools/cmake/project.cmake)\n"
                f"project({self.name})\n")
         _write_if_changed(self.root / "CMakeLists.txt", top)
-        if self.target not in SDKCONFIG_DEFAULTS:
-            raise ValueError(f"不支持的芯片 {self.target}，可选：{', '.join(SDKCONFIG_DEFAULTS)}")
-        _write_if_changed(self.root / "sdkconfig.defaults", SDKCONFIG_DEFAULTS[self.target])
+        _write_if_changed(self.root / "sdkconfig.defaults", sdkconfig_for(self.target, profile))
         for rel, content in files.items():
             rel = rel.replace("\\", "/").lstrip("/")
             if rel.startswith("..") or "/../" in rel:

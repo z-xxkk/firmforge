@@ -16,6 +16,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from .chip_detect import ChipInfo, detect_chip
 from .esp_idf import IdfEnv, IdfProject
 from .harness import END, BoardTestResult, parse_board_output
 
@@ -69,6 +70,15 @@ def find_port(explicit: str | None = None, env: dict[str, str] | None = None) ->
 class BoardRunner:
     def __init__(self, idf: IdfEnv, port: str | None = None, *, run_timeout: float = RUN_TIMEOUT_S):
         self.idf, self.port, self.run_timeout = idf, find_port(port), run_timeout
+        self._chip: ChipInfo | None = None
+
+    def chip(self) -> ChipInfo | None:
+        """识别板子上的芯片（只识别一次）；没有串口返回 None。"""
+        if self.port is None or not (self.port.startswith("COM") or Path(self.port).exists()):
+            return None
+        if self._chip is None:
+            self._chip = detect_chip(self.idf.python, self.port)
+        return self._chip
 
     def run(self, project: IdfProject, log_path: Path | None = None) -> BoardTestResult:
         """project 必须已经编译成功。"""

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -248,6 +249,7 @@ class ChatPage(QWidget):
     open_designer = Signal(str)          # /workflow 指令转给设计器
     review_rules = Signal(dict, object)  # 规则等人确认：交给硬件页，确认完调用回调（DECISIONS 第 100 条）
     run_done = Signal()                  # 一次运行结束（规则可能入库了，硬件页要重新读）
+    source_added = Signal(object, str)   # 拖进来的资料登记完（后台线程发出，DECISIONS 第 114 条）
 
     def __init__(self, project: Path, parent=None):
         super().__init__(parent)
@@ -272,6 +274,9 @@ class ChatPage(QWidget):
         self.hw = QSettings().value("embedded/hw", DEFAULT_HW)
         self.judge: dict | None = None    # 评测题跑完后隐藏测试的判定
         self._build()
+        self.setAcceptDrops(True)                  # 手册拖进对话就登记（DECISIONS 第 114 条）
+        self.input.setAcceptDrops(False)           # 输入框不吞掉拖进来的文件
+        self.source_added.connect(self._on_source_added)
         self.refresh_sessions()
 
     # ------------------------------------------------------------ 布局
@@ -653,6 +658,60 @@ class ChatPage(QWidget):
         self.msgs.insertWidget(self.msgs.count() - 1, w)
         QTimer.singleShot(30, lambda: self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum()))
         return w
+
+    # ------------------------------------------------------------ 拖进来的资料（DECISIONS 第 114 条）
+
+    @staticmethod
+    def _drop_files(md) -> list[Path]:
+        from ..grounding.sources import SUFFIX_KIND
+        if not md.hasUrls():
+            return []
+        return [Path(u.toLocalFile()) for u in md.urls()
+                if u.isLocalFile() and Path(u.toLocalFile()).suffix.lower() in SUFFIX_KIND]
+
+    def dragEnterEvent(self, ev):
+        if self._drop_files(ev.mimeData()):
+            ev.acceptProposedAction()
+
+    def dropEvent(self, ev):
+        files = self._drop_files(ev.mimeData())
+        if files:
+            ev.acceptProposedAction()
+            self.register_files(files)
+
+    def register_files(self, files: list[Path]):
+        """登记要算指纹、提取文字（上千页的手册要几十秒），放后台线程做，做完由 source_added 回到界面。"""
+        for f in files:
+            self.add_user(f"（拖入资料）{f.name}")
+            self.add_line(f"正在登记 {f.name}：算校验值、提取文字……", bg=True)
+            threading.Thread(target=self._register_one, args=(Path(f),), daemon=True).start()
+
+    _register_lock = threading.Lock()
+
+    def _register_one(self, f: Path):
+        from ..grounding.sources import register_source
+        try:
+            with ChatPage._register_lock:                  # 两份同时拖进来：资料清单一份一份地写
+                doc, added = register_source(self.project / self.hw / "sources.toml", self.project / ".ff_sources" / "raw",
+                                             self.project / ".ff_sources" / "library", f)
+            self.source_added.emit((f, doc, added), "")
+        except Exception as exc:                           # noqa: BLE001  登记失败要告诉用户，不能当成功
+            self.source_added.emit((f, None, False), str(exc))
+
+    def _on_source_added(self, res, err: str):
+        f, doc, added = res
+        if doc is None:
+            self.add_agent("FirmForge", "researcher", f"**{f.name}** 没登记上：{err}")
+            return
+        pages = f"{len(doc.pages)} 页，" if doc.kind == "pdf" else ""
+        if not added:
+            self.add_agent("FirmForge", "researcher", f"**{doc.title}** 已经登记过了（编号 {doc.id}，校验值相同），不重复登记。")
+            return
+        self.add_agent("FirmForge", "researcher",
+                       f"登记好了：**{doc.title}**（编号 {doc.id}，{pages}校验值 {doc.sha256[:12]}…）。\n\n"
+                       f"记在 {self.hw}/sources.toml，等级是\"用户提供\"（不算官方资料）。查资料 Agent 提炼规则时能检索它，"
+                       f"从它提炼的规则照样要核对原文、等你确认。")
+        self.run_done.emit()                               # 硬件页、知识库重新读资料
 
     def add_user(self, text: str):
         self._add(Bubble(text), align="right")
@@ -1044,7 +1103,8 @@ class ChatPage(QWidget):
     def _narrate(self, e: dict):
         """过程消息放进折叠块；运行结束的总结和"停下等人"放主线（DECISIONS 第 107 条）。"""
         t = e.get("type")
-        bad_wiring = t == "wiring_checked" and any(not x.get("ok") for x in e.get("data", {}).get("devices", []))
+        bad_wiring = (t == "wiring_checked" and any(not x.get("ok") for x in e.get("data", {}).get("devices", []))) \
+            or (t == "chip_detected" and bool(e.get("data", {}).get("mismatch")))          # 芯片对不上也要你处理
         self._in_process = t not in ("run_finished", "human_wait") and not bad_wiring     # 接线没应答要你去查板子：放主线
         try:
             self._narrate_one(e)
@@ -1151,6 +1211,14 @@ class ChatPage(QWidget):
             pins = d.get("pins") or {}
             src = "设计 Agent 按需求定的" if d.get("source") == "design" else "沿用硬件档案的默认接线"
             self.add_line(f"接线（{src}）：" + "，".join(f"{s}=GPIO{g}" for s, g in sorted(pins.items())))
+        elif t == "chip_detected":
+            if d.get("mismatch"):
+                self.add_line(Dot(T()["fail"]), d["mismatch"])
+            elif d.get("target"):
+                flash = f"，Flash {d['flash_mb']} MB" if d.get("flash_mb") else ""
+                self.add_line(Dot(T()["pass"]), f"识别到板子（{d.get('port')}）：{d.get('description')}{flash}，和硬件档案一致")
+            else:
+                self.add_line(f"没识别出板子上的芯片，照常烧录：{(d.get('error') or '')[-120:]}")
         elif t == "wiring_checked":
             for x in d.get("devices", []):
                 mark = "已实测确认" if x.get("ok") else "没应答，请检查接线"
@@ -1220,8 +1288,8 @@ class ChatPage(QWidget):
         elif kind == "rules":
             n, x = len(payload.get("pending", [])), len(payload.get("escalated", []))
             m = self.add_agent("FirmForge", "reviewer", f"规则判定器核对完了：**{n}** 条等你确认" + (f"，{x} 条多次被退回" if x else "")
-                               + "。请到硬件页逐条通过或驳回；全部表态后流程才继续。")
-            m.add_action("去确认", lambda: self.review_rules.emit(payload, lambda dec: self._rules_done(dec, m)), primary=True)
+                               + "。就在下面逐条看：规则、引用原文、手册原页并排；全部表态后提交，流程才继续。")
+            self._rule_review(payload, m)
         elif kind == "approve":
             m = self.add_agent("FirmForge", "reviewer", f"{payload.get('agent')} 想调用外部工具 `{payload.get('tool')}`，参数：\n\n"
                                f"```\n{json.dumps(payload.get('args'), ensure_ascii=False)[:400]}\n```")
@@ -1230,6 +1298,18 @@ class ChatPage(QWidget):
         else:
             return
         self.pending = (kind, payload, m)
+
+    def _rule_review(self, payload: dict, msg):
+        """规则在对话里就地确认（DECISIONS 第 114 条）。"""
+        from .rule_review import RuleReview
+        try:
+            from ..grounding.sources import SourceLibrary
+            lib = SourceLibrary.load(self.project / ".ff_sources" / "library")
+        except Exception:                                  # noqa: BLE001  资料缓存读不了就不显示原页文字
+            lib = None
+        self.rule_review = RuleReview(payload, self.project, self.hw, lib)
+        self.rule_review.submitted.connect(lambda dec: self._rules_done(dec, msg))
+        self._add(self.rule_review)
 
     def _rules_done(self, decisions: dict, msg):
         ok = sum(1 for v, _ in decisions.values() if v == "approve")
