@@ -70,6 +70,64 @@ class Bubble(QFrame):
         lay.addWidget(lab)
 
 
+class RunBlock(QFrame):
+    """一段运行过程折叠成一行（DECISIONS 第 107 条，照 Claude、ChatGPT 把思考和工具调用收起来的做法）：
+    收起时只显示最新一步和步数，点一下展开看各个 Agent 的消息和工具调用。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("RunBlock")
+        self.started = time.time()
+        self.steps = 0
+        self.done = False
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.head = QPushButton()
+        self.head.setObjectName("RunBlockHead")
+        self.head.setCursor(Qt.PointingHandCursor)
+        self.head.clicked.connect(self.toggle)
+        self.head.setToolTip("展开或收起这段过程")
+        lay.addWidget(self.head)
+        self.body = QWidget()
+        self.body_lay = QVBoxLayout(self.body)
+        self.body_lay.setContentsMargins(0, 6, 0, 6)
+        self.body_lay.setSpacing(10)
+        self.body.setVisible(False)
+        lay.addWidget(self.body)
+        self.latest = "开始运行"
+        self._paint()
+
+    def add(self, w: QWidget, summary: str) -> None:
+        self.body_lay.addWidget(w)
+        self.steps += 1
+        if summary:
+            self.latest = " ".join(summary.split())[:60]
+        self._paint()
+
+    def finish(self) -> None:
+        self.done = True
+        self._paint()
+
+    def toggle(self) -> None:
+        self.body.setVisible(not self.body.isVisible())
+        self._paint()
+
+    def _paint(self) -> None:
+        c = T()
+        arrow = "▾" if self.body.isVisible() else "▸"
+        if self.done:
+            text = f"{arrow}  过程 · {self.steps} 步"
+        else:
+            text = f"{arrow}  正在：{self.latest}"
+        self.head.setText(f"{text}")
+        if c is not None:
+            dot = c["ink3"] if self.done else c["run"]
+            self.head.setStyleSheet(
+                f"#RunBlockHead {{ text-align: left; padding: 7px 12px; border: 1px solid {c['line']}; border-radius: 10px;"
+                f" background: {c['surface']}; color: {c['ink2'] if self.done else c['ink']}; border-left: 3px solid {dot}; }}")
+
+
 class AgentMessage(QWidget):
     """Agent 的消息：头像、名字、角色、型号，正文，可选按钮；右上"发给 AI 的内容"。"""
     show_brief = Signal(object)
@@ -194,6 +252,8 @@ class ChatPage(QWidget):
         self.chats_dir = project / ".ff_chats"
         self.view = RunView()
         self.seen_events: list[dict] = []          # 这次运行到现在为止的事件（直播、回放都记），修正过程按它画
+        self.run_block: RunBlock | None = None     # 正在往里放过程消息的折叠块
+        self._in_process = False
         self.picked_attempt: int | None = None     # 在修正过程里点选的那一次尝试
         self.backend = None
         self.replay: ReplayPlayer | None = None
@@ -532,7 +592,15 @@ class ChatPage(QWidget):
 
     # ------------------------------------------------------------ 消息
 
-    def _add(self, w: QWidget, align=None):
+    def _add(self, w: QWidget, align=None, summary: str = ""):
+        if self._in_process and align is None:
+            if self.run_block is None or self.run_block.done:
+                self.run_block = RunBlock()
+                self.msgs.insertWidget(self.msgs.count() - 1, self.run_block)
+            self.run_block.add(w, summary)
+            return w
+        if self.run_block is not None and not self.run_block.done:
+            self.run_block.finish()                      # 主线插进一条（要你决定的事、总结）：前面这段过程收尾，后面另起一段
         if align is not None:
             row = QHBoxLayout()
             row.addStretch(1)
@@ -551,11 +619,12 @@ class ChatPage(QWidget):
     def add_agent(self, name, role, text, meta="", brief=None) -> AgentMessage:
         m = AgentMessage(name, role, text, meta, brief)
         m.show_brief.connect(self.show_brief)
-        self._add(m)
+        self._add(m, summary=f"{ROLE_NAMES.get(role, name)}：{text.splitlines()[0] if text else ''}".replace("*", ""))
         return m
 
     def add_line(self, *parts, bg=False):
-        return self._add(line_widget(*parts, bg=bg))
+        words = [p if isinstance(p, str) else p.text() for p in parts if isinstance(p, (str, QLabel))]
+        return self._add(line_widget(*parts, bg=bg), summary=" ".join(w for w in words if w))
 
     def clear(self):
         while self.msgs.count() > 1:
@@ -566,6 +635,7 @@ class ChatPage(QWidget):
                 w.deleteLater()
         self.view = RunView()
         self.seen_events = []
+        self.run_block = None
         self.replay_btn.setVisible(False)
         self.graph.refresh(self.view)
         self.pending = None
@@ -831,8 +901,8 @@ class ChatPage(QWidget):
         if not v.run_id:
             return ""
         elapsed = (v.last_ts - v.started) if v.started else 0
-        return (f"运行 {v.run_id}　用时 {int(elapsed // 60):02d}:{int(elapsed % 60):02d}　token {v.tokens:,}"
-                f"　费用 {v.cost:.2f} 元" + (f"　结论 {VERDICT_NAMES.get(v.verdict, v.verdict)}" if v.verdict else ""))
+        return (f"运行 {v.run_id}　用时 {int(elapsed // 60):02d}:{int(elapsed % 60):02d}"
+                + (f"　结论 {VERDICT_NAMES.get(v.verdict, v.verdict)}" if v.verdict else ""))
 
     def _update_flow_states(self, e):
         t, d = e.get("type"), e.get("data", {})
@@ -849,6 +919,17 @@ class ChatPage(QWidget):
             self.flow.set_states(states)
 
     def _narrate(self, e: dict):
+        """过程消息放进折叠块；运行结束的总结和"停下等人"放主线（DECISIONS 第 107 条）。"""
+        t = e.get("type")
+        self._in_process = t not in ("run_finished", "human_wait")
+        try:
+            self._narrate_one(e)
+        finally:
+            self._in_process = False
+        if t == "run_finished" and self.run_block is not None:
+            self.run_block.finish()
+
+    def _narrate_one(self, e: dict):
         t, d, node = e.get("type"), e.get("data", {}), e.get("node_id")
         if self.view.embedded and self._narrate_embedded(t, d, node):
             return
@@ -890,9 +971,7 @@ class ChatPage(QWidget):
         elif t == "agent_finished" and d.get("ok") is False:
             self.add_line(f"{d.get('agent')} 调用失败：{d.get('error')}", bg=True)
         elif t == "run_finished":
-            v = d.get("verdict")
-            self.add_agent("FirmForge", "reviewer", f"运行结束：**{VERDICT_NAMES.get(v, v)}**。共 {d.get('attempts')} 次尝试，"
-                           f"token {d.get('tokens'):,}，费用 {d.get('cost', 0):.2f} 元，用时 {d.get('wall_s')} 秒。")
+            self._summary(d)
 
     def _narrate_embedded(self, t: str, d: dict, node: str | None) -> bool:
         """新流程的事件怎么讲（DECISIONS 第 100 条）。返回 True 表示已经处理，不再走旧流程的讲法。"""
@@ -947,12 +1026,27 @@ class ChatPage(QWidget):
         elif t == "escalated" and d.get("level") == "rule":
             self.add_line(f"{node} 对规则 {d.get('rule')} 有异议，交给规则判定器重新核对")
         elif t == "run_finished":
-            v = d.get("verdict")
-            self.add_agent("FirmForge", "reviewer", f"流程结束：**{VERDICT_NAMES.get(v, v)}**。token {int(d.get('tokens') or 0):,}，"
-                           f"费用 {float(d.get('cost') or 0):.2f} 元。" + (f"\n\n{d['error']}" if d.get("error") else ""))
+            self._summary(d)
         else:
             return False
         return True
+
+    def _summary(self, d: dict) -> None:
+        """运行结束的总结：结论、每个模块过没过；点按钮看模块的修正过程或导出代码。不讲 token 和费用。"""
+        v = d.get("verdict")
+        mods = list(self.view.modules.values())
+        ok = [m.id for m in mods if m.status == "done"]
+        bad = [m.id for m in mods if m.status != "done"]
+        lines = [f"**{VERDICT_NAMES.get(v, v)}**" + (f"：{len(ok)} 个模块通过" if mods else "")
+                 + (f"，{len(bad)} 个没完成（{'、'.join(bad)}）" if bad else "") + "。"]
+        if d.get("error"):
+            lines.append(str(d["error"]))
+        m = self.add_agent("FirmForge", "reviewer", "\n\n".join(lines))
+        if mods:
+            first = bad[0] if bad else mods[0].id
+            m.add_action("看修正过程", lambda: (self.select_module(first), self.tabs.setCurrentWidget(self.timeline)))
+        if self.run_dir is not None:
+            m.add_action("导出代码", self.export_code)
 
     # ------------------------------------------------------------ 需要人回答
 
@@ -1182,6 +1276,15 @@ class ChatPage(QWidget):
                 self.on_event(e)
         finally:
             self.setUpdatesEnabled(True)
+        if self.run_block is not None:                    # 历史记录不会还在跑（即使当初被强制结束、没有结束事件）
+            self.run_block.finish()
+        judge = run_dir / "judge_report.txt"              # 评测题：流程自己的结论之外，还有隐藏测试的判定
+        if judge.is_file():
+            from PySide6.QtWidgets import QMessageBox
+            text = judge.read_text(encoding="utf-8", errors="replace").strip()
+            last = text.splitlines()[-1] if text else "（没有内容）"
+            m = self.add_agent("FirmForge", "reviewer", f"隐藏测试判定：{last}\n\n隐藏测试只给评测判定用，任何 Agent 都看不到。")
+            m.add_action("看判定报告", lambda: QMessageBox.information(self, "隐藏测试判定", text[:4000]))
         mods = list(self.view.modules.values())
         pick = next((m for m in mods if m.status == "failed"), mods[0] if mods else None)
         if pick is not None:                              # 默认选中出问题的模块（没有就第一个），直接看到修正过程

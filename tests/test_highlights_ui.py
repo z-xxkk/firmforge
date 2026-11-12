@@ -306,6 +306,16 @@ class HighlightsGuiTest(unittest.TestCase):
             self.assertEqual(len(page.seen_events), len(EMB_EVENTS) + 2)
             self.assertEqual(page.graph.selected, "m")                      # 自动选中模块，直接看到修正过程
             self.assertIs(page.tabs.currentWidget(), page.timeline)
+            from firmforge.gui.chat_page import RunBlock
+            blocks = page.findChildren(RunBlock)
+            self.assertTrue(blocks and blocks[-1].done)                     # 过程折叠，结束后标"过程 · N 步"
+            self.assertIn("过程", blocks[-1].head.text())
+            (rd / "judge_report.txt").write_text("共 4 个用例，通过 3，失败 1", encoding="utf-8")
+            page.open_run(rd)                                               # 评测运行：显示隐藏测试判定
+            from firmforge.gui.chat_page import AgentMessage
+            texts = [m.body.text() for m in page.findChildren(AgentMessage)]
+            self.assertTrue(any("隐藏测试判定" in t and "通过 3" in t for t in texts))
+            self.assertFalse(any("元" in t and "费用" in t for t in texts))
             page.replay_btn.click()                                         # 从头回放
             self.assertIsNotNone(page.replay)
             self.assertTrue(page.replay_bar.isVisibleTo(page))

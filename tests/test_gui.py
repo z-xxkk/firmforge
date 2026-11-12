@@ -153,7 +153,15 @@ class GuiSmokeTest(unittest.TestCase):
             # 缺交叉工具链或 cppcheck 时对应层是 skipped，结论只能是 incomplete（规则 4）
             expected = "pass" if helpers.HAS_CROSS and helpers.HAS_CPPCHECK else "incomplete"
             self.assertEqual(page.view.verdict, expected)
-            self.assertGreater(page.msgs.count(), 5)
+            from firmforge.gui.chat_page import RunBlock
+            blocks = page.findChildren(RunBlock)               # 过程消息折叠进去（DECISIONS 第 107 条）
+            self.assertTrue(blocks and sum(b.steps for b in blocks) > 5)
+            self.assertTrue(all(b.done for b in blocks))
+            self.assertFalse(blocks[0].body.isVisible())          # 默认收起
+            blocks[0].head.click()
+            self.assertTrue(blocks[0].body.isVisibleTo(page))
+            self.assertNotIn("费用", page._run_text())            # 对话页不显示花费和 token
+            self.assertNotIn("token", page._run_text())
             page.select_module("a")
             self.assertIn("ringbuf", page.code_view.toPlainText())
             w.close()
