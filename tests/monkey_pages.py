@@ -110,7 +110,7 @@ def fake_world(rng: random.Random):
 
 
 class PageMonkey:
-    PAGES = ["chat", "hw", "eval", "team", "set", "flow"]
+    PAGES = ["chat", "hw", "team", "set", "flow"]
 
     def __init__(self, window, rng: random.Random):
         self.w, self.rng = window, rng
@@ -250,7 +250,7 @@ def stop_backends(window):
     """停掉猴子点出来的后台运行，等所有后台线程结束（和关窗口时做的一样）。"""
     from PySide6.QtWidgets import QApplication
     from firmforge.gui.runner import shutdown_workers
-    for owner in (window.chat, window.hardware, window.evalp):
+    for owner in (window.chat, window.hardware):
         b = getattr(owner, "backend", None)
         if b is not None:
             try:

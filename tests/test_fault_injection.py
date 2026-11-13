@@ -380,19 +380,6 @@ class GuiFaultTest(unittest.TestCase):
         self.assertFalse(page.errors_label.isHidden())
         self.assertEqual(self.errors, [])
 
-    def test_truncated_eval_results_page(self):
-        # 评测页读到最后一行写坏的 runs.jsonl：照常显示前面的结果
-        from firmforge.gui.eval_page import EvalPage
-        out = self.sandbox / "results" / "board_full"
-        if not (out / "runs.jsonl").is_file():
-            self.skipTest("没有上一轮评测数据")
-        with (out / "runs.jsonl").open("a", encoding="utf-8") as f:
-            f.write('{"task": "x", "con')
-        page = EvalPage(self.sandbox)
-        page.out_combo.setEditText("results/board_full")
-        page.refresh()
-        self.assertEqual(page.out_dir, out)
-        self.assertEqual(self.errors, [])
 
 
 if __name__ == "__main__":

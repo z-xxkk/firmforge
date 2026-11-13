@@ -1,4 +1,4 @@
-"""界面的随机操作测试（猴子 + 不变量）和后台运行（对话页上板运行、硬件页提炼规则、评测页）的测试。
+"""界面的随机操作测试（猴子 + 不变量）和后台运行（对话页上板运行）的测试。
 
 猴子测试每次只跑几个种子、每个几十步，保证全部测试几分钟内跑完；要长跑用 tests/monkey_designer.py、tests/monkey_pages.py。
 后台运行用假模型、"找不到 ESP-IDF 和板子"的假环境，在项目副本里跑，不联网、不花钱、不动真实的规则库。
@@ -184,10 +184,10 @@ class MonkeyFoundTest(unittest.TestCase):
         class Busy:
             def stop(self):
                 stop.append(1)
-        w.evalp.backend = Busy()
+        w.chat.backend = Busy()
         job = _Worker(lambda: __import__("time").sleep(0.3))
         job.start()
-        self.assertIn("评测页的评测", w.busy())
+        self.assertIn("对话页的运行", w.busy())
         with mock.patch("PySide6.QtWidgets.QMessageBox.question", lambda *a, **k: __import__("PySide6.QtWidgets",
                         fromlist=["QMessageBox"]).QMessageBox.No):
             w.close()
@@ -197,7 +197,7 @@ class MonkeyFoundTest(unittest.TestCase):
             w.close()
         self.assertEqual(stop, [1])
         self.assertFalse(any(x.isRunning() for x in LIVE_WORKERS))
-        w.evalp.backend = None
+        w.chat.backend = None
 
     def test_settings_worker_without_result(self):
         # 设置页的后台任务被中途停掉、没有结果时：提示，不报错
@@ -249,7 +249,7 @@ class TryRunTest(unittest.TestCase):
 
 @unittest.skipUnless(HAS_QT, "需要 PySide6（在 firmforge-gui 镜像里跑）")
 class BackendTest(unittest.TestCase):
-    """对话页、硬件页、评测页的后台运行（覆盖率最低的一块）。"""
+    """对话页的后台运行（覆盖率最低的一块）。"""
 
     @classmethod
     def setUpClass(cls):
@@ -328,25 +328,6 @@ class BackendTest(unittest.TestCase):
         self.assertIn(info.get("verdict"), ("fail", "incomplete", "error", "pass"))
         rules = json.loads((self.sandbox / "hardware" / "esp32c3_supermini" / "rules.json").read_text(encoding="utf-8"))
         self.assertNotIn("R-UART-001", [r["id"] for r in rules])           # 驳回了，没有入库
-
-    def test_rules_backend_and_eval_backend_errors(self):
-        # 硬件页提炼规则：查不到东西也能正常结束并报告；评测页：没有 ESP-IDF 时开始不了，并说明原因
-        from firmforge.embedded.workspace import WorkspaceError
-        from firmforge.gui.runner import BOARD_USERS, EvalBackend, RulesBackend
-        r = RulesBackend()
-        r.start(project=self.sandbox, hw="hardware/esp32c3_supermini", scopes=["uart"], runs_dir=self.sandbox / ".ff_runs")
-        info = wait_for(r, 120000)
-        self.assertEqual(info["error"], "")
-        self.assertIn("missing", info)
-        e = EvalBackend()
-        with self.assertRaises(WorkspaceError) as cm:
-            e.start(project=self.sandbox, hw="hardware/esp32c3_supermini", task_ids=["ledc_pwm"], configs=["single"],
-                    runs=1, out_dir=self.sandbox / "results" / "x", max_cost=1.0)
-        self.assertIn("ESP-IDF", str(cm.exception))
-        self.assertNotIn(e, BOARD_USERS)                                   # 开始不了也要释放板子
-        with self.assertRaises(WorkspaceError):
-            e.start(project=self.sandbox, hw="hardware/esp32c3_supermini", task_ids=["ledc_pwm"], configs=["single"],
-                    runs=1, out_dir=self.sandbox / "results" / "x", max_cost=0)
 
 
 if __name__ == "__main__":

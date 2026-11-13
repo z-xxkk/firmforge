@@ -128,11 +128,11 @@ class GuiSmokeTest(unittest.TestCase):
 
     def test_pages_build_and_switch(self):
         w = self.window()
-        for i in range(6):
+        for i in range(5):
             w.go(i)
             self.app.processEvents()
-        self.assertEqual(w.stack.count(), 6)
-        self.assertEqual(w.page_keys, ["chat", "hw", "eval", "flow", "team", "set"])
+        self.assertEqual(w.stack.count(), 5)
+        self.assertEqual(w.page_keys, ["chat", "hw", "flow", "team", "set"])         # 评测页去掉了（第 116 条）
         w.go("hw")
         self.assertIs(w.stack.currentWidget(), w.hardware)
         self.assertGreater(w.team.table.rowCount(), 5)
@@ -180,7 +180,7 @@ class GuiSmokeTest(unittest.TestCase):
         w.close()
 
     def test_board_is_used_by_one_run_at_a_time(self):
-        # 对话页的上板运行和评测页不能同时用板子（两边会同时烧录同一个串口）
+        # 同一时间只能有一个运行用板子（对话页的上板运行和命令行评测会同时烧录同一个串口）
         from firmforge.embedded.workspace import WorkspaceError
         from firmforge.gui.runner import BOARD_USERS, claim_board
 
@@ -196,27 +196,6 @@ class GuiSmokeTest(unittest.TestCase):
             BOARD_USERS.discard(a)
         claim_board(b, "评测")
         BOARD_USERS.discard(b)
-
-    def test_eval_page_reads_results(self):
-        w = self.window()
-        ep = w.evalp
-        base = Path(helpers.ROOT) / ".ff_data"
-        base.mkdir(exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=base) as d:
-            rows = [{"task": "ledc_pwm", "config": c, "run": 1, "verdict": v, "failed_layer": fl, "cases_passed": cp,
-                     "cases_total": 6, "failed_cases": [], "cost": 0.1, "run_dir": "", "note": ""}
-                    for c, v, fl, cp in (("single", "pass", "", 6), ("none", "fail", "board_test", 5))]
-            (Path(d) / "runs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-            ep.out_combo.setEditText(Path(d).relative_to(helpers.ROOT).as_posix())
-            ep.refresh()
-            last = ep.table.rowCount() - 1
-            texts = {ep.table.horizontalHeaderItem(j).text(): (ep.table.item(last, j).text() if ep.table.item(last, j) else "")
-                     for j in range(1, ep.table.columnCount())}
-            self.assertEqual((texts["single"], texts["none"]), ("1 / 1", "0 / 1"))
-            self.assertEqual(ep.layers.item(1, 3).text(), "1")              # none 有 1 次卡在上板测试
-            ep._load_dirs()                                                  # 评测结束会重新列目录：自己填的目录不能被换掉
-            self.assertEqual(ep.out_combo.currentText(), Path(d).relative_to(helpers.ROOT).as_posix())
-        w.close()
 
     def test_embedded_replay_shows_board_test(self):
         # 回放一次新流程：模块卡片三段，点模块看到上板测试的用例和代码

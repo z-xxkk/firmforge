@@ -35,14 +35,18 @@ def _icon(kind: str, color: str) -> QIcon:
         path.addRoundedRect(QRectF(3, 5, 18, 12), 3, 3)
         p.drawPath(path)
         p.drawLine(QPointF(8, 17), QPointF(6, 20))
-    elif kind == "hw":                      # 插头：最简单的"硬件"示意，不画电路板
-        p.drawRoundedRect(QRectF(4, 7, 16, 11), 3, 3)
-        p.drawLine(QPointF(9, 7), QPointF(9, 4.5))
-        p.drawLine(QPointF(15, 7), QPointF(15, 4.5))
-        p.drawLine(QPointF(8.5, 12.5), QPointF(15.5, 12.5))
-    elif kind == "eval":
-        for x, y in ((5, 11), (12, 5), (19, 13)):
-            p.drawLine(QPointF(x, 19), QPointF(x, y))
+    elif kind == "hw":                      # 翻开的书：知识库
+        left = QPainterPath(QPointF(12, 7))
+        left.cubicTo(QPointF(9.5, 5.2), QPointF(6, 5), QPointF(3.5, 5.5))
+        left.lineTo(QPointF(3.5, 18))
+        left.cubicTo(QPointF(6, 17.5), QPointF(9.5, 17.7), QPointF(12, 19.5))
+        right = QPainterPath(QPointF(12, 7))
+        right.cubicTo(QPointF(14.5, 5.2), QPointF(18, 5), QPointF(20.5, 5.5))
+        right.lineTo(QPointF(20.5, 18))
+        right.cubicTo(QPointF(18, 17.5), QPointF(14.5, 17.7), QPointF(12, 19.5))
+        p.drawPath(left)
+        p.drawPath(right)
+        p.drawLine(QPointF(12, 7), QPointF(12, 19.5))
     elif kind == "flow":
         p.drawRoundedRect(QRectF(3, 3.5, 7, 5), 2, 2)
         p.drawRoundedRect(QRectF(14, 15.5, 7, 5), 2, 2)
@@ -105,17 +109,15 @@ class MainWindow(QMainWindow):
         self.buttons = {}
         from .chat_page import ChatPage
         from .designer_page import DesignerPage
-        from .eval_page import EvalPage
         from .knowledge_page import KnowledgePage
         from .settings_page import SettingsPage
         from .team_page import TeamPage
         self.chat = ChatPage(project)
         self.hardware = KnowledgePage(project)
-        self.evalp = EvalPage(project)
         self.designer = DesignerPage(project)
         self.team = TeamPage(project)
         self.settings = SettingsPage(project)
-        pages = [("chat", "对话", self.chat), ("hw", "知识库", self.hardware), ("eval", "评测", self.evalp),
+        pages = [("chat", "对话", self.chat), ("hw", "知识库", self.hardware),
                  ("flow", "工作流", self.designer), ("team", "团队", self.team), ("set", "设置", self.settings)]
         self.page_keys = [k for k, _, _ in pages]
         for i, (key, text, page) in enumerate(pages):
@@ -137,7 +139,6 @@ class MainWindow(QMainWindow):
         self.chat.open_designer.connect(self._designer_ai)
         self.chat.run_done.connect(self.hardware.reload)
         self.hardware.rules_changed.connect(lambda: self.chat.refresh_status(self.chat._run_text()))
-        self.evalp.open_run.connect(self._open_run)
         self.designer.try_run.connect(self._try_run)
         self.settings.theme_changed.connect(self.apply_theme)
         st = QSettings()
@@ -168,8 +169,7 @@ class MainWindow(QMainWindow):
         set_theme(t)
         QApplication.instance().setStyleSheet(th.stylesheet(t))
         self._paint_icons()
-        if hasattr(self, "evalp"):                       # 新加的三页里有按主题算好的颜色，换主题时重画
-            self.evalp.restyle()
+        if hasattr(self, "hardware"):                    # 知识库里有按主题算好的颜色，换主题时重画
             self.hardware.reload()
             self.chat.refresh_status(self.chat._run_text())
         for page in (self.chat, self.designer):
@@ -195,10 +195,6 @@ class MainWindow(QMainWindow):
         self.go("chat")
         self.chat.input.insertPlainText(f"@{sid} ")
         self.chat.input.setFocus()
-
-    def _open_run(self, run_dir: str):
-        self.go("chat")
-        self.chat.open_run(Path(run_dir))
 
     def _designer_ai(self, instruction: str):
         self.go("flow")
@@ -245,7 +241,7 @@ class MainWindow(QMainWindow):
     def busy(self) -> list[str]:
         """还没结束的运行（关窗口前问一声）。"""
         from .runner import LIVE_WORKERS
-        names = [text for owner, text in ((self.chat, "对话页的运行"), (self.evalp, "评测页的评测"))
+        names = [text for owner, text in ((self.chat, "对话页的运行"),)
                  if getattr(owner, "backend", None) is not None]
         if not names and any(w.isRunning() for w in LIVE_WORKERS):
             names.append("一次模型调用")
@@ -262,7 +258,7 @@ class MainWindow(QMainWindow):
             if ans != QMessageBox.Yes:
                 ev.ignore()
                 return
-            for owner in (self.chat, self.hardware, self.evalp):
+            for owner in (self.chat, self.hardware):
                 b = getattr(owner, "backend", None)
                 if b is not None:
                     try:
@@ -275,7 +271,6 @@ class MainWindow(QMainWindow):
         st.setValue("window/page_key", self.page_keys[self.stack.currentIndex()])
         self.chat.save_layout()
         self.hardware.save_layout()
-        self.evalp.save_layout()
         self.designer.save_layout()
         super().closeEvent(ev)
 
