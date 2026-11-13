@@ -656,12 +656,12 @@ firmforge mcp                            以 stdio 方式启动 MCP 服务（可
 - **样式**：浅色简约、圆角分档、松石绿唯一强调色，跟随系统深浅色；相邻面板之间是可拖动的分隔条，关闭时用 `QSettings` 记住布局。
 - **嵌入式新流程**（DECISIONS 第 100 条，`tasks_inbox/gui_sketch_board.md`）：左侧竖栏加"硬件""评测"，共六个工作区。
   - 对话页的"流程"选"上板"：写一句需求跑完整流程，或选一道上板评测题按某种配置跑一次（最后用隐藏测试判定）；模块卡片三段进度（合规、编译、测试）；详情区有"上板测试"（从每次尝试的 `serial.log` 解析出用例，没通过的展开原因，下面是串口原文）和"用到的规则"；底部状态栏显示板子、串口、ESP-IDF、规则库条数。
-  - 硬件页：硬件档案（每个值标来源）、实测记录、规则库（按状态筛选）、规则详情（原文高亮、位标注、核对每一步）；在这里逐条通过或驳回规则，全部表态后提交，流程继续；也可以在这里发起"查资料提炼规则"。
+  - 知识库页（DECISIONS 第 114、115 条，替换原来的硬件页）：`grounding/catalog.py` 把各板子目录里的资料、规则、手册和实测对不上的地方排成固定目录——芯片 → 开发框架（ESP-IDF，按外设）→ 外接器件（按类别）→ 开发板；中间是这一格的说明（芯片能力读自 ESP-IDF 的 soc_caps.h、板子的硬件档案、器件参数）和条目，右边是依据（引用原文、手册原页、核对经过）。能搜索、能驳回已在用但错了的规则；新规则的确认在对话里做（`gui/rule_review.py`）。
   - 评测页：选题目、配置、次数、花费上限，先看要跑多少次和预计花费；结果直接读输出目录的 `runs.jsonl`（终端跑的评测也能看），题目 × 配置每次运行一个小方块，点开在对话页回放；"暂停"在正在跑的一次结束后停下，再开始接着跑。
   - 要上板的运行一律用本机后端（`EmbeddedBackend`、`RulesBackend`、`EvalBackend`），不进 docker：Docker Desktop 在 Windows 上不能把 USB 板子交给容器。
   - 命令行和界面共用 `embedded/workspace.py` 读硬件目录、建流程、建评测上下文、建规则流程。
   - 工程图和接线图（DECISIONS 第 109、113 条）：`embedded/project_map.py` 从运行目录算数据（design.json、wiring.json、每个模块最后交的代码、串口日志和电脑测试报告），`gui/project_map_view.py` 画工程图（ProjectMapView）和接线图（WiringView），对话页上板流程时用"工程图 / 接线图 / 流程图"开关切换，事件来了合并成一次重画，"展开"后积木列出接口、连线写出用到的函数。
-  - 亮点展示（DECISIONS 第 105 条）：对话页"过程"标签按已经发生的事件画修正时间线（`board_view.repair_timeline`），点某次尝试切换下面各标签；硬件页"在手册里看原文"打开原页窗口（`page_viewer.py`，图片和单词位置来自 `grounding/pagepic.py` 调 poppler），"手册和板子对不上"对照卡读 `hardware/<板子>/conflicts.json`（`grounding/conflicts.py` 加载时核对原句和实测记录）。
+  - 亮点展示（DECISIONS 第 105 条）：对话页"过程"标签按已经发生的事件画修正时间线（`board_view.repair_timeline`），点某次尝试切换下面各标签；知识库和对话里的规则卡片"看手册原页"打开原页窗口（`page_viewer.py`，图片和单词位置来自 `grounding/pagepic.py` 调 poppler），"手册和板子对不上"对照卡读 `hardware/<板子>/conflicts.json`（`grounding/conflicts.py` 加载时核对原句和实测记录）。
 
 ## 13. 工具与 MCP（DECISIONS 第 63 条）
 

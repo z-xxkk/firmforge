@@ -247,8 +247,7 @@ def line_widget(*parts, indent: int = 36, bg: bool = False) -> QWidget:
 
 class ChatPage(QWidget):
     open_designer = Signal(str)          # /workflow 指令转给设计器
-    review_rules = Signal(dict, object)  # 规则等人确认：交给硬件页，确认完调用回调（DECISIONS 第 100 条）
-    run_done = Signal()                  # 一次运行结束（规则可能入库了，硬件页要重新读）
+    run_done = Signal()                  # 一次运行结束（规则可能入库了，知识库要重新读）
     source_added = Signal(object, str)   # 拖进来的资料登记完（后台线程发出，DECISIONS 第 114 条）
 
     def __init__(self, project: Path, parent=None):
@@ -711,7 +710,7 @@ class ChatPage(QWidget):
                        f"登记好了：**{doc.title}**（编号 {doc.id}，{pages}校验值 {doc.sha256[:12]}…）。\n\n"
                        f"记在 {self.hw}/sources.toml，等级是\"用户提供\"（不算官方资料）。查资料 Agent 提炼规则时能检索它，"
                        f"从它提炼的规则照样要核对原文、等你确认。")
-        self.run_done.emit()                               # 硬件页、知识库重新读资料
+        self.run_done.emit()                               # 知识库重新读资料
 
     def add_user(self, text: str):
         self._add(Bubble(text), align="right")

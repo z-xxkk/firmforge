@@ -106,16 +106,16 @@ class MainWindow(QMainWindow):
         from .chat_page import ChatPage
         from .designer_page import DesignerPage
         from .eval_page import EvalPage
-        from .hardware_page import HardwarePage
+        from .knowledge_page import KnowledgePage
         from .settings_page import SettingsPage
         from .team_page import TeamPage
         self.chat = ChatPage(project)
-        self.hardware = HardwarePage(project)
+        self.hardware = KnowledgePage(project)
         self.evalp = EvalPage(project)
         self.designer = DesignerPage(project)
         self.team = TeamPage(project)
         self.settings = SettingsPage(project)
-        pages = [("chat", "对话", self.chat), ("hw", "硬件", self.hardware), ("eval", "评测", self.evalp),
+        pages = [("chat", "对话", self.chat), ("hw", "知识库", self.hardware), ("eval", "评测", self.evalp),
                  ("flow", "工作流", self.designer), ("team", "团队", self.team), ("set", "设置", self.settings)]
         self.page_keys = [k for k, _, _ in pages]
         for i, (key, text, page) in enumerate(pages):
@@ -135,8 +135,7 @@ class MainWindow(QMainWindow):
         body.addWidget(rail)
         body.addWidget(self.stack, 1)
         self.chat.open_designer.connect(self._designer_ai)
-        self.chat.review_rules.connect(self._review_rules)
-        self.chat.run_done.connect(lambda: self.hardware.pending or self.hardware.reload())
+        self.chat.run_done.connect(self.hardware.reload)
         self.hardware.rules_changed.connect(lambda: self.chat.refresh_status(self.chat._run_text()))
         self.evalp.open_run.connect(self._open_run)
         self.designer.try_run.connect(self._try_run)
@@ -171,8 +170,7 @@ class MainWindow(QMainWindow):
         self._paint_icons()
         if hasattr(self, "evalp"):                       # 新加的三页里有按主题算好的颜色，换主题时重画
             self.evalp.restyle()
-            if not self.hardware.pending:
-                self.hardware.reload()
+            self.hardware.reload()
             self.chat.refresh_status(self.chat._run_text())
         for page in (self.chat, self.designer):
             for view in (getattr(page, "graph", None), getattr(page, "flow", None), getattr(page, "canvas", None)):
@@ -197,10 +195,6 @@ class MainWindow(QMainWindow):
         self.go("chat")
         self.chat.input.insertPlainText(f"@{sid} ")
         self.chat.input.setFocus()
-
-    def _review_rules(self, payload: dict, done):
-        self.go("hw")
-        self.hardware.begin_review(payload, done)
 
     def _open_run(self, run_dir: str):
         self.go("chat")
@@ -251,8 +245,7 @@ class MainWindow(QMainWindow):
     def busy(self) -> list[str]:
         """还没结束的运行（关窗口前问一声）。"""
         from .runner import LIVE_WORKERS
-        names = [text for owner, text in ((self.chat, "对话页的运行"), (self.hardware, "硬件页的查资料提炼规则"),
-                                          (self.evalp, "评测页的评测"))
+        names = [text for owner, text in ((self.chat, "对话页的运行"), (self.evalp, "评测页的评测"))
                  if getattr(owner, "backend", None) is not None]
         if not names and any(w.isRunning() for w in LIVE_WORKERS):
             names.append("一次模型调用")

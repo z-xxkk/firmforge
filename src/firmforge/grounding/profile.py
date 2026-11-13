@@ -42,6 +42,7 @@ class Device:
     # 软复位：{"reg": 寄存器, "value": 写入值, "wait_ms": 等待毫秒}。上板测试每个用例前用它复位器件（DECISIONS 第 96 条），
     # 不写进 hw_config.h
     reset: Fact | None = None
+    category: str = ""          # 知识库目录里的类别，例如 运动传感器（DECISIONS 第 114 条）；不进提示词
 
 
 @dataclass(frozen=True)

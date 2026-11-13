@@ -370,13 +370,14 @@ class GuiFaultTest(unittest.TestCase):
         self.assertTrue(all(f.is_file() and str(f).startswith(str(dest)) for f in files))
 
     def test_broken_rule_library_is_shown(self):
-        # 规则库文件坏了：硬件页明说读不了，不能显示成"0 条已确认"让人以为是空的
-        from firmforge.gui.hardware_page import HardwarePage
-        page = HardwarePage(self.sandbox)
-        rules = self.sandbox / page.hw / "rules.json"
+        # 规则库文件坏了：知识库明说读不了，不能显示成"没有规则"让人以为是空的
+        from firmforge.gui.knowledge_page import KnowledgePage
+        page = KnowledgePage(self.sandbox)
+        rules = self.sandbox / "hardware" / "esp32c3_supermini" / "rules.json"
         rules.write_text('[{"id": "R-1", ', encoding="utf-8")
         page.reload()
-        self.assertIn("读不了", page.rules_sub.text())
+        self.assertIn("读不了", page.errors_label.text())
+        self.assertFalse(page.errors_label.isHidden())
         self.assertEqual(self.errors, [])
 
     def test_truncated_eval_results_page(self):

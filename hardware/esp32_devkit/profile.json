@@ -119,7 +119,8 @@
         },
         "origin": "document",
         "note": "mpu6050-rm p.42 PWR_MGMT_1 的 DEVICE_RESET：When set to 1, this bit resets all internal registers to their default values；等待 100 ms 是默认值"
-      }
+      },
+      "category": "运动传感器"
     },
     {
       "name": "ppg",
@@ -137,7 +138,8 @@
         },
         "origin": "document",
         "note": "max30102-ds Mode Configuration(0x09) Bit 6 RESET：registers are reset to their power-on-state"
-      }
+      },
+      "category": "光学传感器"
     }
   ]
 }

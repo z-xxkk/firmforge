@@ -166,29 +166,17 @@ class GuiSmokeTest(unittest.TestCase):
             self.assertIn("ringbuf", page.code_view.toPlainText())
             w.close()
 
-    def test_hardware_page_reviews_rules(self):
-        # 在界面上确认规则（DECISIONS 第 100 条）：驳回必须写理由；全部表态后才能提交
+    def test_knowledge_page_directory(self):
+        # 知识库只做目录（DECISIONS 第 114 条）：固定层级、能搜索；审核在对话里
         w = self.window()
-        hp = w.hardware
-        self.assertGreater(hp.list.rowCount(), 10)                       # 读出了规则库
-        rule = {"id": "R-T-001", "kind": "register", "scope": ["max30102"], "text": "DIE_TEMP_RDY 在 bit1",
-                "cite": {"doc": "max30102-ds", "page": 12, "section": "", "quote": "Interrupt Status 2"},
-                "tier": "official_manual", "status": "checked", "check": None, "notes": [],
-                "steps": [[0, "ok", "资料已登记"], [2, "ok", "找到原文"]]}
-        got = {}
-        hp.begin_review({"pending": [rule, dict(rule, id="R-T-002")], "escalated": []}, got.update)
-        self.assertFalse(hp.submit_btn.isEnabled())
-        hp.current = dict(rule, status="pending")
-        hp.decide("reject")                                              # 没写理由：不算
-        self.assertNotIn("R-T-001", hp.decisions)
-        hp.comment.setText("位置写错了")
-        hp.decide("reject")
-        hp.current = dict(rule, id="R-T-002", status="pending")
-        hp.decide("approve")
-        self.assertTrue(hp.submit_btn.isEnabled())
-        hp.submit()
-        self.assertEqual(got, {"R-T-001": ("reject", "位置写错了"), "R-T-002": ("approve", "")})
-        self.assertEqual(hp.pending, [])
+        kp = w.hardware
+        tops = [kp.tree.topLevelItem(i).text(0) for i in range(kp.tree.topLevelItemCount())]
+        self.assertEqual(tops[:4], ["芯片", "开发框架", "外接器件", "开发板"])
+        kp.search.setText("WHO_AM_I")
+        self.assertIn("搜索", kp.crumb.text())
+        self.assertGreater(kp.list.count(), 1)
+        kp.search.clear()
+        self.assertEqual(kp.crumb.text().split(" / ")[0], "芯片")
         w.close()
 
     def test_board_is_used_by_one_run_at_a_time(self):

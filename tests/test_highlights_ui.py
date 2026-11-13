@@ -327,20 +327,22 @@ class HighlightsGuiTest(unittest.TestCase):
             page.open_run(rd)                                               # 记录坏了：说明原因，不崩
         self.assertEqual(self.errors, [])
 
-    def test_hardware_page_viewer_and_conflicts(self):
-        from PySide6.QtWidgets import QFrame
-        from firmforge.gui.hardware_page import HardwarePage
-        page = HardwarePage(ROOT)
-        cards = [f for f in page.prof_box.findChildren(QFrame) if f.objectName() == "ConflictCard"]
-        if (LIB_DIR / "sources.json").is_file():
-            self.assertEqual(len(cards), 2)
-        rule = next((r for r in page.rules if r.get("cite", {}).get("doc") == "max30102-ds" and r["cite"].get("page")), None)
+    def test_knowledge_page_viewer_and_conflicts(self):
+        from firmforge.gui.knowledge_page import KnowledgePage
+        page = KnowledgePage(ROOT)
+        page.select_path(("board", "esp32c3_supermini"))
+        conflicts = [page.list.item(i).data(0x0100) for i in range(page.list.count())]
+        conflicts = [e for e in conflicts if e is not None and e.kind == "conflict"]
+        self.assertEqual(len(conflicts), 2)                            # 手册和实测对不上的两处
+        rule = next((e for e in page.catalog.all_entries() if e.kind == "rule"
+                     and e.data.get("cite", {}).get("doc") == "max30102-ds" and e.data["cite"].get("page")), None)
         if rule is None:
             self.skipTest("规则库里没有引用 MAX30102 手册的规则")
-        page.current = rule
-        page.open_cited_page()
+        page.reveal(rule)
+        self.assertIs(page.current, rule)
+        page.open_page(rule.data["cite"]["doc"], int(rule.data["cite"]["page"]), rule.data["cite"]["quote"])
         v = page.viewers[-1]
-        self.assertIn(f"第 {rule['cite']['page']} 页", v.windowTitle())
+        self.assertIn(f"第 {rule.data['cite']['page']} 页", v.windowTitle())
         if HAS_POPPLER and (RAW / "max30102.pdf").is_file():
             self.assertTrue(v.has_image)
             self.assertIn("绿框", v.note.text())
