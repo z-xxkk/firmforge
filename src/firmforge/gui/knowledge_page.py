@@ -557,8 +557,18 @@ class KnowledgePage(QWidget):
             self.comment.setPlaceholderText("驳回要写一句理由：这条规则哪里错了")
             self.comment.setFocus()
             return False
-        for b in e.boards:
-            reject_rule(self.project / "hardware" / b / "rules.json", e.id, reason)
+        from ..grounding.rules import RuleSet
+        paths = [self.project / "hardware" / b / "rules.json" for b in e.boards]
+        try:
+            for p in paths:                                    # 先确认每份规则库都读得了，免得只改了一半
+                if e.id not in RuleSet.load(p).rules:
+                    raise ValueError(f"{p} 里没有 {e.id}")
+            for p in paths:
+                reject_rule(p, e.id, reason)
+        except (ValueError, OSError) as exc:                   # RuleError 也是 ValueError
+            self.reject_note.setText(f"没驳回成功：{exc}")
+            self.reject_note.setVisible(True)
+            return False
         keys = self.key_path
         self.reload()
         self.select_path(keys)

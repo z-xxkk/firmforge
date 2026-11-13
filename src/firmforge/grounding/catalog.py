@@ -263,10 +263,10 @@ def _title_for(key: str, parent: Node) -> str:
 
 
 def _doc_place(did: str, d: dict, chips: list[str], parts: dict, board: str) -> tuple[str, ...]:
+    """先按内容归（器件型号、ESP-IDF 头文件、芯片名）；都对不上的用户资料（实测记录等）才归到登记它的板子。
+    拖进对话的手册等级也是 user，但它是某个器件或芯片的手册，要归到器件或芯片下面。"""
     low = did.lower()
     title = str(d.get("title", "")).lower()
-    if d.get("tier") == "user":
-        return ("board", board)
     for p, (cat, _part) in parts.items():
         if p and (low.startswith(p) or p in title):
             return ("device", cat, p)
@@ -274,10 +274,13 @@ def _doc_place(did: str, d: dict, chips: list[str], parts: dict, board: str) -> 
         tokens = low.replace("_", "-").split("-")
         hit = [t for t in tokens if t in PERIPHERALS]
         return ("framework", "idf", min(hit, key=PERIPHERALS.index) if hit else OTHER_PERIPHERAL)
+    compact = low.replace("-", "").replace("_", "")       # 拖进来的 esp32-c3_datasheet 编号是 esp32-c3-datasheet
     for c in sorted(chips, key=len, reverse=True):          # esp32c3 先于 esp32
-        if low.startswith(c + "-"):
+        if compact.startswith(c):
             return ("chip", c)
-    return ("other",)
+    if d.get("tier") == "user" and d.get("added") != "chat":    # 实测记录等：归到登记它的板子
+        return ("board", board)
+    return ("other",)                                         # 拖进来、认不出是哪个器件的手册
 
 
 def _rule_place(r: dict, docs: dict, doc_place: dict, parts: dict, chip: str, board: str) -> tuple[str, ...]:

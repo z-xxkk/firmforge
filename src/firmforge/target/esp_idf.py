@@ -35,7 +35,7 @@ SDKCONFIG_DEFAULTS = {
 }
 
 
-def sdkconfig_for(target: str, profile: HardwareProfile | None = None) -> str:
+def sdkconfig_for(target: str) -> str:
     """原来支持的三种芯片用固定配置（评测编译结果不变）；其他芯片按 ESP-IDF 的 soc_caps.h 生成（DECISIONS 第 114 条）。"""
     if target in SDKCONFIG_DEFAULTS:
         return SDKCONFIG_DEFAULTS[target]
@@ -43,8 +43,7 @@ def sdkconfig_for(target: str, profile: HardwareProfile | None = None) -> str:
     caps = load_caps(target)
     if caps is None:
         raise ValueError(f"不支持的芯片 {target}：ESP-IDF 里没有它的 soc_caps.h（{idf_path()}）")
-    flash = getattr(profile, "flash_mb", None) if profile is not None else None
-    return sdkconfig_defaults(caps, flash.value if hasattr(flash, "value") else flash)
+    return sdkconfig_defaults(caps)          # Flash 大小用 ESP-IDF 的默认值（硬件档案还没有 Flash 大小这一项）
 
 
 _GCC_DIAG = re.compile(r"^(?P<file>[^:\n]+):(?P<line>\d+):(?:(?P<col>\d+):)?\s*(?P<kind>error|warning|fatal error):\s*(?P<msg>.+)$",
@@ -196,7 +195,7 @@ class IdfProject:
         top = (f"cmake_minimum_required(VERSION 3.22)\ninclude($ENV{{IDF_PATH}}/tools/cmake/project.cmake)\n"
                f"project({self.name})\n")
         _write_if_changed(self.root / "CMakeLists.txt", top)
-        _write_if_changed(self.root / "sdkconfig.defaults", sdkconfig_for(self.target, profile))
+        _write_if_changed(self.root / "sdkconfig.defaults", sdkconfig_for(self.target))
         for rel, content in files.items():
             rel = rel.replace("\\", "/").lstrip("/")
             if rel.startswith("..") or "/../" in rel:

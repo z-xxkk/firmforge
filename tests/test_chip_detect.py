@@ -66,6 +66,22 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(mismatch(ChipInfo(error="x"), "esp32s3"), "")          # 没识别出来：不下结论
 
 
+class RetryTest(unittest.TestCase):
+    def test_failed_detection_is_retried(self):
+        # 第一次识别失败（串口被占用）不记住，下次再试；识别出来以后就不再跑 esptool（代码审查发现的问题）
+        from unittest import mock
+        from firmforge.target import board as bmod
+        with tempfile.NamedTemporaryFile() as port:
+            r = bmod.BoardRunner.__new__(bmod.BoardRunner)
+            r.idf, r.port, r._chip = type("I", (), {"python": "py"})(), port.name, None
+            answers = [parse_esptool(FAIL), parse_esptool(V5)]
+            with mock.patch.object(bmod, "detect_chip", side_effect=lambda *a: answers.pop(0)) as det:
+                self.assertFalse(r.chip().ok)
+                self.assertEqual(r.chip().target, "esp32c3")
+                self.assertEqual(r.chip().target, "esp32c3")
+            self.assertEqual(det.call_count, 2)
+
+
 class FakeBoard:
     def __init__(self, info):
         self.info, self.runs = info, 0

@@ -132,7 +132,13 @@ def module_problems(name: str, steps: tuple[Step, ...], registry) -> list[str]:
     if not any(s.kind == "verify" for s in steps):
         problems.append(f"{where}要有检查步骤")
 
-    done: set[str] = set()                   # 按执行顺序走到这一步时，已经做过的事：coder / tester / verify
+    # 按执行顺序走到这一步时，一定已经做过的事：coder / tester / verify。在条件分支里、带 when 或 enabled_by 的
+    # 步骤不一定执行，不算数——否则检查器放行了，跑起来编码步骤被跳过，修正循环就没有代码可改
+    done: set[str] = set()
+
+    def sure(x: Step, nested: bool) -> bool:
+        return not nested and not x.when and not x.enabled_by
+
     def visit(s: Step, nested: bool) -> None:
         _cond_problems(s, MODULE_CONDITIONS, where, problems)
         if s.kind == "agent":
@@ -142,7 +148,8 @@ def module_problems(name: str, steps: tuple[Step, ...], registry) -> list[str]:
             if s.role == "reviewer" and "verify" not in done:
                 problems.append(f"{where}的步骤 {s.id}：审查要放在检查之后（检查通过才审）")
             _agent_problems(s, registry, problems)
-            done.add(s.role)
+            if sure(s, nested):
+                done.add(s.role)
         elif s.kind == "parallel":
             kids = [by[b] for b in s.branches if b in by]
             if sorted(k.role for k in kids if k.kind == "agent") != ["coder", "tester"] or len(kids) != 2:
@@ -151,13 +158,16 @@ def module_problems(name: str, steps: tuple[Step, ...], registry) -> list[str]:
                 _cond_problems(k, MODULE_CONDITIONS, where, problems)
                 if k.kind == "agent":
                     _agent_problems(k, registry, problems)
-                    done.add(k.role or "")
+                    if sure(s, nested) and sure(k, False):
+                        done.add(k.role or "")
         elif s.kind == "verify":
             if s.scope != "module":
                 problems.append(f"{where}的步骤 {s.id}：检查只能检查本模块（scope = module）")
             if not {"coder", "tester"} <= done:
-                problems.append(f"{where}的步骤 {s.id}：第一次检查之前，编码和写测试都要做过")
-            done.add("verify")
+                problems.append(f"{where}的步骤 {s.id}：第一次检查之前，编码和写测试都要做过"
+                                f"（不能只放在条件分支里或带执行条件）")
+            if sure(s, nested):
+                done.add("verify")
         elif s.kind == "loop":
             if s.body != "repair_round":
                 problems.append(f"{where}的步骤 {s.id}：循环只支持修正循环（body = repair_round）")

@@ -32,6 +32,15 @@ class ParseTest(unittest.TestCase):
         self.assertNotIn("twai", c.peripherals)
         self.assertFalse(c.usb_serial_jtag)
 
+    def test_mask_with_minus(self):
+        # ((1U<<SOC_GPIO_PIN_COUNT) - 1) 写法：要能算，不能退回"全部引脚"（代码审查发现的问题）
+        text = ("#define SOC_GPIO_PIN_COUNT (62)\n"
+                "#define SOC_GPIO_VALID_GPIO_MASK (((1ULL << SOC_GPIO_PIN_COUNT) - 1) & ~(0ULL | BIT29 | BIT41))\n")
+        c = parse_caps("x", text)
+        self.assertEqual(len(c.gpios), 60)
+        self.assertNotIn(29, c.gpios)
+        self.assertNotIn(41, c.gpios)
+
     def test_mask_only_arithmetic(self):
         self.assertEqual(_eval_mask("BIT3 | 0x1ULL", {}), 9)
         self.assertIsNone(_eval_mask("__import__('os')", {}))
@@ -60,6 +69,16 @@ class RealIdfTest(unittest.TestCase):
             c = load_caps(t)
             self.assertEqual((c.gpios, c.input_only, c.usb_serial_jtag, set(c.peripherals)),
                              (b.gpios, b.input_only, b.usb_serial_jtag, set(b.peripherals)), t)
+
+    def test_every_target_mask_parses(self):
+        import re
+        from firmforge.target.soc_caps import _DEFINE
+        for t in list_targets(idf_path()):
+            defs = {k: v.strip() for k, v in _DEFINE.findall(caps_file(idf_path(), t).read_text(encoding="utf-8"))}
+            if "SOC_GPIO_VALID_GPIO_MASK" in defs:
+                self.assertIsNotNone(_eval_mask(defs["SOC_GPIO_VALID_GPIO_MASK"], defs), t)
+        if "esp32s31" in list_targets(idf_path()):
+            self.assertEqual(len(load_caps("esp32s31").gpios), 60)
 
     def test_new_chip_from_idf(self):
         self.assertIn("esp32p4", list_targets(idf_path()))

@@ -42,12 +42,13 @@ _DEFINE = re.compile(r"^\s*#define\s+(SOC_\w+)\s+(.+?)\s*(?://.*|/\*.*)?$", re.M
 
 
 def _eval_mask(expr: str, defs: dict[str, str]) -> int | None:
-    """算 SOC_GPIO_VALID_GPIO_MASK 这类表达式：只认数字、BITn、已定义的宏和 & | ~ << ( )。"""
+    """算 SOC_GPIO_VALID_GPIO_MASK 这类表达式：只认数字、BITn、已定义的宏和 & | ~ << >> + - ( )。
+    ((1U<<SOC_GPIO_PIN_COUNT) - 1) 这种写法要有减号（C 系列、S31 都这么写）。"""
     for _ in range(5):                                   # 展开引用到的其他宏
         expr = re.sub(r"\bSOC_\w+\b", lambda m: f"({defs[m.group(0)]})" if m.group(0) in defs else m.group(0), expr)
     expr = re.sub(r"\bBIT(\d+)\b", r"(1<<\1)", expr)
     expr = re.sub(r"\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]+\b", r"\1", expr)
-    if not re.fullmatch(r"[0-9a-fA-FxX()\s&|~<>]+", expr):
+    if not re.fullmatch(r"[0-9a-fA-FxX()\s&|~<>+\-]+", expr):
         return None
     try:
         return int(eval(expr, {"__builtins__": {}}, {}))      # noqa: S307  只剩数字和位运算

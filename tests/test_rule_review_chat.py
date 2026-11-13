@@ -74,6 +74,28 @@ class ChatReviewTest(unittest.TestCase):
         self.assertEqual(Backend.got, {"R-GPIO-001": ("approve", ""), "R-X": ("reject", "引用不对")})
         self.assertIsNone(page.pending)
 
+    def test_typed_text_is_not_an_answer(self):
+        # 规则卡片、工具审批等你点按钮时，输入框里打的字不能当成审核结果或"允许"（代码审查发现的问题）
+        from firmforge.gui.chat_page import ChatPage
+
+        class Backend:
+            got = []
+
+            def answer(self, v):
+                Backend.got.append(v)
+        page = ChatPage(Path(helpers.ROOT))
+        page.hw = "hardware/esp32c3_supermini"
+        page.backend = Backend()
+        for kind, payload in (("rules", {"pending": [RULE], "escalated": []}),
+                              ("approve", {"agent": "coder", "tool": "shell", "args": {}})):
+            page.pending = None
+            page.on_ask(kind, payload)
+            page.input.setPlainText("不行，等等")
+            page.send()
+            self.assertEqual(Backend.got, [])                         # 没交上去
+            self.assertIsNotNone(page.pending)                        # 还在等
+            self.assertEqual(page.input.toPlainText(), "不行，等等")     # 打的字留着
+
     @unittest.skipUnless(shutil.which("pdftoppm") and (Path(helpers.ROOT) / ".ff_sources/raw/esp32-c3_datasheet_en.pdf").is_file(),
                          "没有 poppler 或手册原件")
     def test_page_shown_beside_rule(self):

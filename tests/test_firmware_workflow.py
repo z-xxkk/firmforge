@@ -106,6 +106,11 @@ class WorkflowCheckTest(unittest.TestCase):
             "规则在设计后": lambda d: d["main"].insert(3, d["main"].pop(0)),
             "主流程用分层条件": lambda d: d["main"][2].update(when="hardware_layer"),
             "没有编码": lambda d: (drop(sub(d), "write"), drop(sub(d), "code")),
+            "编码带条件": lambda d: next(s for s in sub(d) if s["id"] == "code").update(when="hardware_layer"),
+            "并行带条件": lambda d: sub(d)[0].update(enabled_by="human_review"),
+            "编码只在分支里": lambda d: (drop(sub(d), "write"),
+                                       sub(d).insert(0, {"id": "c", "kind": "condition", "if": "hardware_layer",
+                                                          "then": ["code"]})),
             "并行三个分支": lambda d: (sub(d)[0]["branches"].append("rev"),
                                      sub(d).append({"id": "rev", "kind": "agent", "role": "reviewer"})),
         }
@@ -366,6 +371,20 @@ class InterpreterTest(unittest.TestCase):
             res, events, _ = run_flow(d, FakeTeam(), variant(add))
         self.assertNotIn("按你的意见改", purposes(events))
 
+    def test_module_checkpoint_comment_that_breaks_is_reverted(self):
+        # 按人的意见改坏了已经通过的模块：退回通过的版本，不让模块变成没通过（代码审查发现的问题）
+        class Breaks(FakeTeam):
+            def __call__(self, messages):
+                if "负责人看了这个模块" in messages[-1]["content"]:
+                    return files(("conv.c", CONV_BAD), ("include/conv.h", CONV_H))
+                return super().__call__(messages)
+        add = lambda d: sub(d).append({"id": "look", "kind": "human"})              # noqa: E731
+        with tempfile.TemporaryDirectory() as d:
+            res, events, _ = run_flow(d, Breaks(), variant(add), confirm_module=lambda m, mr, v: "改一下")
+        self.assertEqual(res.modules["conv"].verdict, "pass")
+        self.assertIn("x * 2", res.modules["conv"].files["conv.c"])
+        self.assertTrue(any(e["type"] == "human_reverted" for e in events))
+
     def test_random_accepted_workflows_all_run(self):
         # 检查器放行的结构解释器都能跑完（DECISIONS 第 117 条：不会"图上能存、跑起来出错"）
         import random
@@ -384,13 +403,15 @@ class InterpreterTest(unittest.TestCase):
             {"id": "rev2", "kind": "agent", "role": "reviewer"},
             {"id": "check2", "kind": "verify", "scope": "module", "when": "attempts_exhausted"},
             {"id": "code2", "kind": "agent", "role": "coder"},
+            {"id": "gate2", "kind": "condition", "if": "hardware_layer", "then": ["code3"]},   # 检查器应拦下的
+            {"id": "code3", "kind": "agent", "role": "coder", "when": "logic_layer"},
         ]
         rng = random.Random(117)
         ran = 0
-        for k in range(40):
+        for k in range(150):
             steps = rng.choice(blocks)() + [dict(x) for x in rng.sample(tail, rng.randint(1, len(tail)))]
             ids = {x["id"] for x in steps}
-            if "gate" in ids and "rev2" not in ids:
+            if ("gate" in ids) != ("rev2" in ids) or ("gate2" in ids) != ("code3" in ids):
                 continue
             data = copy.deepcopy(BASE)
             data["subflow"]["board_module"]["steps"] = steps

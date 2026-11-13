@@ -168,7 +168,7 @@ class LocalBackend(Backend):
             return (ans or "") == "", ans or ""
 
         def approve_cb(agent, tool, args):
-            return bool(self._wait("approve", {"agent": agent, "tool": tool, "args": args}))
+            return self._wait("approve", {"agent": agent, "tool": tool, "args": args}) is True   # 只有点了"允许"才算
 
         def job():
             store = Store()

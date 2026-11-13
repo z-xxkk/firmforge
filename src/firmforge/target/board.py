@@ -73,12 +73,15 @@ class BoardRunner:
         self._chip: ChipInfo | None = None
 
     def chip(self) -> ChipInfo | None:
-        """识别板子上的芯片（只识别一次）；没有串口返回 None。"""
+        """识别板子上的芯片：识别出来就记住；没识别出来（串口被占用等）下次再试。没有串口返回 None。"""
         if self.port is None or not (self.port.startswith("COM") or Path(self.port).exists()):
             return None
-        if self._chip is None:
-            self._chip = detect_chip(self.idf.python, self.port)
-        return self._chip
+        if self._chip is not None:
+            return self._chip
+        info = detect_chip(self.idf.python, self.port)
+        if info.ok:
+            self._chip = info
+        return info
 
     def run(self, project: IdfProject, log_path: Path | None = None) -> BoardTestResult:
         """project 必须已经编译成功。"""

@@ -251,6 +251,9 @@ class FirmwareInterpreter:
 
     def _revise_code(self, run: ModuleRun, msg: str, pin=None, purpose: str = "改代码") -> None:
         f, m = self.flow, run.m
+        if run.c_conv is None:                             # 还没写过（检查器会拦，这里兜底）：当第一次写
+            self._take_code(run, *self._first_code(run, pin if pin is not None else run.coder_pin))
+            return
         coder, bucket = f._pick_coder(m, run.attempt + 1, pinned=pin if pin is not None else run.coder_pin)
         before = (f.result.prompt_tokens + f.result.completion_tokens, f.result.cost, time.time())
         run.c_conv, o = f._ask_files(coder, run.c_conv + [{"role": "user", "content": msg}], m.id, set(m.files), None,
@@ -291,7 +294,10 @@ class FirmwareInterpreter:
             if diag["blame"] == "rule":
                 f.bus.emit("escalated", m.id, level="rule", rule=diag["rule"], note=diag["instruction"])
                 run.rules = f._dispute_rule(run.rules, diag)
-            if diag["blame"] == "test":
+            if diag["blame"] == "test" and run.t_conv is None:      # 还没写过测试（兜底）：当第一次写
+                run.t_conv, tout = self._first_test(run, run.tester_pin, self._interface(run))
+                mr.tests.update(tout.files)
+            elif diag["blame"] == "test":
                 msg = tester_repair_message(run.attempt, limit, run.report, mr.files, diag)
                 run.t_conv, tout = f._ask_files(run.tester_pin or "tester", run.t_conv + [{"role": "user", "content": msg}],
                                                 m.id, {test_file(m)}, {test_file(m)}, attempt=run.attempt + 1, purpose="改测试")
@@ -337,8 +343,15 @@ class FirmwareInterpreter:
         comment = (ask(m, mr, run.verdict) or "").strip()
         if not comment:
             return
+        was_pass, keep = run.verdict == "pass", dict(mr.files)
         self._revise_code(run, human_fix_message(comment), purpose="按你的意见改")
         self._verify(run)
+        if was_pass and run.verdict != "pass":             # 按意见改坏了一个已经通过的模块：退回改之前的版本
+            mr.files.clear()
+            mr.files.update(keep)
+            run.verdict, run.passed_files = "pass", keep
+            f.bus.emit("human_reverted", m.id, attempt=run.attempt,
+                       note="按你的意见改了以后没通过检查，退回改之前通过的版本")
 
     def _finish_module(self, run: ModuleRun) -> None:
         f, m, mr = self.flow, run.m, run.mr

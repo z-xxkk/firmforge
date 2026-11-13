@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -349,7 +350,16 @@ class SourceLibrary:
 
 # ---------------------------------------------------------------- 资料清单
 
+# 同一个进程里登记资料（界面后台线程）和运行时按清单取文字（运行线程）都会改写缓存，一次只让一个来
+_CACHE_LOCK = threading.RLock()
+
+
 def load_manifest(manifest: Path, raw_dir: Path, cache_root: Path) -> SourceLibrary:
+    with _CACHE_LOCK:
+        return _load_manifest(manifest, raw_dir, cache_root)
+
+
+def _load_manifest(manifest: Path, raw_dir: Path, cache_root: Path) -> SourceLibrary:
     """按资料清单（sources.toml，进仓库）登记资料：原件在 raw_dir（不进仓库），先核对 sha256 再取文字；
     取过的文字缓存在 cache_root，指纹没变就直接用缓存（1500 页的手册取一次要几十秒）。"""
     import tomllib
@@ -387,6 +397,12 @@ def _toml_str(s: str) -> str:
 
 def register_source(manifest: Path, raw_dir: Path, cache_root: Path, file: Path, *, title: str = "",
                     url: str = "", version: str = "") -> tuple[Document, bool]:
+    with _CACHE_LOCK:
+        return _register_source(manifest, raw_dir, cache_root, file, title=title, url=url, version=version)
+
+
+def _register_source(manifest: Path, raw_dir: Path, cache_root: Path, file: Path, *, title: str = "",
+                    url: str = "", version: str = "") -> tuple[Document, bool]:
     """把用户给的一份资料登记进资料清单：算指纹、复制原件到 raw_dir、追加到 sources.toml、提取文字。
     同一份文件（指纹相同）已经登记过就直接返回它，第二个值是 False。用户给的资料等级是 user（不算官方）。"""
     file = Path(file)
@@ -422,7 +438,7 @@ def register_source(manifest: Path, raw_dir: Path, cache_root: Path, file: Path,
         import shutil
         shutil.copyfile(file, target)
     doc = load_document(target, id=doc_id, title=title or file.stem, kind=kind, tier="user", url=url, version=version)
-    block = (f"\n[[doc]]\n# 用户在对话里拖进来的资料\nid = {_toml_str(doc_id)}\ntitle = {_toml_str(doc.title)}\n"
+    block = (f"\n[[doc]]\n# 用户在对话里拖进来的资料\nid = {_toml_str(doc_id)}\ntitle = {_toml_str(doc.title)}\nadded = \"chat\"\n"
              f"kind = {_toml_str(kind)}\ntier = \"user\"\nversion = {_toml_str(version)}\nurl = {_toml_str(url)}\n"
              f"file = {_toml_str(name)}\nsha256 = {_toml_str(digest)}\n")
     manifest.write_text(text.rstrip("\n") + ("\n" if text.strip() else "") + block, encoding="utf-8")

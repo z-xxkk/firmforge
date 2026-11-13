@@ -685,14 +685,12 @@ class ChatPage(QWidget):
             self.add_line(f"正在登记 {f.name}：算校验值、提取文字……", bg=True)
             threading.Thread(target=self._register_one, args=(Path(f),), daemon=True).start()
 
-    _register_lock = threading.Lock()
-
     def _register_one(self, f: Path):
         from ..grounding.sources import register_source
         try:
-            with ChatPage._register_lock:                  # 两份同时拖进来：资料清单一份一份地写
-                doc, added = register_source(self.project / self.hw / "sources.toml", self.project / ".ff_sources" / "raw",
-                                             self.project / ".ff_sources" / "library", f)
+            # 两份同时拖进来、或者运行正在取资料文字：核心库里有锁，一份一份地写
+            doc, added = register_source(self.project / self.hw / "sources.toml", self.project / ".ff_sources" / "raw",
+                                         self.project / ".ff_sources" / "library", f)
             self.source_added.emit((f, doc, added), "")
         except Exception as exc:                           # noqa: BLE001  登记失败要告诉用户，不能当成功
             self.source_added.emit((f, None, False), str(exc))
@@ -1237,6 +1235,8 @@ class ChatPage(QWidget):
                 self.add_line(f"{node} 审查：没发现必须改的问题" + (f"（另有 {len(d.get('issues', []))} 条建议）" if d.get("issues") else ""))
         elif t == "review_reverted":
             self.add_line(Dot(T()["run"]), f"{node} 按审查意见改了以后没通过检查，退回改之前通过的版本")
+        elif t == "human_reverted":
+            self.add_line(Dot(T()["run"]), f"{node} 按你的意见改了以后没通过检查，退回改之前通过的版本；可以换个说法再提")
         elif t == "human_wait" and node != "rules":
             self.add_agent("FirmForge", "reviewer", f"模块 **{node}** 停下了：{d.get('reason', '')}\n\n{d.get('instruction', '')}")
         elif t == "escalated" and d.get("level") == "rule":
@@ -1337,6 +1337,10 @@ class ChatPage(QWidget):
     def _answer_pending(self, text: str):
         kind, payload, msg = self.pending
         if not text:
+            return
+        if kind in ("rules", "approve"):                   # 这两种只能点按钮：打的字不能当成审核结果或"允许"
+            where = "上面的规则卡片里逐条点通过或驳回" if kind == "rules" else "上面点「允许」或「拒绝」"
+            self.add_line(f"这句话没有发出去：现在要先在{where}。", bg=True)
             return
         self.input.clear()
         self.add_user(text)

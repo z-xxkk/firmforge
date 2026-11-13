@@ -51,6 +51,20 @@ class RealCatalogTest(unittest.TestCase):
         self.assertTrue(any(e.id == "C-001" for e in hits))
         self.assertEqual(self.cat.search("   "), [])
 
+    def test_dragged_manuals_go_by_content(self):
+        # 拖进对话的手册等级是 user，但要按内容归到器件或芯片（代码审查发现的问题）
+        from firmforge.grounding.catalog import _doc_place
+        parts = {"mpu6050": ("运动传感器", "MPU6050")}
+        chips = ["esp32", "esp32c3", "esp32s3"]
+        drop = {"tier": "user", "kind": "pdf", "added": "chat"}
+        self.assertEqual(_doc_place("esp32-c3-datasheet-en", {**drop, "title": "x"}, chips, parts, "b"), ("chip", "esp32c3"))
+        self.assertEqual(_doc_place("esp32-s3-trm", {**drop, "title": "x"}, chips, parts, "b"), ("chip", "esp32s3"))
+        self.assertEqual(_doc_place("ps-mpu", {**drop, "title": "MPU6050 手册"}, chips, parts, "b"),
+                         ("device", "运动传感器", "mpu6050"))
+        self.assertEqual(_doc_place("bh1750", {**drop, "title": "BH1750"}, chips, parts, "b"), ("other",))
+        self.assertEqual(_doc_place("board-measured", {"tier": "user", "kind": "text", "title": "实测记录"},
+                                    chips, parts, "b"), ("board", "b"))          # 实测记录仍归板子
+
     def test_helpers(self):
         self.assertEqual(chip_title("esp32c3"), "ESP32-C3")
         self.assertEqual(chip_title("esp32"), "ESP32")
@@ -108,6 +122,29 @@ class PageRejectTest(unittest.TestCase):
             self.assertIs(page.current, e2)
             self.assertTrue(page.reject_row.isHidden())                               # 驳回过的不能再驳回
             self.assertEqual(got, [1])
+
+    def test_reject_reports_broken_rule_file(self):
+        # 规则库里有一条缺字段的规则：驳回失败要明说，不能悄悄失败（代码审查发现的问题）
+        from PySide6.QtCore import QCoreApplication
+        from firmforge.gui import theme as th
+        from firmforge.gui.knowledge_page import KnowledgePage
+        from firmforge.gui.widgets import set_theme
+        QApplication.instance() or QApplication([])
+        QCoreApplication.setOrganizationName("FirmForgeCatalogTest")
+        set_theme(th.current(False))
+        with tempfile.TemporaryDirectory() as d:
+            proj = Path(d)
+            shutil.copytree(ROOT / "hardware" / "esp32c3_supermini", proj / "hardware" / "esp32c3_supermini")
+            p = proj / "hardware" / "esp32c3_supermini" / "rules.json"
+            data = json.loads(p.read_text(encoding="utf-8"))
+            data.append({"id": "R-BAD-001", "status": "trusted", "text": "缺出处"})
+            p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            page = KnowledgePage(proj)
+            page.reveal(next(x for x in page.catalog.all_entries() if x.id == "R-GPIO-001"))
+            page.comment.setText("页码写错了")
+            self.assertFalse(page.reject_current())
+            self.assertIn("没驳回成功", page.reject_note.text())
+            self.assertEqual(json.loads(p.read_text(encoding="utf-8")), data)          # 文件没被改
 
 
 if __name__ == "__main__":
