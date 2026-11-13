@@ -120,6 +120,10 @@ class EngineProblemsTest(unittest.TestCase):
             Engine(RB, FULL, llm=FakeLLM([]), settings=SETTINGS, runs_root=d, workflow=bad)
 
 
+# 没有交叉编译器或 cppcheck 时，对应的判定层是 skipped，结论最多是 incomplete（CLAUDE.md 硬性规则 4）
+FULL_PASS = "pass" if helpers.HAS_CROSS and helpers.HAS_CPPCHECK else "incomplete"
+
+
 class RelaxedEngineTest(_Tmp):
     def wf_with_accept(self, note="审查之后等人验收"):
         wf = load_workflow()
@@ -134,7 +138,7 @@ class RelaxedEngineTest(_Tmp):
             return (info["node"] != "a" or len([x for x in asked if x["node"] == "a"]) > 1), "请加注释"
         res, llm, events = self.run_m(B3, rb_team(), workflow=self.wf_with_accept(), human_review=True,
                                       human=lambda plan: (True, ""), checkpoint=checkpoint)
-        self.assertEqual(res.verdict, "pass")
+        self.assertEqual(res.verdict, FULL_PASS)
         a_info = [x for x in asked if x["node"] == "a"][0]
         self.assertEqual((a_info["step"], a_info["note"]), ("accept", "审查之后等人验收"))
         coder_a = [m for r, md, m in llm._script.log if r == "coder" and md == "a"]
@@ -145,7 +149,7 @@ class RelaxedEngineTest(_Tmp):
     def test_checkpoint_skipped_without_human_review(self):
         res, llm, events = self.run_m(B3, rb_team(), workflow=self.wf_with_accept(),
                                       checkpoint=lambda info: self.fail("评测模式不该问人"))
-        self.assertEqual(res.verdict, "pass")
+        self.assertEqual(res.verdict, FULL_PASS)
         self.assertFalse([e for e in events if e["type"] == "human_wait"])
 
     def test_main_checkpoint_after_modules_can_reject(self):

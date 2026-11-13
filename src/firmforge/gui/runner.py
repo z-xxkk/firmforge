@@ -270,7 +270,10 @@ class EmbeddedBackend(Backend):
         try:
             settings = config.load_settings()
             llm = OpenAICompatClient.from_settings(settings)
-            hwc = load_hw(project / hw, need_sources=(rule_mode != "none") or config_name == "unverified", root=project)
+            # 评测题只有 unverified 要现查手册（和命令行 board-eval 一样）；single、none、verified 用不到手册原件。
+            # 写需求跑：不是 none 模式就可能要查资料提炼规则
+            need = (config_name == "unverified") if task_id else (rule_mode != "none")
+            hwc = load_hw(project / hw, need_sources=need, root=project)
         except Exception:
             BOARD_USERS.discard(self)
             raise

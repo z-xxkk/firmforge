@@ -6,7 +6,13 @@ import unittest
 from pathlib import Path
 
 import helpers
-from firmforge.gui.rule_review import review_points
+
+try:                                     # rule_review 在 gui 包里，导入就要 Qt 的运行库（没装时跳过，不报错）
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from firmforge.gui.rule_review import review_points
+    HAS_QT = True
+except ImportError:
+    HAS_QT = False
 
 RULE = {"id": "R-GPIO-001", "kind": "pin", "scope": ["gpio"], "tier": "official_manual", "status": "pending",
         "text": "GPIO12–GPIO17 接封装内 SPI Flash，不要分配给外设",
@@ -17,6 +23,7 @@ RULE2 = {**RULE, "id": "R-X", "tier": "user", "cite": {"doc": "notes", "page": N
          "reasons": ["引用找不到"]}
 
 
+@unittest.skipUnless(HAS_QT, "需要 PySide6 和 Qt 运行库")
 class PointsTest(unittest.TestCase):
     def test_points(self):
         p = review_points(RULE)

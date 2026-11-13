@@ -283,7 +283,7 @@ python3 -m unittest discover -s tests -v
 | 操作系统 | Ubuntu 24.04.5 LTS（x86_64）；只在 Linux 上开发和测试，没有做 Windows（DECISIONS 第 101 条） |
 | Python | 3.12.3（要求 ≥ 3.11） |
 | 核心库依赖 | 只用 Python 标准库 |
-| 可选依赖 | 桌面软件 `PySide6-Essentials`（≥ 6.7，测试用 6.12.0）；读 PDF 资料 `pypdf`（≥ 5，测试用 6.21.4）；界面上显示手册原页用 poppler 的 `pdftoppm`、`pdftotext`（Ubuntu 的 `poppler-utils` 包，测试用 24.02.0；没有时只显示文字，不影响判定） |
+| 可选依赖 | 桌面软件 `PySide6-Essentials`（≥ 6.7，本机测试用 6.12.0，界面测试镜像里是 6.9.1）；读 PDF 资料 `pypdf`（≥ 5，测试用 6.21.4）；界面上显示手册原页用 poppler 的 `pdftoppm`、`pdftotext`（Ubuntu 的 `poppler-utils` 包，测试用 24.02.0；没有时只显示文字，不影响判定） |
 | Docker | 29.1.3；判定器的工具链（gcc、arm-none-eabi-gcc、cppcheck、gcov）装在镜像里 |
 | ESP-IDF | v6.1，默认装在 `~/esp/esp-idf-v6.1`，也可以用环境变量 `FF_IDF_PATH` 或 `IDF_PATH` 指定 |
 | 大模型 | DeepSeek（OpenAI 兼容接口），API key 放在 `.env` |
@@ -302,12 +302,21 @@ python3 -m unittest discover -s tests -v
 
 ### 部署步骤
 
+0. 系统软件包（新装的 Ubuntu 默认没有 `python3-venv`，不装的话下一步建虚拟环境会失败；`poppler-utils` 可选，用来在界面上显示手册原页）：
+   ```bash
+   sudo apt install git python3-venv poppler-utils
+   ```
+   桌面版 Ubuntu 自带桌面软件要的 Qt 运行库；在服务器版或精简环境里还要装
+   `libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 libglib2.0-0 fonts-noto-cjk`
+   （和 `docker/Dockerfile.gui` 里的一样）。没装时桌面软件打不开，对应的单元测试会跳过。
 1. 取代码，建虚拟环境，装可选依赖：
    ```bash
    git clone https://github.com/z-xxkk/firmforge.git && cd firmforge
    python3 -m venv .venv
    .venv/bin/pip install -e ".[gui,sources]"
    ```
+   桌面软件的 PySide6 有 84 MB。2026-11-14 在全新的 Ubuntu 24.04 容器里照这一步装，直连 PyPI 用了 47 分钟；
+   下载慢时可以换国内镜像，例如在命令后面加 `-i https://pypi.tuna.tsinghua.edu.cn/simple`。
 2. 构建判定器镜像：
    ```bash
    docker build -t firmforge -f docker/Dockerfile .
@@ -320,6 +329,8 @@ python3 -m unittest discover -s tests -v
    .venv/bin/firmforge doctor
    .venv/bin/python -m unittest discover -s tests
    ```
+   本机没装判定器工具链（gcc、arm-none-eabi-gcc、cppcheck）、Qt 运行库或手册原件时，用到它们的测试会跳过并写明原因，
+   不会报错；全部测试要在 Docker 镜像里跑（`docker/Dockerfile.gui`）。
 7. 板子插好以后，自检上板评测题（标准答案要通过、变异体要被抓住，不调用模型、不花钱）：
    ```bash
    .venv/bin/firmforge check-board-tasks --board
@@ -329,6 +340,16 @@ python3 -m unittest discover -s tests -v
    .venv/bin/firmforge gui
    ```
    想在桌面的"显示应用"里直接点开，运行一次 `.venv/bin/firmforge gui --install-shortcut`（`--remove-shortcut` 去掉）。
+
+### 手册原件
+
+芯片手册、器件手册有版权，不放进仓库。`hardware/<板子>/sources.toml` 里每份资料都写了官方下载网址（`url`）、
+放到哪里（`file`，相对于 `.ff_sources/raw/`）和校验值（`sha256`）；ESP-IDF 头文件取自本机装的 v6.1 源码树
+（`file` 里的 `__` 对应路径分隔符）。平台读资料前会核对校验值，对不上就报错，不会用错的文件。
+
+要用到手册原件的功能：对话里写需求跑上板流程（默认规则模式要查资料提炼规则）、`firmforge rules build`、
+评测的 unverified 配置。不需要原件的：评测题的 single、none、verified 配置（verified 用仓库里已确认的规则库）、
+全部单元测试、判定器、知识库页浏览（页数、原页图片要原件才显示）。
 
 ### 没有板子时能复现什么
 

@@ -304,6 +304,8 @@ class BackendTest(unittest.TestCase):
         self.assertNotEqual(info["judge"]["verdict"], "pass")
         self.assertTrue(any(e["type"] == "run_started" for e in events))
 
+    @unittest.skipUnless((helpers.ROOT / ".ff_sources" / "raw").is_dir(),
+                         "没有资料原件（.ff_sources/raw，手册有版权、不进仓库，按资料清单下载后才能跑）")
     def test_embedded_spec_asks_for_rule_review(self):
         # 写需求 + 规则库：规则库缺规则时查资料，核对后等人确认（ask("rules")），确认后流程继续
         import tomllib  # noqa: F401
