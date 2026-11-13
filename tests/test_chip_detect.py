@@ -19,6 +19,23 @@ MAC:                aa:bb:cc:dd:ee:ff
 Detected flash size: 4MB
 Hard resetting via RTS pin...
 """
+# 负责人的 ESP32-C3 SuperMini 实测输出（2026-11-13，esptool v5.6.0）
+REAL_C3 = """Connecting...
+Detecting chip type... ESP32-C3
+Connected to ESP32-C3 on /dev/ttyACM0:
+Chip type:          ESP32-C3 AZ (QFN32) (revision v1.1)
+Features:           Wi-Fi, BT 5 (LE), Single Core, 160MHz, Embedded Flash 4MB (XMC)
+Crystal frequency:  40MHz
+USB mode:           USB-Serial/JTAG
+
+Flash Memory Information:
+=========================
+Manufacturer: 46
+Device: 4016
+Detected flash size: 4MB
+
+Hard resetting via RTS pin...
+"""
 V4 = "Chip is ESP32-S3 (QFN56) (revision v0.2)\nDetected flash size: 8MB\n"
 FAIL = "esptool v5.6.0\nA fatal error occurred: Failed to connect to Espressif device: No serial data received.\n"
 
@@ -29,6 +46,11 @@ class ParseTest(unittest.TestCase):
         self.assertEqual((i.target, i.flash_mb, i.port), ("esp32c3", 4, "/dev/ttyACM0"))
         self.assertIn("QFN32", i.description)
         self.assertIn("Wi-Fi", i.features)
+
+    def test_real_board_output(self):
+        i = parse_esptool(REAL_C3)
+        self.assertEqual((i.target, i.description, i.flash_mb), ("esp32c3", "ESP32-C3 AZ (QFN32) (revision v1.1)", 4))
+        self.assertEqual(mismatch(i, "esp32c3"), "")
 
     def test_old_output_and_failure(self):
         self.assertEqual((parse_esptool(V4).target, parse_esptool(V4).flash_mb), ("esp32s3", 8))

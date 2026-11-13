@@ -74,6 +74,7 @@ def _doctor_board() -> None:
         print("[INFO] 板子                 没插（插上后会自动识别芯片）")
         return
     try:
+        port = os.path.realpath(port)                       # by-id 长路径换成 /dev/ttyACM0
         info = detect_chip(IdfEnv.load().python, port)
     except IdfUnavailable as exc:
         print(f"[INFO] 板子                 {port}，识别不了：{exc}")
