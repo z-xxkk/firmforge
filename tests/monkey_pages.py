@@ -1,4 +1,4 @@
-"""对话、硬件、评测、团队、设置几页的随机点击测试（Android Monkey 的做法：固定种子的随机操作，出问题能原样重现）。
+"""对话、知识库、工作流、团队、设置几页的随机点击测试（Android Monkey 的做法：固定种子的随机操作，出问题能原样重现）。
 
 为了不产生副作用，猴子在一份临时的项目副本里跑：
 - 模型换成假的（不联网、不花钱），回复内容随机：正常的、格式乱的、空的；
@@ -131,6 +131,8 @@ class PageMonkey:
         from PySide6.QtWidgets import (QAbstractButton, QComboBox, QLineEdit, QListWidget, QPlainTextEdit, QSpinBox,
                                        QDoubleSpinBox, QSplitter, QTableWidget, QTabWidget, QTreeWidget)
         r = self.rng.random()
+        if r < 0.04 and self.w.stack.currentWidget() is self.w.chat:
+            return self._chat_special()
         if r < 0.1:
             key = self.rng.choice(self.PAGES)
             self.w.go(key)
@@ -210,6 +212,28 @@ class PageMonkey:
         self.w.resize(W, H)
         return f"窗口改成 {W}×{H}"
 
+    def _chat_special(self) -> str | None:
+        """对话页只在特定时候出现的东西（DECISIONS 第 114 条）：拖进来的资料、等你确认的规则卡片。"""
+        chat = self.w.chat
+        if self.rng.random() < 0.5:
+            d = Path(tempfile.mkdtemp(prefix="ff-drop-"))
+            kind = self.rng.choice(["txt", "md", "pdf", "h"])
+            f = d / f"手册 {self.rng.randrange(100)}.{kind}"
+            body = self.rng.choice(["", "Power Down 0000_0000", "%PDF-1.4 坏的 pdf", "x" * 5000])
+            f.write_text(body, encoding="utf-8")
+            chat.register_files([f] * self.rng.randint(1, 2))       # 同一份拖两次：第二次应说已登记过
+            return f"拖进资料 {f.name}（{len(body)} 字）"
+        if chat.pending is not None:
+            return None
+        rule = {"id": f"R-MK-{self.rng.randrange(1000):03d}", "kind": "register", "scope": ["max30102"],
+                "text": "DIE_TEMP_RDY 在 bit1", "tier": self.rng.choice(["official_manual", "user", "community"]),
+                "status": "pending", "check": None, "notes": [],
+                "cite": {"doc": "max30102-ds", "page": self.rng.choice([None, 12, 999]), "section": "",
+                         "quote": "Interrupt Status 2"},
+                "steps": [["1", self.rng.choice(["ok", "wrong", "unknown"]), "资料已登记"]]}
+        chat.on_ask("rules", {"pending": [rule, dict(rule, id=rule["id"] + "B")][: self.rng.randint(1, 2)], "escalated": []})
+        return "对话里出现待确认的规则"
+
     def problems(self) -> list[str]:
         from PySide6.QtCore import QPoint
         from PySide6.QtWidgets import QFrame
@@ -228,6 +252,7 @@ def run_seed(window, seed: int, steps: int, errors: Errors) -> list[str]:
     rng = random.Random(seed)
     fake_world(rng)
     m = PageMonkey(window, rng)
+    window._monkey_history = m.history                      # main 里统计各类操作做了几次
     for i in range(steps):
         try:
             what = m.step()
@@ -289,7 +314,10 @@ def main(argv=None) -> int:
         w.show()
         found = run_seed(w, s, a.steps, errors)
         stop_backends(w)
-        print(f"种子 {s}：{'没发现问题' if not found else '发现问题'}")
+        h = getattr(w, "_monkey_history", [])
+        drops = sum(1 for x in h if x.startswith("拖进资料"))
+        cards = sum(1 for x in h if x.startswith("对话里出现待确认的规则"))
+        print(f"种子 {s}：{'没发现问题' if not found else '发现问题'}（做了 {len(h)} 步，其中拖进资料 {drops} 次、规则卡片 {cards} 次）")
         for f in found:
             bad += 1
             print("  " + f)
