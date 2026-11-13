@@ -1228,6 +1228,15 @@ class ChatPage(QWidget):
             self.add_line(f"{node} 第 {d.get('attempt')} 次编码交给 {d.get('agent')}：{sc.get('reason', '')}")
         elif t == "experience_used":
             self.add_line(f"{node} 编码前参考了 {len(d.get('ids', []))} 条过往经验")
+        elif t == "review":                              # 审查 Agent（DECISIONS 第 117 条）
+            high = [i for i in d.get("issues", []) if i.get("severity") == "high"]
+            if d.get("verdict") == "needs_fix" and high:
+                self.add_line(f"{node} 审查：{len(high)} 个必须改的问题，交给编码 Agent 改一次："
+                              + "；".join(f"{i.get('rule', '')} {i.get('message', '')}".strip() for i in high[:2]))
+            else:
+                self.add_line(f"{node} 审查：没发现必须改的问题" + (f"（另有 {len(d.get('issues', []))} 条建议）" if d.get("issues") else ""))
+        elif t == "review_reverted":
+            self.add_line(Dot(T()["run"]), f"{node} 按审查意见改了以后没通过检查，退回改之前通过的版本")
         elif t == "human_wait" and node != "rules":
             self.add_agent("FirmForge", "reviewer", f"模块 **{node}** 停下了：{d.get('reason', '')}\n\n{d.get('instruction', '')}")
         elif t == "escalated" and d.get("level") == "rule":

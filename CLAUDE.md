@@ -80,7 +80,7 @@ firmforge gui                                  # 桌面软件（先 pip install 
 firmforge rules build --scopes i2c,mpu6050      # 查资料提炼规则（调用模型，需人工确认）
 firmforge rules build --scopes i2c,mpu6050 --tier fast --think low   # 给评测用的规则库（和 board-eval 同一档）
 firmforge firmware --spec 需求.md                # 嵌入式新流程：按 workflows/firmware_dev.toml 走（规则 → 设计 → 编码、测试 → 上板）
-firmforge firmware --spec 需求.md --human-review --workflow firmware_dev   # 设计好后停下等确认；换别的上板工作流
+firmforge firmware --spec 需求.md --human-review --workflow firmware_review   # 设计好后停下等确认；换上板工作流（firmware_review 加审查）
 firmforge check-board-tasks [题目 id]            # 上板评测题自检（没有板子时编译标准答案和变异体）
 firmforge board-eval --out results/<实验名> --plan --max-cost 0  # 先看要跑多少次、verified 缺哪些规则（不调用模型）
 firmforge board-eval --out results/<实验名> --runs 2 --max-cost 20  # 题目 × 四种配置 × 2 次（默认 fast 档、思考 low），最多花 20 元

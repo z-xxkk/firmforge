@@ -33,11 +33,11 @@ from .widgets import FlowLayout, Panel, T, label
 PALETTE = [("干活", [("agent", "Agent 干活"), ("verify", "检查"), ("human", "等人确认")]),
            ("控制", [("parallel", "并行"), ("condition", "条件"), ("loop", "循环")]),
            ("嵌套", [("subflow", "子流程"), ("foreach", "每个模块各跑")])]
-# 上板流程的步骤箱：只放执行代码支持的步骤（DECISIONS 第 110 条，可改项见 embedded/firmware_workflow.py）
+# 上板流程的步骤箱：只放解释器支持的步骤（DECISIONS 第 110、117 条，规则见 embedded/firmware_workflow.py）
 FIRMWARE_PALETTE = [("干活", [("agent:researcher", "查资料提炼规则"), ("agent:designer", "设计分层"),
-                              ("agent:coder", "编码"), ("agent:tester", "写测试"), ("verify", "检查"),
-                              ("human", "等人确认")]),
-                    ("控制", [("parallel", "并行"), ("loop", "修正循环")]),
+                              ("agent:coder", "编码"), ("agent:tester", "写测试"), ("agent:reviewer", "审查"),
+                              ("verify", "检查"), ("human", "等人确认")]),
+                    ("控制", [("parallel", "并行"), ("condition", "条件"), ("loop", "修正循环")]),
                     ("嵌套", [("foreach", "每个模块各跑")])]
 
 
@@ -395,13 +395,15 @@ class DesignerPage(QMainWindow):
         if self.wf.engine == "firmware":
             fw = {"agent": dict(role=role or ("coder" if where != "main" else "designer"),
                                 note={"researcher": "查资料提炼规则", "designer": "设计分层", "coder": "编码",
-                                      "tester": "写测试"}.get(role or "", "")),
+                                      "tester": "写测试", "reviewer": "检查通过后审一遍代码，只提意见"}.get(role or "", "")),
+                  "condition": dict(cond="hardware_layer", note="条件成立才走\"是\"里的步骤"),
                   "verify": dict(scope="module", note="合规 → 编译 → 测试"),
                   "loop": dict(body="repair_round", until="verify_passed", max=4, note="诊断后交给对应的 Agent 修改"),
                   "human": dict(note="等人确认"), "parallel": dict(branches=()),
                   "foreach": dict(over="design.modules", subflow=self.current_sub or "")}
             sid = self._unique({"agent": {"researcher": "rules", "designer": "design", "coder": "code",
-                                          "tester": "test"}.get(role or "", "agent"), "human": "confirm"}.get(kind, kind))
+                                          "tester": "test", "reviewer": "review"}.get(role or "", "agent"),
+                                "human": "confirm"}.get(kind, kind))
             return Step(id=sid, kind=kind, **fw.get(kind, {}))
         defaults = {"agent": dict(role=role or ("coder" if where != "main" else "planner")),
                     "verify": dict(scope="all" if where == "main" else "module"),
@@ -696,12 +698,18 @@ class DesignerPage(QMainWindow):
 
         self.form.addRow("名称", line(s.id, "id"))
         self.form.addRow("类型", QLabel(KIND_NAMES.get(s.kind, s.kind)))
-        conds = [(None, "（无）")] + [(c, COND_NAMES[c]) for c in CONDITIONS]
+        if self.wf.engine == "firmware":                  # 上板流程能用的条件（模块分层只有它知道）
+            from ..embedded.firmware_workflow import MAIN_CONDITIONS, MODULE_CONDITIONS
+            usable = MAIN_CONDITIONS if self._where(s.id)[0] == "main" else MODULE_CONDITIONS
+        else:
+            from ..orchestrator.workflow import FIRMWARE_ONLY_CONDITIONS
+            usable = tuple(c for c in CONDITIONS if c not in FIRMWARE_ONLY_CONDITIONS)
+        conds = [(None, "（无）")] + [(c, COND_NAMES[c]) for c in usable]
         if s.kind == "agent":
             in_main = self._where(s.id)[0] == "main"
             if self.wf.engine == "firmware":
                 roles = ([("researcher", "查资料提炼规则"), ("designer", "设计分层")] if in_main else
-                         [("coder", ROLE_NAMES["coder"]), ("tester", ROLE_NAMES["tester"])])
+                         [(r, ROLE_NAMES[r]) for r in ("coder", "tester", "reviewer")])
             else:
                 roles = [("planner", "规划")] if in_main else [(r, ROLE_NAMES[r]) for r in ("coder", "tester", "reviewer")]
             self.form.addRow("角色", combo(roles, s.role, "role"))
@@ -718,7 +726,7 @@ class DesignerPage(QMainWindow):
             sp.editingFinished.connect(lambda: self._set_field("max", sp.value()))
             self.form.addRow("最多几次", sp)
         elif s.kind == "condition":
-            self.form.addRow("判断依据", combo([(c, COND_NAMES[c]) for c in CONDITIONS], s.cond, "cond"))
+            self.form.addRow("判断依据", combo(conds[1:], s.cond, "cond"))
             self.form.addRow("是 → 执行", line(", ".join(s.then), "then", ids))
             self.form.addRow("否 → 执行", line(", ".join(s.otherwise), "otherwise", ids))
         elif s.kind == "parallel":

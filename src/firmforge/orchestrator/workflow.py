@@ -21,7 +21,9 @@ from .. import config
 from ..agents.registry import ROLES
 
 KINDS = ("agent", "verify", "parallel", "condition", "loop", "subflow", "foreach", "human")
-CONDITIONS = ("verify_passed", "signature_repeated", "attempts_exhausted", "review_needs_fix", "human_review")
+CONDITIONS = ("verify_passed", "signature_repeated", "attempts_exhausted", "review_needs_fix", "human_review",
+              "hardware_layer", "logic_layer")
+FIRMWARE_ONLY_CONDITIONS = ("hardware_layer", "logic_layer")       # 只有上板流程知道模块分层（DECISIONS 第 117 条）
 LOOP_BODIES = ("repair_round",)
 SCOPES = ("module", "all")
 ENGINES = ("module", "firmware")
@@ -253,6 +255,9 @@ def engine_problems(wf: Workflow, registry=None) -> list[str]:
     for s in (*wf.main, *[x for ss in wf.subflows.values() for x in ss]):
         if s.detached:
             problems.append(f"步骤 {s.id} 还没连上：把它拖到连线上或某个步骤的正下方，或者删掉它")
+        for c in (s.cond, s.when, s.until, s.enabled_by):
+            if c in FIRMWARE_ONLY_CONDITIONS:
+                problems.append(f"步骤 {s.id}：条件 {c} 只有上板流程能用")
     if not any(s.kind == "agent" and s.role == "planner" for s in wf.main):
         problems.append("主流程要有一个规划步骤（Agent：planner）")
     if not any(s.kind == "foreach" for s in wf.main):

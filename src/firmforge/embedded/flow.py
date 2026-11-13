@@ -57,6 +57,7 @@ RULE_MODES = ("verified", "unverified", "none")
 MAX_FORMAT_RETRIES = 2              # 没按格式交文件时，当场补要几次
 MAX_DESIGN_TRIES = 3
 DEFAULT_MAX_TOKENS = 8192
+_PLAN = object()                    # _pick_coder 没传 pinned：按 self.plan
 
 
 @dataclass
@@ -129,9 +130,12 @@ class EmbeddedFlow:
                  coder: str = "coder-strong", design: Design | None = None, locked: dict[str, str] | None = None,
                  extra_requires: tuple[str, ...] = (), build_rules: bool = True, workflow=None, store=None,
                  human_review: bool = False, confirm_design: Callable[[Design], str | None] | None = None,
-                 prior_wiring: dict[str, int] | None = None):
+                 prior_wiring: dict[str, int] | None = None,
+                 confirm_module: Callable[[DesignModule, "ModuleResult", str], str | None] | None = None):
         """workflow：上板工作流（firmware_dev.toml，DECISIONS 第 110 条）决定走哪些步骤、在哪停下、最多试几次、
-        编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder，不经调度器、不用经验库。"""
+        编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder，不经调度器、不用经验库。
+        给了工作流时由解释器逐步执行（fw_interpreter.py，DECISIONS 第 117 条）；confirm_module 是模块流程里
+        "等人确认"步骤的回调，返回意见（空表示没意见）。"""
         if rule_mode not in RULE_MODES:
             raise ValueError(f"规则模式只能是 {', '.join(RULE_MODES)}")
         self.profile, self.spec, self.rules, self.library, self.verifier = profile, spec, rules, library, verifier
@@ -139,7 +143,10 @@ class EmbeddedFlow:
                      FirmwarePlan(build_rules=build_rules, confirm_rules=True, coder=coder, tester="tester",
                                   max_attempts=max_attempts))
         self.rule_mode, self.idf, self.board = rule_mode, idf, board
+        self.workflow = workflow
+        self._human_in = human                           # 解释器按"查资料后面有没有等人确认"决定用不用
         self.human = human if self.plan.confirm_rules else None
+        self.confirm_module = confirm_module
         self.max_attempts = self.plan.max_attempts
         self.coder, self.fixed_design, self.locked = coder, design, dict(locked or {})
         self.extra_requires, self.build_rules = tuple(extra_requires), self.plan.build_rules
@@ -203,7 +210,10 @@ class EmbeddedFlow:
         return resp
 
     # ---------------------------------------------------------------- 设计
-    def _design(self, rules: RuleSet) -> Design | None:
+    def _design(self, rules: RuleSet, confirm: bool | None = None) -> Design | None:
+        """confirm：设计好后要不要停下等人确认；None 按 self.plan（评测路径）。"""
+        if confirm is None:
+            confirm = self.plan.stop_after_design(self.human_review)
         if self.fixed_design is not None:
             self.rd.write_json("design.json", self.fixed_design.to_dict())
             self.bus.emit("plan_ready", "design", modules=[m.to_dict() for m in self.fixed_design.modules],
@@ -224,8 +234,7 @@ class EmbeddedFlow:
                 continue
             self.rd.write_json("design.json", design.to_dict())
             self.bus.emit("plan_ready", "design", modules=[m.to_dict() for m in design.modules], app=design.app)
-            if (self.plan.stop_after_design(self.human_review) and self.confirm_design is not None
-                    and revisions < MAX_DESIGN_TRIES):
+            if confirm and self.confirm_design is not None and revisions < MAX_DESIGN_TRIES:
                 self.bus.emit("human_wait", "design", step="confirm_design", reason="设计好了，等你确认")
                 comment = (self.confirm_design(design) or "").strip()
                 if comment:                                # 负责人有意见：带着意见重做
@@ -362,14 +371,16 @@ class EmbeddedFlow:
                 pass
 
     # ---------------------------------------------------------------- 调度与经验（DECISIONS 第 110 条）
-    def _pick_coder(self, m: DesignModule, attempt: int) -> tuple[str, str]:
-        """这一轮编码交给谁。返回 (Agent 名, 统计分组)。分组按任务特征：硬件层还是逻辑层、第一次写还是修改。"""
+    def _pick_coder(self, m: DesignModule, attempt: int, pinned: str | None | object = _PLAN) -> tuple[str, str]:
+        """这一轮编码交给谁。返回 (Agent 名, 统计分组)。分组按任务特征：硬件层还是逻辑层、第一次写还是修改。
+        pinned：解释器传入工作流步骤里指定的 Agent（None 表示由调度器挑）；不传按 self.plan。"""
         bucket = f"fw-{m.layer}-{'first' if attempt == 1 else 'repair'}"
-        if self.plan.coder:
-            self.bus.emit("node_assigned", m.id, agent=self.plan.coder, role="coder", attempt=attempt, bucket=bucket,
+        pin = self.plan.coder if pinned is _PLAN else pinned
+        if pin:
+            self.bus.emit("node_assigned", m.id, agent=pin, role="coder", attempt=attempt, bucket=bucket,
                           scores={"strategy": "workflow" if self.plan.source else "fixed",
-                                  "reason": f"{'工作流' if self.plan.source else '评测配置'}指定 {self.plan.coder}"})
-            return self.plan.coder, bucket
+                                  "reason": f"{'工作流' if self.plan.source else '评测配置'}指定 {pin}"})
+            return pin, bucket
         fails = self._fails.get(m.id, {})
         cands = self.agents.registry.find("coder")
         keep = [a for a in cands if fails.get(a.name, 0) < 2] or cands     # 连续两次没修好就换人（只剩它时照用）
@@ -565,6 +576,8 @@ class EmbeddedFlow:
         self.bus.emit("run_started", None, task=self.rd.run_id, config=f"embedded/{self.rule_mode}",
                       board=self.profile.board.value, workflow=self.plan.source)
         t0 = time.time()
+        if self.workflow is not None:                    # 按工作流逐步执行（DECISIONS 第 117 条）
+            return self._run_workflow(res, t0)
         try:
             rules = self._rules_for_flow()
             res.rules_used = [r.id for r in rules.select(None, "approved")]
@@ -589,6 +602,19 @@ class EmbeddedFlow:
         except IdfUnavailable as exc:
             res.error = str(exc)
         except Exception as exc:                         # 模型调用失败等：先把记录写完整（运行目录能正常回放），再往上抛
+            res.verdict, res.error = "error", f"{type(exc).__name__}: {exc}"
+            self._finish(res, t0)
+            raise
+        self._finish(res, t0)
+        return res
+
+    def _run_workflow(self, res: FlowResult, t0: float) -> FlowResult:
+        from .fw_interpreter import FirmwareInterpreter
+        try:
+            FirmwareInterpreter(self, self.workflow).run_main()
+        except IdfUnavailable as exc:
+            res.error = str(exc)
+        except Exception as exc:                         # 和固定路径一样：先把记录写完整再往上抛
             res.verdict, res.error = "error", f"{type(exc).__name__}: {exc}"
             self._finish(res, t0)
             raise

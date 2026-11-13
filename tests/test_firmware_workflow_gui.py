@@ -50,12 +50,17 @@ class FirmwareWorkflowGuiTest(unittest.TestCase):
         self.assertEqual(d.wf.engine, "firmware")
         kinds = [d.palette.item(i).data(Qt.UserRole) for i in range(d.palette.count())]
         self.assertIn("agent:designer", kinds)
-        self.assertNotIn("condition", kinds)                            # 上板流程不支持条件分支，步骤箱里就不放
+        self.assertIn("condition", kinds)                               # 解释器支持条件和审查（第 117 条）
+        self.assertIn("agent:reviewer", kinds)
         self.assertEqual(d.check(), [])
-        d.selected = "check"
-        d.add_step("agent:coder")                                       # 多一个编码步骤：检查不通过、不能保存
+        d.selected = "repair"
+        d.add_step("agent:reviewer")                                    # 检查之后加审查：能执行
+        self.assertEqual(d.check(), [])
+        d.do_undo()
+        d.selected = "write"
+        d.add_step("agent:reviewer")                                    # 审查放在检查前：检查不通过、不能保存
         probs = d.check()
-        self.assertTrue(any("编码" in p for p in probs))
+        self.assertTrue(any("审查要放在检查之后" in p for p in probs))
         d.do_undo()
         self.assertEqual(d.check(), [])
         d.selected = "repair"                                           # 改尝试次数：照样能执行

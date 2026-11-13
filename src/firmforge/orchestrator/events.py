@@ -25,6 +25,8 @@ EVENT_TYPES = {
     "wiring_ready",                 # 这个项目的接线定下来了（DECISIONS 第 108 条）
     "wiring_checked",               # 上板时外接器件有没有应答（实测确认接线）
     "chip_detected",                # 第一次上板前识别板子上的芯片（esptool 实测），对不上就不烧录
+    "step_started",                 # 解释器开始执行主流程里的一步（DECISIONS 第 117 条）
+    "review", "review_reverted",    # 审查 Agent 的意见；按意见改坏了退回通过的版本
     # 经验库
     "experience_saved", "experience_used",
     # 工具（DECISIONS 第 63 条）

@@ -1,0 +1,353 @@
+"""上板流程的工作流解释器（DECISIONS 第 117 条）：按工作流文件逐步执行，顺序和结构完全由文件决定。
+
+每种步骤一个处理函数，真正干活的（调用 Agent、编译、上板、诊断、调度选人、经验库）都复用 EmbeddedFlow 里的方法，
+所以默认工作流 firmware_dev.toml 跑出来和原来的固定流程一样；设计器里改了顺序、加了审查或条件，这里就照着做。
+评测（不给工作流）不经过这里，走 EmbeddedFlow 原来的固定路径。
+
+模块流程里的状态（ModuleRun）：
+- 已经写过的代码、测试和各自的对话（修改轮接着这段对话）；
+- 最近一次检查的结论（pass / fail / skipped）、出问题的层、报告，以及检查了几次（attempt）；
+- 上一轮诊断（修好后存经验）、审查结果、是否已经停下（硬件问题等人）。
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+
+from ..agents.roles import parse_review
+from ..grounding.rules import RuleSet
+from ..orchestrator.dag import extract_json
+from ..orchestrator.workflow import Step, Workflow
+from .design import Design, DesignModule
+from .firmware_workflow import firmware_problems
+from .roles import (coder_repair_message, human_fix_message, review_fix_message, reviewer_messages, test_file,
+                    tester_messages, tester_repair_message)
+
+
+@dataclass
+class ModuleRun:
+    m: DesignModule
+    mr: object                                     # flow.ModuleResult
+    rules: RuleSet
+    deps_h: dict
+    c_msgs: list
+    coder_pin: str | None = None                   # 模块流程里编码步骤指定的 Agent（修正循环也交给它；不指定由调度器挑）
+    tester_pin: str | None = None
+    c_conv: list | None = None
+    t_conv: list | None = None
+    turn: dict | None = None
+    verdict: str | None = None                     # 最近一次检查：pass / fail / skipped
+    layer: str = ""
+    report: str = ""
+    attempt: int = 0                               # 检查了几次
+    last: tuple | None = None                      # 上一轮没过的层、报告、诊断
+    review: dict | None = None
+    stopped: str = ""                              # 停下的原因（hardware：诊断为硬件问题，等人处理）
+    passed_files: dict = field(default_factory=dict)   # 最近一次通过时的代码（审查改坏了退回）
+
+
+class FirmwareInterpreter:
+    def __init__(self, flow, wf: Workflow):
+        probs = firmware_problems(wf, flow.agents.registry)
+        if probs:
+            from ..orchestrator.workflow import WorkflowError
+            raise WorkflowError(f"上板工作流 {wf.name} {wf.version} 执行不了：" + "；".join(probs))
+        self.flow, self.wf = flow, wf
+        self.loop_cfg = flow.agents.settings.loop
+
+    # ------------------------------------------------------------ 公共
+
+    def _on(self, s: Step, run: ModuleRun | None = None) -> bool:
+        """步骤要不要执行：enabled_by 和 when 都成立才执行。"""
+        if s.enabled_by and not self._cond(s.enabled_by, run):
+            return False
+        return not s.when or self._cond(s.when, run)
+
+    def _cond(self, name: str, run: ModuleRun | None) -> bool:
+        if name == "human_review":
+            return bool(self.flow.human_review)
+        if run is None:
+            return False
+        if name == "verify_passed":
+            return run.verdict == "pass"
+        if name == "hardware_layer":
+            return run.m.layer == "hardware"
+        if name == "logic_layer":
+            return run.m.layer == "logic"
+        if name == "attempts_exhausted":
+            return run.attempt >= self._max_attempts(run)
+        if name == "review_needs_fix":
+            return bool(run.review and run.review.get("verdict") == "needs_fix")
+        raise ValueError(f"未知条件 {name}")
+
+    # ------------------------------------------------------------ 主流程
+
+    def run_main(self):
+        f = self.flow
+        res = f.result
+        rules = RuleSet() if f.rule_mode == "none" else f.rules
+        design: Design | None = None
+        main = Workflow.top_level(self.wf.main)
+        by = Workflow.by_id(self.wf.main)
+        for i, s in enumerate(main):
+            if not self._on(s):
+                continue
+            nxt = main[i + 1] if i + 1 < len(main) else None
+            confirm = self._confirm_follows(nxt, by)
+            f.bus.emit("step_started", s.id, kind=s.kind, role=s.role)
+            if s.kind == "agent" and s.role == "researcher":
+                f.human = f._human_in if confirm else None
+                f.build_rules = True
+                rules = f._rules_for_flow()
+            elif s.kind == "agent" and s.role == "designer":
+                res.rules_used = [r.id for r in rules.select(None, "approved")]
+                design = f._design(rules, confirm=confirm)
+                res.design = design
+                if design is None:
+                    res.error = "设计几次都没有通过检查"
+                    return
+                f._use_wiring(design)
+            elif s.kind in ("human", "condition"):
+                pass                                   # 确认规则、确认设计由前一步处理（见 _confirm_follows）
+            elif s.kind == "foreach":
+                if design is None:
+                    res.error = "还没有设计，不能按模块执行"
+                    return
+                if not res.rules_used:
+                    res.rules_used = [r.id for r in rules.select(None, "approved")]
+                steps = self.wf.subflows[s.subflow]
+                for m in design.order():
+                    if any(res.modules.get(d) is None or res.modules[d].verdict not in ("pass", "skipped")
+                           for d in m.depends_on):
+                        from .flow import ModuleResult
+                        res.modules[m.id] = ModuleResult(m.id, m.layer, verdict="skipped", last_report="依赖的模块没有完成")
+                        f.bus.emit("node_failed", m.id, verdict="skipped", note="依赖的模块没有完成")
+                        continue
+                    self.run_module(steps, design, m, rules)
+        verdicts = {mr.verdict for mr in res.modules.values()}
+        if design is not None:
+            res.verdict = "pass" if verdicts == {"pass"} else "incomplete" if verdicts <= {"pass", "skipped"} else "fail"
+
+    def _confirm_follows(self, nxt: Step | None, by: dict) -> bool:
+        """紧跟着的是等人确认（或开关打开时才走的条件分支里的等人确认），并且这次要停。"""
+        if nxt is None:
+            return False
+        if nxt.kind == "human":
+            return self._on(nxt)
+        if nxt.kind == "condition" and self._on(nxt):
+            branch = nxt.then if self._cond(nxt.cond, None) else nxt.otherwise
+            return any(by[r].kind == "human" and self._on(by[r]) for r in branch if r in by)
+        return False
+
+    # ------------------------------------------------------------ 模块流程
+
+    def _max_attempts(self, run: ModuleRun) -> int:
+        loop = next((s for s in self._mod_steps if s.kind == "loop"), None)
+        return max(1, min(10, self.wf.resolve_max(loop, self.loop_cfg))) if loop is not None else 1
+
+    def run_module(self, steps: tuple[Step, ...], design: Design, m: DesignModule, rules: RuleSet):
+        from .flow import ModuleResult
+        f = self.flow
+        self._mod_steps, self._by = steps, Workflow.by_id(steps)
+        f.max_attempts = self._max_attempts(None)          # 修改消息里写"最多几次"
+        mr = ModuleResult(m.id, m.layer)
+        f.result.modules[m.id] = mr
+        f.bus.emit("node_ready", m.id, title=m.title, layer=m.layer)
+        deps_h = f._dep_headers(design, m)
+        from .roles import coder_messages
+        c_msgs = coder_messages(f.spec, f.profile, rules, design, m, deps_h, locked_header=f.locked.get(m.header))
+        tip = f._experience_text(m)
+        if tip and c_msgs and c_msgs[-1].get("role") == "user":
+            c_msgs = c_msgs[:-1] + [{**c_msgs[-1], "content": (c_msgs[-1].get("content") or "") + tip}]
+        coder_step = next((s for s in steps if s.kind == "agent" and s.role == "coder"), None)
+        tester_step = next((s for s in steps if s.kind == "agent" and s.role == "tester"), None)
+        run = ModuleRun(m, mr, rules, deps_h, c_msgs, coder_pin=coder_step.agent if coder_step else None,
+                        tester_pin=tester_step.agent if tester_step else None)
+        self.design = design
+        for s in Workflow.top_level(steps):
+            if run.stopped:
+                break
+            self._step(s, run)
+        self._finish_module(run)
+        return mr
+
+    def _step(self, s: Step, run: ModuleRun) -> None:
+        if not self._on(s, run):
+            return
+        if s.kind == "parallel":
+            self._write_parallel(run)
+        elif s.kind == "agent" and s.role == "coder":
+            self._code(run, s)
+        elif s.kind == "agent" and s.role == "tester":
+            self._test(run, s)
+        elif s.kind == "agent" and s.role == "reviewer":
+            self._review(run, s)
+        elif s.kind == "verify":
+            self._verify(run)
+        elif s.kind == "loop":
+            self._repair_loop(run)
+        elif s.kind == "human":
+            self._human(run, s)
+        elif s.kind == "condition":
+            for r in (s.then if self._cond(s.cond, run) else s.otherwise):
+                if r in self._by and not run.stopped:
+                    self._step(self._by[r], run)
+
+    # ---- 写代码、写测试
+
+    def _interface(self, run: ModuleRun) -> str:
+        """测试 Agent 看的接口：锁定的头文件 > 编码 Agent 已经写好的头文件 > 设计给出的函数原型。"""
+        f, m = self.flow, run.m
+        if m.header in f.locked:
+            return f.locked[m.header]
+        if m.header in run.mr.files:
+            return run.mr.files[m.header]
+        return ("/* 设计给出的接口（编码 Agent 写的头文件以它为准） */\n#pragma once\n#include <stdint.h>\n#include <stdbool.h>\n"
+                + "\n".join(p if p.rstrip().endswith(";") else p.rstrip() + ";" for p in m.provides) + "\n")
+
+    def _first_code(self, run: ModuleRun, pin):
+        f, m = self.flow, run.m
+        coder, bucket = f._pick_coder(m, 1, pinned=pin)
+        before = (f.result.prompt_tokens + f.result.completion_tokens, f.result.cost, time.time())
+        writable = set(m.files)
+        need = {x for x in writable if x.endswith(".c")} or writable
+        conv, out = f._ask_files(coder, run.c_msgs, m.id, writable, need, attempt=1, purpose="编码",
+                                 tools=f.rule_mode != "none")
+        return conv, out, f._turn(m, coder, bucket, before)
+
+    def _first_test(self, run: ModuleRun, pin, header: str):
+        f, m = self.flow, run.m
+        msgs = tester_messages(f.spec, f.profile, run.rules, m, header, run.deps_h)
+        return f._ask_files(pin or "tester", msgs, m.id, {test_file(m)}, {test_file(m)}, attempt=1, purpose="写测试")
+
+    def _take_code(self, run: ModuleRun, conv, out, turn) -> None:
+        run.c_conv, run.turn = conv, turn
+        run.mr.files.update(out.files)
+        self.flow._new_facts(out.facts)
+
+    def _write_parallel(self, run: ModuleRun) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+        header = self._interface(run)
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fc = ex.submit(self._first_code, run, run.coder_pin)
+            ft = ex.submit(self._first_test, run, run.tester_pin, header)
+            conv, out, turn = fc.result()
+            t_conv, tout = ft.result()
+        self._take_code(run, conv, out, turn)
+        run.t_conv = t_conv
+        run.mr.tests.update(tout.files)
+
+    def _code(self, run: ModuleRun, s: Step) -> None:
+        if run.c_conv is None:
+            self._take_code(run, *self._first_code(run, s.agent))
+        elif run.verdict == "fail":                        # 已经写过、上次没过：按报告改一轮（不再检查，交给后面的步骤）
+            self._revise_code(run, coder_repair_message(run.attempt, self._max_attempts(run), run.report), s.agent)
+
+    def _test(self, run: ModuleRun, s: Step) -> None:
+        if run.t_conv is None:
+            run.t_conv, tout = self._first_test(run, s.agent, self._interface(run))
+            run.mr.tests.update(tout.files)
+
+    def _revise_code(self, run: ModuleRun, msg: str, pin=None, purpose: str = "改代码") -> None:
+        f, m = self.flow, run.m
+        coder, bucket = f._pick_coder(m, run.attempt + 1, pinned=pin if pin is not None else run.coder_pin)
+        before = (f.result.prompt_tokens + f.result.completion_tokens, f.result.cost, time.time())
+        run.c_conv, o = f._ask_files(coder, run.c_conv + [{"role": "user", "content": msg}], m.id, set(m.files), None,
+                                     attempt=run.attempt + 1, purpose=purpose, tools=f.rule_mode != "none")
+        run.turn = f._turn(m, coder, bucket, before)
+        run.mr.files.update(o.files)
+        f._new_facts(o.facts)
+
+    # ---- 检查与修正
+
+    def _verify(self, run: ModuleRun) -> None:
+        f, m, mr = self.flow, run.m, run.mr
+        run.attempt += 1
+        mr.attempts = run.attempt
+        run.verdict, run.layer, run.report = f._check(self.design, m, mr, run.rules, run.attempt)
+        mr.last_report = run.report
+        f._write_snapshot(m, mr, run.attempt, run.report)
+        f._record(run.turn, run.attempt, run.verdict)
+        run.turn = None
+        if run.verdict == "pass":
+            run.passed_files = dict(mr.files)
+            if run.last is not None and run.last[2].get("blame") == "code":
+                f._save_experience(m, *run.last)
+                run.last = None
+
+    def _repair_loop(self, run: ModuleRun) -> None:
+        """诊断 → 按责任交给编码或测试 Agent（硬件问题停下等人，规则问题先退回规则）→ 再检查，直到通过或次数用完。"""
+        f, m, mr = self.flow, run.m, run.mr
+        limit = self._max_attempts(run)
+        while run.verdict == "fail" and run.attempt < limit and not run.stopped:
+            diag = f._diagnose(m, mr, run.rules, run.layer, run.report, run.attempt)
+            run.last = (run.layer, run.report, diag)
+            if diag["blame"] == "hardware":
+                run.stopped = "hardware"
+                f.bus.emit("human_wait", m.id, reason="诊断为硬件或接线问题，请检查板子和接线",
+                           evidence=diag["evidence"], instruction=diag["instruction"])
+                return
+            if diag["blame"] == "rule":
+                f.bus.emit("escalated", m.id, level="rule", rule=diag["rule"], note=diag["instruction"])
+                run.rules = f._dispute_rule(run.rules, diag)
+            if diag["blame"] == "test":
+                msg = tester_repair_message(run.attempt, limit, run.report, mr.files, diag)
+                run.t_conv, tout = f._ask_files(run.tester_pin or "tester", run.t_conv + [{"role": "user", "content": msg}],
+                                                m.id, {test_file(m)}, {test_file(m)}, attempt=run.attempt + 1, purpose="改测试")
+                mr.tests.update(tout.files)
+            else:
+                self._revise_code(run, coder_repair_message(run.attempt, limit, run.report, diag))
+            self._verify(run)
+
+    # ---- 审查、等人
+
+    def _review(self, run: ModuleRun, s: Step) -> None:
+        """检查通过后审一遍；needs_fix 时让编码 Agent 改 1 次再检查，改坏了退回通过的版本（审查不能否决通过）。"""
+        if run.verdict != "pass" or run.review is not None:
+            return
+        f, m, mr = self.flow, run.m, run.mr
+        msgs = reviewer_messages(f.spec, f.profile, run.rules, m, mr.files, run.report)
+        resp = f.agents.call(s.agent or "reviewer", msgs, m.id, attempt=run.attempt, purpose="审查")
+        try:
+            run.review = parse_review(extract_json(resp.text))
+        except ValueError as exc:
+            run.review = {"verdict": "ok", "issues": [], "error": str(exc)}
+        high = [i for i in run.review["issues"] if i.get("severity") == "high"]
+        f.bus.emit("review", m.id, attempt=run.attempt, verdict=run.review["verdict"], issues=run.review["issues"][:10],
+                   error=run.review.get("error", ""))
+        if run.review["verdict"] != "needs_fix" or not high:
+            return
+        keep = dict(mr.files)
+        self._revise_code(run, review_fix_message(high), purpose="按审查意见改")
+        self._verify(run)
+        if run.verdict != "pass":                          # 改坏了：退回审查前通过的版本
+            mr.files.clear()
+            mr.files.update(keep)
+            run.verdict, run.passed_files = "pass", keep
+            f.bus.emit("review_reverted", m.id, attempt=run.attempt, note="按审查意见改了以后没通过检查，退回改之前的版本")
+
+    def _human(self, run: ModuleRun, s: Step) -> None:
+        """看结果确认：写意见就交给编码 Agent 改并重新检查；没写就继续。没有人在场（命令行）时跳过。"""
+        f, m, mr = self.flow, run.m, run.mr
+        ask = getattr(f, "confirm_module", None)
+        if ask is None or run.verdict is None:
+            return
+        f.bus.emit("human_wait", m.id, step=s.id, reason="模块检查完了，等你看结果", verdict=run.verdict)
+        comment = (ask(m, mr, run.verdict) or "").strip()
+        if not comment:
+            return
+        self._revise_code(run, human_fix_message(comment), purpose="按你的意见改")
+        self._verify(run)
+
+    def _finish_module(self, run: ModuleRun) -> None:
+        f, m, mr = self.flow, run.m, run.mr
+        if run.stopped == "hardware":
+            mr.verdict = "hardware"
+            return
+        mr.verdict = run.verdict if run.verdict in ("pass", "skipped") else "fail"
+        if mr.verdict == "pass" and run.passed_files and mr.files != run.passed_files:
+            mr.files.clear()
+            mr.files.update(run.passed_files)
+        f.bus.emit("node_done" if mr.verdict == "pass" else "node_failed", m.id, verdict=mr.verdict,
+                   attempts=run.attempt, note=mr.last_report[-300:])

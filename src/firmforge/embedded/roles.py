@@ -183,3 +183,32 @@ def parse_diagnosis(data: dict, rules: RuleSet | None = None) -> dict:
         if rules is not None and out["rule"] not in rules.rules:
             raise ValueError(f"规则 {out['rule']} 不存在")
     return out
+
+
+# ---------------------------------------------------------------- 审查（DECISIONS 第 117 条：工作流里可以加的步骤）
+
+def reviewer_messages(requirement: str, profile: HardwareProfile, rules: RuleSet | None, module: DesignModule,
+                      code: dict[str, str], report: str, where: str = "") -> list[dict]:
+    """检查已经通过后再审一遍代码。只给实现代码和检查结果，不给测试代码（审的是实现）。"""
+    system = system_prompt("reviewer_idf.md", profile, rules, _module_scopes(module))
+    b = Brief(intent=f"审查模块 {module.id} 的实现（检查已全部通过），输出审查 JSON", location=where or f"审查 › {module.id}")
+    b.ref(f"module {module.id}", json.dumps(module.to_dict(), ensure_ascii=False, indent=2), "json")
+    for p, c in sorted(code.items()):
+        b.ref(f"file main/{p}", c, "c")
+    b.attach("需求文档", requirement)
+    b.attach("检查结果", report)
+    return [{"role": "system", "content": system}, {"role": "user", "content": b.render()}]
+
+
+def review_fix_message(issues: list[dict]) -> str:
+    lines = ["检查已经通过，但审查 Agent 指出了下面这些必须修改的问题。请修改后输出改动的完整文件（没改动的文件不用输出）。",
+             "注意不要破坏已经通过的行为：改完会重新检查，检查不过就退回改之前的版本。", ""]
+    for i in issues:
+        where = f"{i.get('file', '')}" + (f":{i['line']}" if i.get("line") else "")
+        lines.append(f"- [{i.get('severity', '')}] {where} {i.get('rule', '')}：{i.get('message', '')}")
+    return "\n".join(lines)
+
+
+def human_fix_message(comment: str) -> str:
+    return ("负责人看了这个模块的代码和检查结果，意见如下。请按意见修改，输出改动的完整文件（没改动的文件不用输出）。\n\n"
+            + comment.strip())

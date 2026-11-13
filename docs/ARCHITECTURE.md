@@ -512,12 +512,13 @@ registry.get(name, version=None)
 ## 6. 编排与执行引擎
 
 > **两种执行方式（DECISIONS 第 110 条）**：纯逻辑流程由下面的通用引擎（`orchestrator/engine.py`）执行 `workflows/module_dev.toml`；
-> 上板流程由 `embedded/flow.py` 执行 `workflows/firmware_dev.toml`（工作流文件里 `engine = "firmware"`）。
-> `embedded/firmware_workflow.py` 把上板工作流翻译成执行参数（要不要查资料、确认规则、设计后停不停、编码和写测试是否并行、
-> 指定的编码 Agent、最多尝试几次），并检查设计器画出来的东西执行代码能不能照做（`engine_problems` 按 engine 分派）。
-> 上板流程里编码交给谁由同一个 smart 调度器打分，成绩按 `fw-<层>-<first|repair>` 分组记在 SQLite 的 agent_stats；
-> 修好的问题存进经验库（类别 `firmware-<层>`）。评测（`board_eval.py`）不传工作流，保持原来的固定做法。
-> 决赛阶段计划让通用引擎直接执行上板工作流（完整接入）。
+> 上板流程由解释器 `embedded/fw_interpreter.py` 逐步执行上板工作流（`engine = "firmware"`，DECISIONS 第 117 条）：
+> 每种步骤一个处理函数（查资料、设计、等人确认、条件、每个模块各跑；模块里的编码、写测试、并行、检查、修正循环、审查、等人确认、条件），
+> 顺序和结构完全按文件走；真正干活的（调用 Agent、编译、上板、诊断、调度选人、经验库）复用 `embedded/flow.py` 的方法。
+> `embedded/firmware_workflow.py` 检查设计器画出来的结构解释器能不能照做（`engine_problems` 按 engine 分派），放行的结构都有测试保证能跑完。
+> 自带两个上板工作流：`firmware_dev`（默认）和 `firmware_review`（硬件层模块通过后审查、开了人工确认时每个模块做完等人看）。
+> 编码交给谁由 smart 调度器打分，成绩按 `fw-<层>-<first|repair>` 分组记在 SQLite 的 agent_stats；修好的问题存进经验库（类别 `firmware-<层>`）。
+> 评测（`board_eval.py`）不传工作流，走 `flow.py` 原来的固定路径，四种配置和以前的数据可比；测试保证"和固定路径做同一件事的工作流"调用和检查完全一样。
 
 - 用 `asyncio` 实现。LLM 调用和判定都是阻塞调用，通过 `asyncio.to_thread` 执行，用两个信号量分别限制并发数（`concurrency.llm` 和 `concurrency.verify`）。
 - 节点状态：`pending → ready → running → done | failed | skipped`。每次状态变化都发事件。

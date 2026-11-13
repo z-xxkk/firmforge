@@ -309,6 +309,13 @@ class EmbeddedBackend(Backend):
                                           "wiring": dict(design.wiring)})
                 return ans if isinstance(ans, str) else ""
 
+            def confirm_module(m, mr, verdict):
+                """模块流程里的"等人确认"（DECISIONS 第 117 条）：通过就继续，写意见就交给编码 Agent 改。"""
+                ans = self._wait("checkpoint", {"node": m.id, "step": "等人确认", "files": sorted(mr.files),
+                                                "note": f"检查结果：{'通过' if verdict == 'pass' else '跳过' if verdict == 'skipped' else '没通过'}"
+                                                        f"。代码在右边\"代码\"标签里看"})
+                return ans if isinstance(ans, str) else ""
+
             def human(pending, escalated):
                 b = holder.get("builder")
                 results = getattr(b, "results", {}) if b is not None else {}
@@ -324,7 +331,7 @@ class EmbeddedBackend(Backend):
                                       runs_root=runs_dir, name=name, human=human, tier=tier, think=thinking,
                                       subscribers=sub, workflow=workflow or "firmware_dev", store=db,
                                       human_review=human_review, confirm_design=confirm_design,
-                                      prior_wiring=prior_wiring)
+                                      prior_wiring=prior_wiring, confirm_module=confirm_module)
             flow.on_builder = lambda b: holder.__setitem__("builder", b)
 
             def job():

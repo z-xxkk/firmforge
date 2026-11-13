@@ -1,0 +1,86 @@
+# 上板流程（加审查和人工抽查，DECISIONS 第 117 条）：和 firmware_dev 一样，另外
+# - 硬件层模块检查通过后，审查 Agent 再审一遍代码（只提意见；必须改的问题让编码 Agent 改一次，改坏了退回）；
+# - 开了"设计后等我确认"时，每个模块做完也停下等你看结果，写意见就交给编码 Agent 改。
+name = "firmware_review"
+version = "1.0.0"
+engine = "firmware"
+description = "上板流程加审查：硬件层模块通过后再审一遍代码；开了人工确认时每个模块做完等你看"
+
+[[main]]
+id = "rules"
+kind = "agent"
+role = "researcher"
+note = "知识库缺某个外设的规则时查手册提炼，经规则判定器核对"
+
+[[main]]
+id = "confirm_rules"
+kind = "human"
+note = "新规则等你逐条确认；没确认的规则不给编码 Agent"
+
+[[main]]
+id = "design"
+kind = "agent"
+role = "designer"
+note = "把需求拆成模块：硬件层上板测试，逻辑层在电脑上测试"
+
+[[main]]
+id = "confirm_design"
+kind = "human"
+enabled_by = "human_review"
+note = "开了\"设计后等我确认\"时，设计好先停下等你确认"
+
+[[main]]
+id = "modules"
+kind = "foreach"
+over = "design.modules"
+subflow = "board_module"
+note = "按依赖顺序，每个模块各跑一遍"
+
+[[subflow.board_module.steps]]
+id = "write"
+kind = "parallel"
+branches = ["code", "test"]
+note = "编码和写测试同时进行：测试 Agent 只看接口，不看实现"
+
+[[subflow.board_module.steps]]
+id = "code"
+kind = "agent"
+role = "coder"
+
+[[subflow.board_module.steps]]
+id = "test"
+kind = "agent"
+role = "tester"
+
+[[subflow.board_module.steps]]
+id = "check"
+kind = "verify"
+scope = "module"
+note = "合规 → 编译 → 测试（硬件层烧到板子上）"
+
+[[subflow.board_module.steps]]
+id = "repair"
+kind = "loop"
+until = "verify_passed"
+body = "repair_round"
+max = 4
+note = "诊断错在代码、测试、规则还是硬件，交给对应的 Agent；硬件问题停下等人"
+
+[[subflow.board_module.steps]]
+id = "hw_gate"
+kind = "condition"
+if = "hardware_layer"
+then = ["review"]
+note = "只审硬件层模块（逻辑层在电脑上测得很全）"
+
+[[subflow.board_module.steps]]
+id = "review"
+kind = "agent"
+role = "reviewer"
+note = "检查通过后审一遍代码：返回值、超时、溢出、硬件规则"
+
+[[subflow.board_module.steps]]
+id = "look"
+kind = "human"
+enabled_by = "human_review"
+note = "开了人工确认时，每个模块做完等你看结果"
