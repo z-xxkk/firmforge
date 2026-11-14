@@ -323,7 +323,14 @@ def main(argv=None) -> int:
             print("  " + f)
         w.close()
         w.deleteLater()
+        # processEvents 不执行"延后删除"：不强制删掉，旧窗口和它们的定时器会一直留着，种子越多越慢
+        # （2026-11-15：15 个种子 7 分钟，单独跑每个 4 秒）
+        from PySide6.QtCore import QEvent
+        app.sendPostedEvents(None, QEvent.DeferredDelete)
         app.processEvents()
+        del w
+        import gc
+        gc.collect()
     shutil.rmtree(sandbox, ignore_errors=True)
     return 1 if bad else 0
 

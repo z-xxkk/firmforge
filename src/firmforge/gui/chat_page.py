@@ -690,7 +690,7 @@ class ChatPage(QWidget):
             row.setContentsMargins(60, 0, 0, 0)
             w = holder
         self.msgs.insertWidget(self.msgs.count() - 1, w)
-        QTimer.singleShot(30, lambda: self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum()))
+        QTimer.singleShot(30, self.scroll, lambda: self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum()))  # 带接收对象：页面先被销毁时定时器自动取消
         return w
 
     # ------------------------------------------------------------ 拖进来的资料（DECISIONS 第 114 条）
@@ -1577,7 +1577,7 @@ class ChatPage(QWidget):
             self.select_module(pick.id)
             self.tabs.setCurrentWidget(self.timeline)
         self.replay_btn.setVisible(True)
-        QTimer.singleShot(30, lambda: self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum()))
+        QTimer.singleShot(30, self.scroll, lambda: self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum()))  # 带接收对象：页面先被销毁时定时器自动取消
 
     def start_replay(self, run_dir: Path, append: bool = False):
         if self.backend is not None:
