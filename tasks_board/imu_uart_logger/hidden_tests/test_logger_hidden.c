@@ -47,6 +47,7 @@ TEST_CASE("50 Hz：2 秒约 100 帧，CRC 全对，序号连续，加速度约 1
     TEST_ASSERT_EQUAL(ESP_OK, logger_stop());
     int frames = 0, bad_crc = 0, seq_breaks = 0, last_seq = -1;
     float g = 0;
+    int16_t last[3] = {0, 0, 0};
     for (int i = 0; i + 19 <= len;) {
         if (s_rx[i] != 0xA5 || s_rx[i + 1] != 0x5A) { i++; continue; }
         const uint8_t *f = &s_rx[i];
@@ -56,6 +57,7 @@ TEST_CASE("50 Hz：2 秒约 100 帧，CRC 全对，序号连续，加速度约 1
         last_seq = f[2];
         int16_t ax = (int16_t)(f[3] | (f[4] << 8)), ay = (int16_t)(f[5] | (f[6] << 8)), az = (int16_t)(f[7] | (f[8] << 8));
         g = sqrtf((float)ax * ax + (float)ay * ay + (float)az * az) / 16384.0f;
+        last[0] = ax, last[1] = ay, last[2] = az;
         frames++;
         i += 19;
     }
@@ -65,6 +67,19 @@ TEST_CASE("50 Hz：2 秒约 100 帧，CRC 全对，序号连续，加速度约 1
     TEST_ASSERT_EQUAL(0, bad_crc);
     TEST_ASSERT_EQUAL(0, seq_breaks);
     TEST_ASSERT_FLOAT_WITHIN(0.15f, 1.0f, g);
+    /* 每个轴都要和测试自己直接读到的一致（板子静止）：只看 |a|≈1 g 时，字节序写反的帧碰巧也能落在范围里
+       （2026-11-14 板子换了摆放角度后 big_endian 变异体算出 0.917 g，没被抓住） */
+    i2c_device_config_t dc = {.dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = FF_IMU_ADDR, .scl_speed_hz = 100000};
+    i2c_master_dev_handle_t probe;
+    TEST_ASSERT_EQUAL(ESP_OK, i2c_master_bus_add_device(bus, &dc, &probe));
+    uint8_t start = 0x3B, b[6];
+    TEST_ASSERT_EQUAL(ESP_OK, i2c_master_transmit_receive(probe, &start, 1, b, sizeof b, 50));
+    for (int k = 0; k < 3; k++) {
+        int16_t mine = (int16_t)((b[2 * k] << 8) | b[2 * k + 1]);
+        ff_log("轴 %d：帧里 %d，直接读 %d", k, last[k], mine);
+        TEST_ASSERT_INT_WITHIN(1500, mine, last[k]);
+    }
+    i2c_master_bus_rm_device(probe);
     TEST_ASSERT_EQUAL(ESP_OK, i2c_del_master_bus(bus));
 }
 
