@@ -103,6 +103,277 @@
     ]
   },
   {
+    "id": "R-GPIO-006",
+    "kind": "pin",
+    "scope": [
+      "gpio",
+      "uart",
+      "i2c"
+    ],
+    "text": "GPIO18、GPIO19 属 USB Serial/JTAG 接口，手册列为 Priority 3「应谨慎使用」，本板这两个脚用于 USB 烧录通信，不要分配",
+    "cite": {
+      "doc": "esp32c3-ds",
+      "page": 23,
+      "section": "2.3.4 Peripheral Pin Assignment",
+      "quote": "GPIO18, GPIO19 : USB Serial/JTAG interface."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": {
+      "type": "pin_forbidden",
+      "gpio": [
+        18,
+        19
+      ]
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPT-001",
+    "kind": "api",
+    "scope": [
+      "gptimer"
+    ],
+    "text": "通用定时器用 gptimer_new_timer(&config, &handle) 创建；gptimer_config_t 至少填 clk_src、direction、resolution_hz，创建后定时器处于 init 状态",
+    "cite": {
+      "doc": "idf-driver-gptimer-h",
+      "page": null,
+      "section": "gptimer_new_timer",
+      "quote": "esp_err_t gptimer_new_timer(const gptimer_config_t *config, gptimer_handle_t *ret_timer);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "gptimer_new_timer",
+      "header": "driver/gptimer.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPT-002",
+    "kind": "api",
+    "scope": [
+      "gptimer"
+    ],
+    "text": "resolution_hz 是计数分辨率（工作频率），每个计数 tick 的时长等于 1/resolution_hz 秒，换算时间时按这个步长算",
+    "cite": {
+      "doc": "idf-driver-gptimer-h",
+      "page": null,
+      "section": "gptimer_config_t",
+      "quote": "the step size of each count tick equals to (1 / resolution_hz) seconds"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "gptimer_new_timer",
+      "header": "driver/gptimer.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPT-003",
+    "kind": "sequence",
+    "scope": [
+      "gptimer"
+    ],
+    "text": "gptimer_enable() 只是使能定时器，不开会计数；要真正开始计数必须再调 gptimer_start()",
+    "cite": {
+      "doc": "idf-driver-gptimer-h",
+      "page": null,
+      "section": "gptimer_enable",
+      "quote": "Enable a timer doesn't mean to start it. See also `gptimer_start` for how to make the timer start counting."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "call_order",
+      "before": "gptimer_enable",
+      "after": "gptimer_start"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPT-004",
+    "kind": "api",
+    "scope": [
+      "gptimer"
+    ],
+    "text": "gptimer_disable() 只是停使能，不等于停止计数；要让定时器停止计数必须调用 gptimer_stop()",
+    "cite": {
+      "doc": "idf-driver-gptimer-h",
+      "page": null,
+      "section": "gptimer_disable",
+      "quote": "Disable a timer doesn't mean to stop it. See also `gptimer_stop` for how to make the timer stop counting."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "gptimer_stop",
+      "header": "driver/gptimer.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPT-005",
+    "kind": "api",
+    "scope": [
+      "gptimer"
+    ],
+    "text": "闹钟用 gptimer_set_alarm_action(timer, &alarm_config) 配置：alarm_count 填目标计数值，reload_count 只在 auto_reload_on_alarm 为 true 时生效",
+    "cite": {
+      "doc": "idf-driver-gptimer-h",
+      "page": null,
+      "section": "gptimer_alarm_config_t",
+      "quote": "uint64_t alarm_count; /*!< Alarm target count value */"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "gptimer_set_alarm_action",
+      "header": "driver/gptimer.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPT-006",
+    "kind": "api",
+    "scope": [
+      "gptimer"
+    ],
+    "text": "闹钟回调用 gptimer_register_event_callbacks(timer, &cbs, user_data) 注册，回调原型是 gptimer_alarm_cb_t，返回是否有高优先级任务被唤醒",
+    "cite": {
+      "doc": "idf-driver-gptimer-h",
+      "page": null,
+      "section": "gptimer_register_event_callbacks",
+      "quote": "esp_err_t gptimer_register_event_callbacks(gptimer_handle_t timer, const gptimer_event_callbacks_t *cbs, void *user_data);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "gptimer_register_event_callbacks",
+      "header": "driver/gptimer.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPT-007",
+    "kind": "api",
+    "scope": [
+      "gptimer"
+    ],
+    "text": "读计数值用 gptimer_get_raw_count()，它会触发一次软件捕获事件再返回计数值；要读外部事件已捕获的值用 gptimer_get_captured_count()",
+    "cite": {
+      "doc": "idf-driver-gptimer-h",
+      "page": null,
+      "section": "gptimer_get_raw_count",
+      "quote": "This function will trigger a software capture event and then return the captured count value."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "gptimer_get_raw_count",
+      "header": "driver/gptimer.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPT-008",
+    "kind": "sequence",
+    "scope": [
+      "gptimer"
+    ],
+    "text": "删除定时器用 gptimer_del_timer()，且定时器必须已回到 init 状态，否则返回 ESP_ERR_INVALID_STATE",
+    "cite": {
+      "doc": "idf-driver-gptimer-h",
+      "page": null,
+      "section": "gptimer_del_timer",
+      "quote": "A timer must be in the \"init\" state before it can be deleted."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "gptimer_del_timer",
+      "header": "driver/gptimer.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPT-009",
+    "kind": "peripheral",
+    "scope": [
+      "gptimer"
+    ],
+    "text": "ESP32-C3 有 timer group 0/1 两组，每组只有一个通用定时器 T0（另有一个主系统看门狗定时器），所以最多只有 2 个通用定时器可用，不要按更多规划",
+    "cite": {
+      "doc": "esp32c3-trm",
+      "page": 288,
+      "section": "11.1 Overview",
+      "quote": "the ESP32-C3 chip contains two timer groups, namely timer group 0 and timer group 1. Each timer group consists of one general purpose timer referred to as T0 and one Main System Watchdog Timer."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-GPT-010",
+    "kind": "peripheral",
+    "scope": [
+      "gptimer"
+    ],
+    "text": "通用定时器是 16 位时钟预分频器（2~65536）+ 54 位可自增/自减计数器，计数范围按 54 位规划",
+    "cite": {
+      "doc": "esp32c3-trm",
+      "page": 288,
+      "section": "11.1 Overview",
+      "quote": "A 16-bit clock prescaler, from 2 to 65536 … A 54-bit time-base counter programmable to incrementing or decrementing"
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
     "id": "R-I2C-001",
     "kind": "api",
     "scope": [
@@ -1117,6 +1388,208 @@
     "tier": "official_manual",
     "status": "trusted",
     "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-UART-001",
+    "kind": "api",
+    "scope": [
+      "uart"
+    ],
+    "text": "UART 参数用 uart_param_config() 按 uart_config_t（baud_rate、data_bits 等）配置，再用 uart_driver_install() 安装驱动",
+    "cite": {
+      "doc": "idf-driver-uart-h",
+      "page": null,
+      "section": "uart_config_t",
+      "quote": "UART configuration parameters for uart_param_config function"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "uart_param_config",
+      "header": "driver/uart.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-UART-002",
+    "kind": "api",
+    "scope": [
+      "uart"
+    ],
+    "text": "uart_set_pin() 的引脚参数不想改动的方向填 UART_PIN_NO_CHANGE（值为 -1），不要填 0 或其它数字",
+    "cite": {
+      "doc": "idf-driver-uart-h",
+      "page": null,
+      "section": "UART_PIN_NO_CHANGE",
+      "quote": "#define UART_PIN_NO_CHANGE (-1)"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "uart_set_pin",
+      "header": "driver/uart.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-UART-004",
+    "kind": "peripheral",
+    "scope": [
+      "uart"
+    ],
+    "text": "uart_driver_install 的 rx_buffer_size 必须大于 UART_HW_FIFO_LEN(uart_num)，tx_buffer_size 只能取 0 或大于 UART_HW_FIFO_LEN(uart_num)",
+    "cite": {
+      "doc": "idf-driver-uart-h",
+      "page": null,
+      "section": "uart_driver_install",
+      "quote": "Rx_buffer_size should be greater than UART_HW_FIFO_LEN(uart_num). Tx_buffer_size should be either zero or greater than UART_HW_FIFO_LEN(uart_num)."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "uart_driver_install",
+      "header": "driver/uart.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-UART-006",
+    "kind": "api",
+    "scope": [
+      "uart"
+    ],
+    "text": "接收用 uart_read_bytes(uart_num, buf, length, ticks_to_wait)，ticks_to_wait 为等待的 tick 数，返回实际读到的字节数（-1 为错误）",
+    "cite": {
+      "doc": "idf-driver-uart-h",
+      "page": null,
+      "section": "uart_read_bytes",
+      "quote": "int uart_read_bytes(uart_port_t uart_num, void* buf, uint32_t length, uint32_t ticks_to_wait);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "uart_read_bytes",
+      "header": "driver/uart.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-UART-007",
+    "kind": "api",
+    "scope": [
+      "uart"
+    ],
+    "text": "发送用 uart_write_bytes(uart_num, src, size)，返回压入 TX FIFO 的字节数（-1 为参数错误）",
+    "cite": {
+      "doc": "idf-driver-uart-h",
+      "page": null,
+      "section": "uart_write_bytes",
+      "quote": "int uart_write_bytes(uart_port_t uart_num, const void* src, size_t size);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "uart_write_bytes",
+      "header": "driver/uart.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-UART-008",
+    "kind": "api",
+    "scope": [
+      "uart"
+    ],
+    "text": "卸载 UART 驱动用 uart_driver_delete(uart_num)，不要只丢弃句柄",
+    "cite": {
+      "doc": "idf-driver-uart-h",
+      "page": null,
+      "section": "uart_driver_delete",
+      "quote": "esp_err_t uart_driver_delete(uart_port_t uart_num);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "uart_driver_delete",
+      "header": "driver/uart.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-UART-009",
+    "kind": "pin",
+    "scope": [
+      "uart"
+    ],
+    "text": "uart_set_pin() 的 tx_io_num/rx_io_num 等引脚参数填 GPIO 编号；本板 UART1 用 TX=GPIO0、RX=GPIO1，不想改的方向填 UART_PIN_NO_CHANGE",
+    "cite": {
+      "doc": "idf-driver-uart-h",
+      "page": null,
+      "section": "UART_PIN_NO_CHANGE",
+      "quote": "When calling `uart_set_pin`, instead of GPIO number, `UART_PIN_NO_CHANGE`"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "uart_set_pin",
+      "header": "driver/uart.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-UART-011",
+    "kind": "pin",
+    "scope": [
+      "uart"
+    ],
+    "text": "GPIO20、GPIO21 是 UART0 的 U0RXD/U0TXD（手册列为 Priority 3，应与 UART0 冲突），不要拿它们做 UART1 或其它外设的引脚",
+    "cite": {
+      "doc": "esp32c3-ds",
+      "page": 23,
+      "section": "2.3.4 Peripheral Pin Assignment",
+      "quote": "* GPIO20, GPIO21: UART0 interface."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": {
+      "type": "pin_forbidden",
+      "gpio": [
+        20,
+        21
+      ]
+    },
     "notes": [
       "规则判定器通过",
       "人工确认"
