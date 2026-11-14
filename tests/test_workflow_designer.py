@@ -173,5 +173,25 @@ class RelaxedEngineTest(_Tmp):
                                     and e["data"].get("role") == "coder"][0]["data"]["scores"]["reason"])
 
 
+class RoundtripProblemsTest(unittest.TestCase):
+    """2026-11-15 随机点击长测发现：条件步骤的跳转目标填成不存在的步骤，结构检查没拦住，点"保存为新版本"抛异常。"""
+
+    def test_dangling_reference_is_a_check_problem(self):
+        try:
+            from firmforge.gui.designer_page import roundtrip_problems
+        except ImportError as exc:
+            self.skipTest(str(exc))
+        from dataclasses import replace
+        wf = load_workflow("module_dev")
+        self.assertEqual(roundtrip_problems(wf), [])
+        name, steps = next((n, st) for n, st in wf.subflows.items() if any(s.kind == "condition" for s in st))
+        bad = tuple(replace(s, then=("0",)) if s.kind == "condition" else s for s in steps)
+        wf2 = replace(wf, subflows={**wf.subflows, name: bad})
+        probs = roundtrip_problems(wf2)
+        self.assertEqual(len(probs), 1)
+        self.assertIn("不存在的步骤 0", probs[0])
+        self.assertIn("没连上", probs[0])                     # 检查面板归到"连线"一类
+
+
 if __name__ == "__main__":
     unittest.main()

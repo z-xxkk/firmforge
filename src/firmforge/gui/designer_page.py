@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDockWidget, QFormL
                                QPushButton, QSizePolicy, QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ..orchestrator.workflow import (CONDITIONS, Step, Workflow, dump_workflow, engine_problems, list_versions,
-                                     load_workflow, parse_workflow, save_workflow)
+                                     WorkflowError, load_workflow, parse_workflow, save_workflow)
 from .check_panel import CheckPanel
 from .graph import COND_NAMES, KIND_NAMES, ROLE_NAMES, STEP_H, STEP_MIME, STEP_W, FlowCanvas
 from .runner import _Worker
@@ -67,6 +67,17 @@ def bump(version: str) -> str:
         parts[-1] = str(int(parts[-1]) + 1)
         return ".".join(parts)
     return version + ".1"
+
+
+def roundtrip_problems(wf: Workflow) -> list[str]:
+    """写成文件再读回来能不能通过（步骤 id 重复、引用了不存在的步骤等）。2026-11-15 随机点击长测发现：
+    在条件步骤的属性里把跳转目标填成不存在的"0"，结构检查没拦住，点"保存为新版本"时抛异常。"""
+    import tomllib
+    try:
+        parse_workflow(tomllib.loads(dump_workflow(wf)), f"{wf.name}.toml")
+    except (WorkflowError, tomllib.TOMLDecodeError) as exc:
+        return [f"{exc}（引用的步骤不存在，等于没连上）" if "不存在的步骤" in str(exc) else str(exc)]
+    return []
 
 
 class DesignerPage(QMainWindow):
@@ -313,7 +324,7 @@ class DesignerPage(QMainWindow):
     def check(self, quiet: bool = False):
         """结构检查（保存、试运行前也用它把关）。返回问题列表。"""
         from ..agents.registry import default_registry
-        probs = engine_problems(self.wf, default_registry())
+        probs = roundtrip_problems(self.wf) + engine_problems(self.wf, default_registry())
         self.problems.show_structure(probs, self._diff_text())
         return probs
 
@@ -858,7 +869,11 @@ class DesignerPage(QMainWindow):
         if self.wf == self.saved:
             QMessageBox.information(self, "没有改动", "和当前版本一样，不需要保存。")
             return
-        save_workflow(self.wf)
+        try:
+            save_workflow(self.wf)
+        except (WorkflowError, OSError) as exc:              # 兜底：存不下就明说，不让窗口出错
+            QMessageBox.warning(self, "保存失败", str(exc))
+            return
         self.saved = self.wf
         self.new_ids.clear()
         self.render_all()
