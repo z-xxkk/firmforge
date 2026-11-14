@@ -124,5 +124,46 @@ class LoopRoutesTestBuildErrorToTesterTest(unittest.TestCase):
                 self.assertEqual(seen.count("coder"), 1, seen)                      # 编码 Agent 只写了第一次
 
 
+class DiagnosisRetryTest(unittest.TestCase):
+    """诊断回复格式不对时补要一次（第 123 条）；一个字都没回（推理写满上限）不重试。"""
+
+    def setUp(self):
+        self.m = DesignModule("imu", "IMU", "hardware", ("imu.c", "include/imu.h"), provides=("int imu_read(void)",))
+        self.mr = ModuleResult("imu", "hardware")
+        self.mr.files, self.mr.tests = {"imu.c": ""}, {"test/test_imu.c": ""}
+
+    def run_diag(self, replies):
+        calls = []
+
+        def team(messages):
+            calls.append(messages)
+            return replies[min(len(calls), len(replies)) - 1]
+        with tempfile.TemporaryDirectory() as d:
+            f = make_flow(d, FakeLLM(team))
+            diag = f._diagnose(self.m, self.mr, RuleSet(), "board_test", "失败：x", 2)
+            ev = [e["type"] for e in read_events(f.rd.path)]
+        return diag, calls, ev
+
+    def test_bad_json_then_good(self):
+        good = '```json\n{"blame": "test", "rule": "", "evidence": "e", "instruction": "改测试"}\n```'
+        diag, calls, ev = self.run_diag(['```json\n{"blame": "test", "evidence": "说"了"}\n```', good])
+        self.assertEqual(diag["blame"], "test")
+        self.assertEqual(len(calls), 2)
+        self.assertIn("上一条回复没法用", calls[1][-1]["content"])
+        self.assertIn("format_retry", ev)
+
+    def test_missing_instruction_twice_falls_back(self):
+        bad = '```json\n{"blame": "code", "rule": "", "evidence": "e"}\n```'
+        diag, calls, _ = self.run_diag([bad, bad])
+        self.assertEqual(len(calls), 2)                     # 只补要一次
+        self.assertEqual(diag["blame"], "code")
+        self.assertIn("诊断输出不合格", diag["evidence"])
+
+    def test_empty_reply_not_retried(self):
+        diag, calls, _ = self.run_diag([""])
+        self.assertEqual(len(calls), 1)
+        self.assertIn("诊断输出不合格", diag["evidence"])
+
+
 if __name__ == "__main__":
     unittest.main()

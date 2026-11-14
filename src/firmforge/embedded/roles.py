@@ -186,6 +186,13 @@ def diagnoser_messages(profile: HardwareProfile, rules: RuleSet | None, module: 
     return [{"role": "system", "content": system}, {"role": "user", "content": b.render()}]
 
 
+def diagnosis_format_reminder(problem: str) -> str:
+    """诊断回复不合格时的补交要求：说清哪里不对、要什么格式。"""
+    return (f"上一条回复没法用：{problem}。请只输出一个 ```json 代码块，不要别的文字，形如\n"
+            '```json\n{"blame": "code", "rule": "", "evidence": "一句话证据", "instruction": "一句话修改指令"}\n```\n'
+            f"blame 只能是 {'、'.join(BLAMES)}；instruction 必须写；字符串里不要出现未转义的双引号和换行。")
+
+
 def parse_diagnosis(data: dict, rules: RuleSet | None = None) -> dict:
     blame = data.get("blame")
     if blame not in BLAMES:

@@ -113,6 +113,33 @@ class PipelineTest(unittest.TestCase):
             self.assertIn(why, r.content)
             self.assertTrue(r.content.startswith("工具调用失败"))        # 不伪装成功
 
+    def test_duplicate_key_fills_missing_required(self):
+        # 第 123 条：模型把 {"query": 关键词, "doc": 资料} 写成 {"doc": 关键词, "doc": 资料}，基线里丢了 76 次 query
+        reg = ToolRegistry()
+        reg.register(ToolDef(name="doc_search", toolset="demo", description="查",
+                             parameters={"type": "object", "properties": {"query": {"type": "string"},
+                                                                          "doc": {"type": "string"}},
+                                         "required": ["query"], "additionalProperties": False},
+                             execute=lambda a, c: f"q={a['query']} d={a.get('doc', '')}"))
+        pipe, _ = pipeline(reg, reg.all())
+        r = pipe.execute(ToolCall("c1", "doc_search", '{"doc": "ledc_stop idle_level", "doc": "idf-driver-ledc-h"}'))
+        self.assertTrue(r.ok, r.content)
+        self.assertIn("q=ledc_stop idle_level d=idf-driver-ledc-h", r.content)
+        self.assertIn("doc 写了两次", r.content)                         # 告诉模型下次写对
+        self.assertIn("query（必填", r.content)
+        r = pipe.execute(ToolCall("c2", "doc_search", '{"query": "a", "doc": "x", "doc": "y"}'))
+        self.assertTrue(r.ok)                                             # 不缺必填：照常（后一个算数），不提示
+        self.assertEqual(r.content, "q=a d=y")
+        r = pipe.execute(ToolCall("c3", "doc_search", '{"doc": "esp_err_t ledc_set_duty"}'))
+        self.assertFalse(r.ok)                                            # 真缺：报错里写清参数怎么写
+        self.assertIn("缺少参数 query", r.content)
+        self.assertIn('例：{"query": "...", "doc": "..."}', r.content)
+        r = pipe.execute(ToolCall("c4", "doc_search", '{"doc": "a", "doc": 3}'))
+        self.assertFalse(r.ok)                                            # 类型不对的不拿来补
+        r = pipe.execute(ToolCall("c5", "doc_search", '["ledc", "idf"]'))
+        self.assertFalse(r.ok)
+        self.assertIn("参数必须是 JSON 对象", r.content)
+
     def test_tool_exception_and_timeout(self):
         self.reg.register(ToolDef("boom", "demo", "d", {"type": "object", "properties": {}},
                                   execute=lambda a, c: 1 / 0))

@@ -51,7 +51,8 @@ from ..tools import ToolContext, ToolPipeline, default_registry as default_tools
 from ..tools.loop import call_with_tools
 from .design import Design, DesignModule, design_from_text, designer_messages, designer_retry_message
 from .firmware_workflow import FirmwarePlan, firmware_plan
-from .roles import (coder_messages, coder_repair_message, diagnoser_messages, format_reminder, parse_diagnosis,
+from .roles import (coder_messages, coder_repair_message, diagnoser_messages, diagnosis_format_reminder, format_reminder,
+                    parse_diagnosis,
                     parse_output, test_file, tester_messages, tester_repair_message)
 
 RULE_MODES = ("verified", "unverified", "none")
@@ -568,7 +569,20 @@ class EmbeddedFlow:
         try:
             diag = parse_diagnosis(extract_json(resp.text), rules)
         except ValueError as exc:
-            diag = {"blame": "code", "instruction": "", "evidence": f"诊断输出不合格（{exc}），按代码问题处理", "rule": ""}
+            diag = None
+            # 有回复但格式不对（JSON 坏了、缺字段）：指出哪里不对再要一次（第 123 条：基线里 11 次不合格有 8 次是这种）。
+            # 一个字都没回（推理写满了输出上限）不重试：再要一次多半又写满，白花一倍
+            if (resp.text or "").strip():
+                self.bus.emit("format_retry", m.id, agent="diagnoser", attempt=attempt, missing=[str(exc)[:120]], round=1)
+                again = msgs + [{"role": "assistant", "content": resp.text},
+                                {"role": "user", "content": diagnosis_format_reminder(str(exc))}]
+                resp = self.agents.call("diagnoser", again, m.id, attempt=attempt, purpose="诊断（补交结论）")
+                try:
+                    diag = parse_diagnosis(extract_json(resp.text), rules)
+                except ValueError as exc2:
+                    exc = exc2
+            if diag is None:
+                diag = {"blame": "code", "instruction": "", "evidence": f"诊断输出不合格（{exc}），按代码问题处理", "rule": ""}
         self.bus.emit("diagnosis", m.id, attempt=attempt, **diag)
         return diag
 

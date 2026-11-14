@@ -52,6 +52,39 @@ def _type_ok(value, schema: dict) -> bool:
             "number": isinstance(value, (int, float)) and not isinstance(value, bool)}.get(t, True)
 
 
+def param_usage(tool: ToolDef) -> str:
+    """参数说明，放进出错提示里，例如 'query（必填，string）、doc（可选，string）；例：{"query": "...", "doc": "..."}'"""
+    props = tool.parameters.get("properties", {})
+    req = set(tool.parameters.get("required", []))
+    parts = [f"{k}（{'必填' if k in req else '可选'}，{v.get('type', '')}）" for k, v in props.items()]
+    example = json.dumps({k: "..." for k in props}, ensure_ascii=False)
+    return "、".join(parts) + f"；例：{example}"
+
+
+def parse_arguments(raw: str, tool: ToolDef) -> tuple[object, str]:
+    """解析模型给的参数。模型偶尔把同一个键写两次（如 {"doc": "关键词", "doc": "资料编号"}，JSON 只留最后一个，
+    必填的 query 就丢了；第 123 条：基线里 doc_search 这样丢参数 76 次）：这时把前面重复的那个值补给缺的必填参数。
+    返回 (参数, 纠正说明；没纠正是空字符串)。"""
+    pairs_seen: list[list[tuple[str, object]]] = []
+    args = json.loads(raw, object_pairs_hook=lambda pairs: pairs_seen.append(pairs) or dict(pairs))
+    if not isinstance(args, dict) or not pairs_seen:
+        return args, ""
+    top = pairs_seen[-1]                                   # 最外层对象最后构造
+    keys = [k for k, _ in top]
+    dups = [(k, v) for i, (k, v) in enumerate(top) if k in keys[i + 1:]]   # 被后面同名键盖掉的值
+    missing = [k for k in tool.parameters.get("required", []) if k not in args]
+    props = tool.parameters.get("properties", {})
+    notes = []
+    for key in missing:
+        for j, (k, v) in enumerate(dups):
+            if _type_ok(v, props.get(key, {})):
+                args = {**args, key: v}
+                notes.append(f"参数里 {k} 写了两次，前一个当作 {key}={json.dumps(v, ensure_ascii=False)}")
+                dups.pop(j)
+                break
+    return args, ("；".join(notes) + f"。正确写法：{param_usage(tool)}") if notes else ""
+
+
 def check_arguments(tool: ToolDef, args) -> str | None:
     """按参数格式做最基本的检查：是对象、必填项齐全、类型对、不多给。返回问题描述，没问题返回 None。"""
     if not isinstance(args, dict):
@@ -59,7 +92,7 @@ def check_arguments(tool: ToolDef, args) -> str | None:
     props = tool.parameters.get("properties", {})
     for key in tool.parameters.get("required", []):
         if key not in args:
-            return f"缺少参数 {key}"
+            return f"缺少参数 {key}。{tool.name} 的参数：{param_usage(tool)}"
     for key, value in args.items():
         if key not in props:
             if tool.parameters.get("additionalProperties") is False:
@@ -107,7 +140,7 @@ class ToolPipeline:
         if tool is None or call.name not in self.allowed:
             return self._fail(call, f"你不能使用工具 {call.name}", t0)
         try:
-            args = json.loads(call.arguments or "{}")
+            args, fixed = parse_arguments(call.arguments or "{}", tool)
         except json.JSONDecodeError as exc:
             return self._fail(call, f"参数不是合法的 JSON：{exc}", t0)
         problem = check_arguments(tool, args)
@@ -138,6 +171,8 @@ class ToolPipeline:
         if "error" in box:
             return self._fail(call, box["error"], t0)
         text = str(box.get("value", ""))
+        if fixed:                                          # 告诉模型参数被纠正了，下次写对
+            text = f"（提示：{fixed}）\n\n" + text
         # 5 整理结果
         truncated = len(text) > self.max_chars
         summary = tool.summarize(args, text) if tool.summarize else ""

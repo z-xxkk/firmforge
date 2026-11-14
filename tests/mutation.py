@@ -46,6 +46,13 @@ TARGETS = {
                      ["summarize", "plan_todo", "missing_scopes", "load_rows", "run_once", "evaluate", "_run_todo",
                       "measured_rules", "_read_cache", "unverified_rules"],
                      ["test_board_eval", "test_fault_injection", "test_mutation_gaps"]),
+    # 修正循环的分派（第 122、123 条）：交给谁改、诊断补要、编译报错落在哪
+    "repair_route": ("firmforge/embedded/flow.py", ["build_error_files", "EmbeddedFlow._diagnose", "EmbeddedFlow._module"],
+                     ["test_repair_sim", "test_build_blame", "test_embedded_flow"]),
+    "repair_interp": ("firmforge/embedded/fw_interpreter.py", ["FirmwareInterpreter._repair_loop"],
+                      ["test_repair_sim", "test_build_blame", "test_firmware_workflow"]),
+    "tool_args": ("firmforge/tools/pipeline.py", ["parse_arguments", "check_arguments", "param_usage"],
+                  ["test_tools", "test_mcp"]),
 }
 
 CMP_SWAP = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.LtE, ast.LtE: ast.Lt, ast.Gt: ast.GtE,
