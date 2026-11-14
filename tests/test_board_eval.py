@@ -64,6 +64,15 @@ def make_ctx(d, team, rules, calls):
 
 
 class DesignTest(unittest.TestCase):
+    def test_spec_names_the_board_chip(self):
+        # 2026-11-14：5 道题面还写着"ESP32-S3"（题目从 S3 换到 C3 时漏改，第 120 条），Agent 会同时看到两种芯片
+        import re
+        chip = re.sub(r"^esp32(\w\d)$", lambda m: "ESP32-" + m.group(1).upper(), str(PROFILE.chip.value))   # ESP32-C3
+        for t in discover_board_tasks(TASKS):
+            with self.subTest(task=t.id):
+                named = set(re.findall(r"ESP32(?:-[A-Z][0-9])?", t.spec_path.read_text(encoding="utf-8")))
+                self.assertLessEqual(named, {chip, "ESP32"}, f"题面提到了别的芯片：{named}")
+
     def test_fixed_design_matches_public_interface(self):
         for t in discover_board_tasks(TASKS):
             with self.subTest(task=t.id):

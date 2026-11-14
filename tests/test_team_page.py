@@ -54,12 +54,22 @@ class TeamPageTest(unittest.TestCase):
         st.close()
 
     def tearDown(self):
+        # 页面用完立刻销毁：留给垃圾回收在后面别的测试中途随机析构，整套测试一起跑时会让进程崩溃（2026-11-14 实测）
+        import gc
+        for p in getattr(self, "pages", []):
+            p.close()
+            p.deleteLater()
+        self.app.processEvents()
+        self.pages = []
+        gc.collect()
         os.chdir(self.cwd)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def page(self):
         from firmforge.gui.team_page import TeamPage
-        return TeamPage(self.tmp)
+        p = TeamPage(self.tmp)
+        self.pages = getattr(self, "pages", []) + [p]
+        return p
 
     def row(self, p, name):
         return next(r for r in range(p.table.rowCount()) if p.table.item(r, 0).text() == name)

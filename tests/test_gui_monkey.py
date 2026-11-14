@@ -317,6 +317,14 @@ class BackendTest(unittest.TestCase):
                                                    "header": "driver/uart.h"}}
         self.replies = [("资料核查员", "```json\n" + json.dumps([rule], ensure_ascii=False) + "\n```"),
                         ("规则核对员", '```json\n{"faithful": true, "reason": "一致"}\n```')]
+        # 沙盒里的规则库先去掉 uart 规则，保证"缺规则 → 查资料 → 等人确认"这条路一定会走到
+        # （2026-11-14 真规则库补了 uart 规则后，这个测试就不再问了；测试不能依赖真规则库里有什么）
+        rp = self.sandbox / "hardware" / "esp32c3_supermini" / "rules.json"
+        data = json.loads(rp.read_text(encoding="utf-8"))
+        items = data["rules"] if isinstance(data, dict) else data
+        kept = [r for r in items if "uart" not in (r.get("scope") or [])]
+        rp.write_text(json.dumps({**data, "rules": kept} if isinstance(data, dict) else kept, ensure_ascii=False, indent=2),
+                      encoding="utf-8")
         b = EmbeddedBackend()
         asked = []
         b.ask.connect(lambda kind, payload: (asked.append((kind, payload)),
