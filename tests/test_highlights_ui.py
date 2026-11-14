@@ -239,6 +239,37 @@ class TimelineDataTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_QT, "需要 PySide6（在 firmforge-gui 镜像里跑）")
+class JudgeSummaryTest(unittest.TestCase):
+    """历史评测运行的隐藏测试判定（彩排发现：以前取报告最后一行，显示成了调试信息）。"""
+
+    def setUp(self):
+        try:
+            from firmforge.gui.chat_page import judge_summary
+        except ImportError as exc:                     # 没装 PySide6
+            self.skipTest(str(exc))
+        self.f = judge_summary
+
+    def test_takes_summary_line_not_debug(self):
+        t = self.f("共 6 个用例，通过 6，失败 0\n调试信息：100 Hz 收到 200 组\n调试信息：丢弃 98 组", "pass")
+        self.assertIn("**通过**", t)
+        self.assertIn("共 6 个用例，通过 6", t)
+        self.assertNotIn("丢弃", t)
+
+    def test_failed_cases(self):
+        t = self.f("失败：复位后读数（x.c:55）\n共 4 个用例，通过 3，失败 1", "fail")
+        self.assertIn("**没通过**", t)
+        self.assertNotIn("以隐藏测试为准", t)
+
+    def test_flow_and_judge_disagree(self):
+        self.assertIn("以隐藏测试为准", self.f("共 6 个用例，通过 6，失败 0", "fail"))
+        self.assertIn("没覆盖到", self.f("共 6 个用例，通过 5，失败 1", "pass"))
+
+    def test_skipped_or_empty(self):
+        self.assertIn("上板测试跳过：没插板子", self.f("上板测试跳过：没插板子", "pass"))
+        self.assertIn("没有内容", self.f("", ""))
+        self.assertIn("**没通过**", self.f("共 0 个用例，通过 0，失败 0"))
+
+
 class HighlightsGuiTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -294,7 +325,10 @@ class HighlightsGuiTest(unittest.TestCase):
             runs.mkdir()
             rd = rd.rename(runs / "20261111-120000-eval-x")
             page = ChatPage(proj)
-            page.refresh_sessions()
+            page.show_cli_runs.setChecked(False)
+            self.assertFalse(any(page.sessions.item(i).data(Qt.UserRole) for i in range(page.sessions.count())),
+                             "评测、命令行的运行默认不列在会话里")
+            page.show_cli_runs.setChecked(True)                             # 勾上才列出来
             item = next(page.sessions.item(i) for i in range(page.sessions.count())
                         if page.sessions.item(i).data(Qt.UserRole))
             page._open_session(item)
@@ -310,11 +344,12 @@ class HighlightsGuiTest(unittest.TestCase):
             blocks = page.findChildren(RunBlock)
             self.assertTrue(blocks and blocks[-1].done)                     # 过程折叠，结束后标"过程 · N 步"
             self.assertIn("过程", blocks[-1].head.text())
-            (rd / "judge_report.txt").write_text("共 4 个用例，通过 3，失败 1", encoding="utf-8")
+            (rd / "judge_report.txt").write_text("失败：某用例\n共 4 个用例，通过 3，失败 1\n调试信息：丢弃 98 组", encoding="utf-8")
             page.open_run(rd)                                               # 评测运行：显示隐藏测试判定
             from firmforge.gui.chat_page import AgentMessage
             texts = [m.body.text() for m in page.findChildren(AgentMessage)]
             self.assertTrue(any("隐藏测试判定" in t and "通过 3" in t for t in texts))
+            self.assertFalse(any("隐藏测试判定" in t and "丢弃 98 组" in t for t in texts))   # 不拿最后一行调试信息当结论
             self.assertFalse(any("元" in t and "费用" in t for t in texts))
             page.replay_btn.click()                                         # 从头回放
             self.assertIsNotNone(page.replay)

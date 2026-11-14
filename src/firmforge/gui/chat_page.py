@@ -41,6 +41,35 @@ DEFAULT_HW = "hardware/esp32c3_supermini"
 BLAME = {"code": "代码", "test": "测试", "rule": "规则", "hardware": "硬件或接线"}
 
 
+def _run_verdict(run_dir: Path) -> str:
+    """运行目录里 run.json 记的流程结论；读不出来是空字符串。"""
+    try:
+        return json.loads((run_dir / "run.json").read_text(encoding="utf-8")).get("verdict", "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def judge_summary(report: str, flow_verdict: str = "") -> str:
+    """历史评测运行的隐藏测试判定写成一句话：取报告里"共 N 个用例，通过 X，失败 Y"那一行（不是最后一行，
+    最后几行是调试信息）；流程自己的结论和隐藏测试不一样时说明以哪个为准。"""
+    import re
+    lines = report.strip().splitlines()
+    head = next((x for x in lines if re.match(r"共 \d+ 个用例", x)), "")
+    if head:
+        m = re.match(r"共 (\d+) 个用例，通过 (\d+)", head)
+        ok = bool(m) and m.group(1) == m.group(2) and m.group(1) != "0"
+        text = f"隐藏测试判定：**{'通过' if ok else '没通过'}**（{head}）。"
+    else:                                          # 跳过、没烧进去之类：报告第一行就是原因
+        ok = False
+        text = f"隐藏测试判定：{lines[0] if lines else '（没有内容）'}"
+    if head and ok and flow_verdict and flow_verdict != "pass":
+        text += ("\n\n流程自己的检查没通过（常见原因是 Agent 自己写的测试有错），但交付的代码过了隐藏测试；"
+                 "评测以隐藏测试为准。")
+    elif head and not ok and flow_verdict == "pass":
+        text += "\n\n流程自己的检查通过了，但隐藏测试没过：Agent 自己的测试没覆盖到这些情况。"
+    return text + "\n\n隐藏测试只给评测判定用，任何 Agent 都看不到。"
+
+
 def pill_combo(items: list[tuple[str, str]], prefix: str) -> QComboBox:
     cb = QComboBox()
     cb.setObjectName("Pill")
@@ -297,6 +326,12 @@ class ChatPage(QWidget):
         self.sessions.setTextElideMode(Qt.ElideRight)
         self.sessions.itemClicked.connect(self._open_session)
         left.lay.addWidget(self.sessions, 1)
+        # 评测、命令行跑出来的运行默认不列（一次评测就几十条，会把对话淹没）；要看再勾上
+        self.show_cli_runs = QCheckBox("显示评测和命令行的运行")
+        self.show_cli_runs.setObjectName("Faint")
+        self.show_cli_runs.setChecked(QSettings().value("chat/show_cli_runs", False, type=bool))
+        self.show_cli_runs.toggled.connect(lambda on: (QSettings().setValue("chat/show_cli_runs", on), self.refresh_sessions()))
+        left.lay.addWidget(self.show_cli_runs)
         left.setMinimumWidth(150)
 
         # 中：对话
@@ -581,7 +616,7 @@ class ChatPage(QWidget):
         last = None
         rows = [("chat", c["title"], c["path"], c["mtime"], c["runs"]) for c in list_conversations(self.chats_dir)]
         linked = {Path(r).name for c in rows for r in c[4]}
-        if self.runs_dir.is_dir():
+        if self.runs_dir.is_dir() and self.show_cli_runs.isChecked():
             for rd in self.runs_dir.iterdir():
                 if (rd / "events.jsonl").is_file() and rd.name not in linked:
                     rows.append(("run", rd.name, rd, (rd / "events.jsonl").stat().st_mtime, [str(rd)]))
@@ -1534,8 +1569,7 @@ class ChatPage(QWidget):
         if judge.is_file():
             from PySide6.QtWidgets import QMessageBox
             text = judge.read_text(encoding="utf-8", errors="replace").strip()
-            last = text.splitlines()[-1] if text else "（没有内容）"
-            m = self.add_agent("FirmForge", "reviewer", f"隐藏测试判定：{last}\n\n隐藏测试只给评测判定用，任何 Agent 都看不到。")
+            m = self.add_agent("FirmForge", "reviewer", judge_summary(text, _run_verdict(run_dir)))
             m.add_action("看判定报告", lambda: QMessageBox.information(self, "隐藏测试判定", text[:4000]))
         mods = list(self.view.modules.values())
         pick = next((m for m in mods if m.status == "failed"), mods[0] if mods else None)
