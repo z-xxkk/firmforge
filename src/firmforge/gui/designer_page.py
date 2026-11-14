@@ -124,8 +124,12 @@ class DesignerPage(QMainWindow):
     def _dock(self, title: str, widget: QWidget, area, name: str) -> QDockWidget:
         d = QDockWidget(title, self)
         d.setObjectName(name)
-        holder = Panel(margins=(12, 6, 12, 10))
-        holder.lay.addWidget(widget)
+        # 面板固定以后不需要系统标题栏（它画成直角，压在圆角面板上，四角不圆、标题下有接缝）：
+        # 换成空标题栏，标题放进圆角面板里，和其他页面一样
+        d.setTitleBarWidget(QWidget())
+        holder = Panel(margins=(14, 12, 14, 10))
+        holder.lay.addWidget(label(title, "H3"))
+        holder.lay.addWidget(widget, 1)
         d.setWidget(holder)
         self._home = {**getattr(self, "_home", {}), name: area}
         d.setFeatures(QDockWidget.NoDockWidgetFeatures)   # 面板固定在原位：不能拖走、不能浮出窗口；面板之间的缝照样能拖着调大小
