@@ -1,0 +1,5 @@
+# 题目划分（DECISIONS 第 119 条，docs/TEST_PLAN.md）：board-eval --tasks tune 或 --tasks test
+# 调优题：改提示词、调度器学习、攒经验只在这些题上做
+tune = ["gpio_edge_count", "gptimer_tick", "i2c_bus_scan", "imu_uart_logger", "uart_loopback"]
+# 测试题：只在改进前、改进后各测一次；调优期间不看它们的逐个用例结果
+test = ["ledc_pwm", "max30102_fifo", "max30102_temp", "mpu6050_drdy", "mpu6050_drv_idf", "rmt_pulse_meter"]

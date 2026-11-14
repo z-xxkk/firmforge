@@ -77,7 +77,7 @@ class DesignTest(unittest.TestCase):
     def test_parse_configs_and_missing_scopes(self):
         self.assertEqual(parse_configs("single, verified"), ["single", "verified"])
         with self.assertRaises(ValueError):
-            parse_configs("single,full")
+            parse_configs("single,best")
         approved = RuleSet([r.advance("checked").advance("approved") for r in good_rules()])
         self.assertEqual(missing_scopes(approved, ("i2c", "mpu6050")), [])
         self.assertEqual(missing_scopes(approved, ("i2c", "rmt")), ["rmt"])       # scope 为 all 的规则不算覆盖
@@ -117,7 +117,7 @@ class EvaluateTest(unittest.TestCase):
             n_calls = len(team.seen)
             evaluate([TASK], list(CONFIGS), 1, out, make_ctx(d, team, approved, calls), progress=lambda s: None)
             self.assertEqual(len(team.seen), n_calls)
-            self.assertEqual(len((out / "runs.jsonl").read_text(encoding="utf-8").splitlines()), 4)
+            self.assertEqual(len((out / "runs.jsonl").read_text(encoding="utf-8").splitlines()), len(CONFIGS))
 
     def test_verified_without_rule_library_is_skipped_and_retried(self):
         team, calls = FakeTeam(), []

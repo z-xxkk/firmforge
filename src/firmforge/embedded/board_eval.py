@@ -5,7 +5,10 @@
 - none：多 Agent 流程（编码、测试 Agent 上板测试、诊断修正），不给规则；
 - unverified：再加上查资料 Agent 提炼、没有核对的规则（每道题生成一次，各次运行复用，DECISIONS 第 94 条；
   生成的费用单独记在 unverified_rules/<题目>.json，汇总里单列）；
-- verified：改用经过规则判定器核对、人工确认过的规则库（事先用 `firmforge rules build` 建好）。
+- verified：改用经过规则判定器核对、人工确认过的规则库（事先用 `firmforge rules build` 建好）；
+- full：verified 再加智能调度和经验库（DECISIONS 第 119 条）：编码 Agent 在 coder-fast（快档）和 coder-strong（强档）
+  之间由调度器按这次实验数据库里的成绩挑（其他 Agent 仍统一快档），修好的问题记进经验库、下次编码前附在提示词后面。
+  调优时数据库照常学习；复测时用 FrozenStore 冻结（只读不写），见 docs/TEST_PLAN.md。
 
 判定（所有配置相同，Agent 看不到）：固定判定规则 tasks_board/judge_rules.json 的合规检查 → 编译 →
 上板跑隐藏测试（board_task.judge_on_board）。公共头文件一律用题目自带的。
@@ -42,9 +45,11 @@ from ..grounding.research import parse_rules, research_messages
 from ..grounding.rules import Rule
 from .roles import coder_messages, coder_repair_message, format_reminder, parse_output
 
-CONFIGS = ("single", "none", "unverified", "verified")
+CONFIGS = ("single", "none", "unverified", "verified", "full")
 CSV_FIELDS = ("task", "config", "run", "verdict", "failed_layer", "cases_passed", "cases_total", "failed_cases",
-              "flow_verdict", "attempts", "tokens", "cost", "seconds", "rules_used", "run_dir", "note")
+              "flow_verdict", "attempts", "tokens", "cost", "seconds", "rules_used", "run_dir", "note",
+              "coder_turns", "strong_turns", "exp_used")
+RULE_CONFIGS = ("verified", "full")          # 要用规则库（缺了适用范围的已确认规则就跳过）
 
 
 class EvalDataError(ValueError):
@@ -94,6 +99,8 @@ class EvalContext:
     secrets: tuple[str, ...] = ()
     subscribers: tuple[Callable[[dict], None], ...] = ()
     judge_fn: Callable[..., JudgeResult] = judge_on_board      # 单元测试里换成假的判定
+    store: object | None = None          # full 用的实验数据库（调度成绩、经验库）；复测时是 FrozenStore
+    full_registry: Registry | None = None  # full 用：编码 Agent 保留各自档位，其他统一档位（full_eval_registry）
 
 
 @dataclass
@@ -114,6 +121,9 @@ class EvalRow:
     rules_used: int = 0
     run_dir: str = ""
     note: str = ""
+    coder_turns: int = 0                 # 编码交给 Agent 的次数（第一次写和每次修改各算一次）
+    strong_turns: int = 0                # 其中交给强档编码 Agent 的次数（full 看调度器怎么分配）
+    exp_used: int = 0                    # 编码前用上经验库的次数
 
     def to_dict(self) -> dict:
         return {k: getattr(self, k) for k in CSV_FIELDS}
@@ -230,7 +240,7 @@ def run_once(task: BoardTask, cfg: str, run_no: int, ctx: EvalContext) -> EvalRo
     row = EvalRow(task.id, cfg, run_no, cases_total=hidden_case_count(task))
     t0 = time.time()
     name = f"eval-{task.id}-{cfg}-{run_no}"
-    if cfg == "verified":
+    if cfg in RULE_CONFIGS:
         miss = missing_scopes(ctx.rules, task.scopes)
         if miss:
             row.verdict, row.failed_layer = "skipped", "skipped"
@@ -240,15 +250,17 @@ def run_once(task: BoardTask, cfg: str, run_no: int, ctx: EvalContext) -> EvalRo
         res, files, attempts = run_single(task, ctx, name)
     else:
         design = task_design(task)
-        rules = (RuleSet(list(ctx.rules)) if cfg == "verified" else
+        rules = (RuleSet(list(ctx.rules)) if cfg in RULE_CONFIGS else
                  unverified_rules(task, ctx) if cfg == "unverified" else RuleSet())
         flow = EmbeddedFlow(llm=ctx.llm, settings=ctx.settings, profile=ctx.profile,
                             spec=task.spec_path.read_text(encoding="utf-8"), rules=rules,
                             library=ctx.library if cfg != "none" else None, verifier=None, runs_root=ctx.runs_root,
-                            name=name, rule_mode=cfg, idf=ctx.idf, board=ctx.board, registry=ctx.registry,
+                            name=name, rule_mode="verified" if cfg == "full" else cfg, idf=ctx.idf, board=ctx.board,
+                            registry=(ctx.full_registry or ctx.registry) if cfg == "full" else ctx.registry,
                             max_attempts=ctx.max_attempts, subscribers=ctx.subscribers, secrets=ctx.secrets,
                             design=design, locked=task.public_files(), extra_requires=task.requires,
-                            build_rules=False)
+                            build_rules=False, coder=None if cfg == "full" else "coder-strong",
+                            store=ctx.store if cfg == "full" else None)
         res = flow.run()
         mr = res.modules.get(design.modules[0].id)
         files = dict(mr.files) if mr else {}
@@ -257,6 +269,7 @@ def run_once(task: BoardTask, cfg: str, run_no: int, ctx: EvalContext) -> EvalRo
     row.flow_verdict = res.verdict + (f"（{res.error}）" if res.error else "")
     row.attempts, row.tokens, row.cost = attempts, res.prompt_tokens + res.completion_tokens, round(res.cost, 6)
     row.run_dir = str(res.run_dir)
+    row.coder_turns, row.strong_turns, row.exp_used = coder_usage(Path(res.run_dir), ctx.full_registry or ctx.registry)
     if not files:
         row.verdict, row.failed_layer, row.note = "fail", "no_code", "Agent 没有交出代码"
     else:
@@ -269,6 +282,44 @@ def run_once(task: BoardTask, cfg: str, run_no: int, ctx: EvalContext) -> EvalRo
             row.note = j.report[:200]
     row.seconds = round(time.time() - t0, 1)
     return row
+
+
+def full_eval_registry(tier: str | None, thinking: str | None, base: Registry | None = None) -> Registry:
+    """full 配置用的 Agent 表：其他 Agent 照第 94 条统一档位和思考强度，编码 Agent 保留各自的档位（coder-fast 快档、
+    coder-strong 强档），调度器才有得挑；思考强度也统一，免得比较的是思考强度。"""
+    base = base or default_registry()
+    same = base.with_overrides(tier, thinking)
+    out = Registry()
+    for name in base.names():
+        for v in base.versions(name):
+            d = base.get(name, v)
+            out.register(replace(d, thinking=thinking or d.thinking) if d.role == "coder" else same.get(name, v))
+    return out
+
+
+def coder_usage(run_dir: Path, registry: Registry | None) -> tuple[int, int, int]:
+    """从运行记录数：编码交给 Agent 几次、其中几次交给强档、用上经验库几次。读不了记录就都是 0。"""
+    reg = registry or default_registry()
+    turns = strong = exp = 0
+    try:
+        lines = (Path(run_dir) / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0, 0, 0
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        d = e.get("data") or {}
+        if e.get("type") == "node_assigned" and d.get("role") == "coder":
+            turns += 1
+            try:
+                strong += reg.get(d.get("agent", "")).model_tier == "strong"
+            except Exception:                                  # noqa: BLE001  不认识的 Agent 不算强档
+                pass
+        elif e.get("type") == "experience_used":
+            exp += 1
+    return turns, strong, exp
 
 
 # ---------------------------------------------------------------- 批量与汇总
@@ -328,7 +379,7 @@ def evaluate(tasks: list[BoardTask], configs: list[str], runs: int, out_dir: Pat
                  f"排除问题后用同一个输出目录再开始会接着跑")
         raise
     finally:
-        write_outputs(rows, out_dir, configs, ctx.rules if "verified" in configs else None)
+        write_outputs(rows, out_dir, configs, ctx.rules if set(RULE_CONFIGS) & set(configs) else None)
     return rows
 
 
@@ -383,7 +434,7 @@ def write_outputs(rows: list[dict], out_dir: Path, configs: list[str], verified_
         w = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         w.writeheader()
         for r in rows:
-            w.writerow({**r, "failed_cases": "；".join(r["failed_cases"])})
+            w.writerow({**{k: r.get(k, "") for k in CSV_FIELDS}, "failed_cases": "；".join(r["failed_cases"])})
     text = summarize(rows, configs)
     gen = [(f, _read_cache(f)) for f in sorted((Path(out_dir) / "unverified_rules").glob("*.json"))]
     broken = [f.name for f, d in gen if d is None]
@@ -432,6 +483,7 @@ def summarize(rows: list[dict], configs: list[str] | None = None) -> str:
         lines.append(f"| {c} | {passes} / {len(valid)} | {passes / len(valid):.0%} | "
                      f"{(cp / ct if ct else 0):.0%} | {avg('attempts'):.1f} | {avg('tokens'):.0f} | "
                      f"{avg('cost'):.4f} | {avg('seconds'):.0f} | {skipped} |")
+    lines += stats_table(rows, configs)
     tasks = sorted({r["task"] for r in rows})
     lines += ["", "## 每道题（通过次数 / 有效次数）", "", "| 题目 | " + " | ".join(configs) + " |",
               "|---|" + "---|" * len(configs)]
@@ -450,3 +502,32 @@ def summarize(rows: list[dict], configs: list[str] | None = None) -> str:
         for (c, layer), n in sorted(layers.items(), key=lambda x: (configs.index(x[0][0]) if x[0][0] in configs else 99, x[0][1])):
             lines.append(f"| {c} | {layer} | {n} |")
     return "\n".join(lines) + "\n"
+
+
+def stats_table(rows: list[dict], configs: list[str]) -> list[str]:
+    """误差、稳定性、自检、花费（DECISIONS 第 119 条，算法见 eval_stats.py）。"""
+    from . import eval_stats as st
+    out = ["", "## 误差、稳定性和自检", "",
+           "通过率 ± 按题聚类的标准误（Miller 2024）；pass^3：同一题 3 次都通过的比例（τ-bench）；"
+           "自检准确率：流程自己的结论和隐藏测试一致的比例；"
+           "\"自检过严\"是流程判没过、代码却过了隐藏测试，\"自检过松\"相反。", "",
+           "| 配置 | 通过率 ± 标准误 | pass^3 | 自检准确率 | 自检过严 | 自检过松 | 通过时平均尝试次数 | 每通过一次花费（元） |",
+           "|---|---|---|---|---|---|---|---|"]
+    for c in configs:
+        rs = st.valid(rows, c)
+        if not rs:
+            continue
+        p, se, _ = st.pass_rate(rs)
+        k3, nk = st.pass_hat_k(rs, 3)
+        agree, n, strict, loose = st.self_check_agreement(rs) if c != "single" else (float("nan"), 0, 0, 0)
+        out.append(f"| {c} | {st.pct(p, se)} | {st.pct(k3)}{f'（{nk} 题）' if nk else ''} | {st.pct(agree)} | "
+                   f"{strict if n else '-'} | {loose if n else '-'} | {st.num(st.mean_attempts_of_passes(rs), '.1f')} | "
+                   f"{st.num(st.cost_per_pass(rs), '.3f')} |")
+    full = st.valid(rows, "full")
+    turns = sum(int(r.get("coder_turns") or 0) for r in full)
+    if turns:
+        strong = sum(int(r.get("strong_turns") or 0) for r in full)
+        used = sum(1 for r in full if int(r.get("exp_used") or 0) > 0)
+        out += ["", f"full 的调度：编码一共交出去 {turns} 次，其中 {strong} 次交给强档（{strong / turns:.0%}）；"
+                    f"{used} / {len(full)} 次运行用上了经验库。"]
+    return out

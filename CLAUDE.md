@@ -84,6 +84,10 @@ firmforge firmware --spec 需求.md --human-review --workflow firmware_review   
 firmforge check-board-tasks [题目 id]            # 上板评测题自检（没有板子时编译标准答案和变异体）
 firmforge board-eval --out results/<实验名> --plan --max-cost 0  # 先看要跑多少次、verified 缺哪些规则（不调用模型）
 firmforge board-eval --out results/<实验名> --runs 2 --max-cost 20  # 题目 × 四种配置 × 2 次（默认 fast 档、思考 low），最多花 20 元
+firmforge board-eval --tasks test --configs single,none,verified --runs 3 --out results/final_before --max-cost 15   # 最后一轮测试：基线（docs/TEST_PLAN.md）
+firmforge board-eval --tasks tune --configs none,full --runs 2 --out results/final_tune --max-cost 10        # 调优题；full 的调度成绩和经验库写进 results/final_tune/firmforge.db
+firmforge board-eval --tasks test --configs none,full --runs 3 --out results/final_after --db results/final_tune/firmforge.db --freeze --max-cost 12   # 复测（冻结）
+firmforge board-compare results/final_before results/final_after --out results/final_compare.md   # 前后逐题配对对比（不调用模型）
 QT_QPA_PLATFORM=offscreen python tests/monkey_designer.py --seeds 0-29 --steps 400   # 设计器随机操作长测（固定种子，可重现）；加 --workflow firmware_dev 测上板工作流
 QT_QPA_PLATFORM=offscreen python tests/monkey_pages.py --seeds 0-14 --steps 300      # 其他几页随机点击长测（在项目副本里跑）
 python tests/mutation.py                         # 变异测试：故意改错判定代码，看测试能否发现（约 2 分钟，结果在 results/mutation/）

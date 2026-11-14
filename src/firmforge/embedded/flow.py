@@ -127,13 +127,14 @@ class EmbeddedFlow:
                  rule_mode: str = "verified", human: Human | None = None, idf: IdfEnv | None = None,
                  board: BoardRunner | None = None, registry: Registry | None = None, max_attempts: int = 6,
                  subscribers: tuple[Callable[[dict], None], ...] = (), secrets: tuple[str, ...] = (),
-                 coder: str = "coder-strong", design: Design | None = None, locked: dict[str, str] | None = None,
+                 coder: str | None = "coder-strong", design: Design | None = None, locked: dict[str, str] | None = None,
                  extra_requires: tuple[str, ...] = (), build_rules: bool = True, workflow=None, store=None,
                  human_review: bool = False, confirm_design: Callable[[Design], str | None] | None = None,
                  prior_wiring: dict[str, int] | None = None,
                  confirm_module: Callable[[DesignModule, "ModuleResult", str], str | None] | None = None):
         """workflow：上板工作流（firmware_dev.toml，DECISIONS 第 110 条）决定走哪些步骤、在哪停下、最多试几次、
-        编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder，不经调度器、不用经验库。
+        编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder（coder=None 时由调度器挑）；
+        store 给了才有调度成绩和经验库（评测的 full 配置，DECISIONS 第 119 条）。
         给了工作流时由解释器逐步执行（fw_interpreter.py，DECISIONS 第 117 条）；confirm_module 是模块流程里
         "等人确认"步骤的回调，返回意见（空表示没意见）。"""
         if rule_mode not in RULE_MODES:
@@ -153,7 +154,7 @@ class EmbeddedFlow:
         self.store, self.human_review, self.confirm_design = store, human_review, confirm_design
         self.prior_wiring = dict(prior_wiring or {})       # 同一个项目上一次的接线（DECISIONS 第 108 条）
         self.exp = None
-        if workflow is not None and store is not None:
+        if store is not None:                            # 给了数据库就用经验库（评测的 full 配置也用，第 119 条）
             from ..memory.experience import ExperienceBase
             self.exp = ExperienceBase(store)
         from ..orchestrator.scheduler import make_strategy

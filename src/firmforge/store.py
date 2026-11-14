@@ -123,3 +123,14 @@ class Store:
     def query(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._lock:
             return [dict(r) for r in self._conn.execute(sql, args).fetchall()]
+
+
+class FrozenStore(Store):
+    """只读用的数据库（评测复测时冻结调度成绩和经验库，DECISIONS 第 119 条）：照常查询，所有写操作什么都不做。
+    数据库文件本身不动，所以同一份调优结果可以反复拿来复测。"""
+
+    def _exec(self, sql: str, args: tuple = ()) -> None:
+        return None
+
+    def execute(self, sql: str, args: tuple = ()) -> int:
+        return 0

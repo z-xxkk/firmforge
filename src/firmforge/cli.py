@@ -12,6 +12,7 @@ import os
 import sys
 import threading
 import time
+import tomllib
 from pathlib import Path
 
 from . import __version__, config
@@ -873,9 +874,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_firmware)
     s = sub.add_parser("board-eval", help="上板评测：上板题 × 配置（single/none/unverified/verified）× 次数（调用模型）")
     s.add_argument("--configs", default="single,none,unverified,verified", help="配置列表，逗号分隔（默认四种都跑）")
-    s.add_argument("--tasks", default="all", help="all 或题目 id 列表，逗号分隔")
+    s.add_argument("--tasks", default="all", help="all、tune（调优题）、test（测试题，见 tasks_board/splits.toml）或题目 id 列表，逗号分隔")
     s.add_argument("--runs", type=int, default=3, help="每个组合跑几次（默认 3）")
     s.add_argument("--out", required=True, help="输出目录，如 results/board_first；中断后用同一目录重跑会接着跑")
+    s.add_argument("--db", help="full 配置用的实验数据库（调度成绩、经验库），默认 <输出目录>/firmforge.db；不碰平时用的数据库")
+    s.add_argument("--freeze", action="store_true", help="复测用：--db 只读不写（调度成绩、经验库冻结，DECISIONS 第 119 条）")
     s.add_argument("--hw", default="hardware/esp32c3_supermini", help="硬件目录（含 profile.json、sources.toml、rules.json）")
     s.add_argument("--tasks-dir", default="tasks_board")
     s.add_argument("--port", help="板子串口（默认自动找）")
@@ -889,6 +892,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-cost", type=float, required=True,
                    help="这次最多花多少元（按缓存未命中价估算）；累计达到就不再开始新的运行，已跑的结果照常保存")
     s.set_defaults(func=cmd_board_eval)
+    s = sub.add_parser("board-compare", help="前后两次上板评测逐题配对对比（不调用模型）")
+    s.add_argument("before", help="改进前的输出目录（含 runs.jsonl）")
+    s.add_argument("after", help="改进后的输出目录")
+    s.add_argument("--out", help="对比报告写到这个文件（Markdown）")
+    s.set_defaults(func=cmd_board_compare)
     s = sub.add_parser("rules", help="硬件规则：build 查资料提炼并核对（调用模型、需人工确认）；list 列出；verify 重新核对")
     s.add_argument("action", choices=["build", "list", "verify"])
     s.add_argument("--hw", default="hardware/esp32c3_supermini", help="硬件目录（含 profile.json、sources.toml）")
@@ -1078,6 +1086,37 @@ def cmd_firmware(args) -> int:
     return VERDICT_EXIT.get(res.verdict, EXIT_FAIL)
 
 
+def task_split(root: Path, text: str) -> list[str]:
+    """--tasks 的值：tune / test 按 tasks_board/splits.toml 展开（DECISIONS 第 119 条），其余按逗号分隔的题目 id。"""
+    names = [t.strip() for t in text.split(",") if t.strip()]
+    out: list[str] = []
+    for n in names:
+        if n in ("tune", "test"):
+            f = Path(root) / "splits.toml"
+            try:
+                out += list(tomllib.loads(f.read_text(encoding="utf-8"))[n])
+            except (OSError, KeyError, tomllib.TOMLDecodeError) as exc:
+                raise UsageError(f"读不了题目划分 {f} 里的 {n}：{exc}") from exc
+        else:
+            out.append(n)
+    return list(dict.fromkeys(out))
+
+
+def cmd_board_compare(args) -> int:
+    """前后两次上板评测的对比（逐题配对，DECISIONS 第 119 条）。不调用模型。"""
+    from .embedded.board_eval import load_rows
+    from .embedded.eval_stats import compare_report
+    before, after = load_rows(Path(args.before)), load_rows(Path(args.after))
+    if not before or not after:
+        raise UsageError("两个目录里都要有 runs.jsonl")
+    text = compare_report(before, after, Path(args.before).name, Path(args.after).name)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text, encoding="utf-8")
+    print(text)
+    return EXIT_PASS
+
+
 def cmd_board_eval(args) -> int:
     """上板评测（DECISIONS 第 69 条 B 方向）：同一批上板题在几种配置下各跑几次，用固定判定规则和隐藏测试打分。"""
     from .embedded.board_eval import EvalDataError, evaluate, missing_scopes, parse_configs
@@ -1092,17 +1131,22 @@ def cmd_board_eval(args) -> int:
         raise UsageError("--runs 至少为 1")
     root = Path(args.tasks_dir)
     tasks = (discover_board_tasks(root) if args.tasks == "all"
-             else [load_board_task(root / t.strip()) for t in args.tasks.split(",") if t.strip()])
+             else [load_board_task(root / t) for t in task_split(root, args.tasks)])
+    if args.freeze and not (args.db and Path(args.db).is_file()):
+        raise UsageError("--freeze 要配合 --db 指向调优阶段留下的数据库（例如 results/final_tune/firmforge.db）")
     hwdir, profile, library, store, _, _ = _hw_context(args.hw, need_sources="unverified" in configs, rules=args.rules)
     rules_path = Path(args.rules) if args.rules else hwdir / "rules.json"
     print(f"{len(tasks)} 道题 × {len(configs)} 种配置 × {args.runs} 次 = {len(tasks) * len(configs) * args.runs} 次运行")
     print(f"花费上限 {args.max_cost:.2f} 元：累计达到后不再开始新的运行；所有 Agent 用 {args.tier} 档、思考强度 {args.think}、"
           f"最多尝试 {args.max_attempts} 次")
-    if "verified" in configs:
+    for c in [c for c in configs if c in ("verified", "full")]:
         for t in tasks:
             miss = missing_scopes(store, t.scopes)
             if miss:
-                print(f"  verified 会跳过 {t.id}：{rules_path} 里没有 {'、'.join(miss)} 的已确认规则")
+                print(f"  {c} 会跳过 {t.id}：{rules_path} 里没有 {'、'.join(miss)} 的已确认规则")
+    if "full" in configs:
+        db_path = Path(args.db) if args.db else Path(args.out) / "firmforge.db"
+        print(f"full：编码 Agent 由调度器在快档和强档之间挑；调度成绩和经验库{'冻结（只读）' if args.freeze else '写进'} {db_path}")
     if args.plan:
         return EXIT_PASS
     try:
@@ -1119,6 +1163,12 @@ def cmd_board_eval(args) -> int:
                             runs_root=Path(DEFAULT_RUNS_DIR), build_root=Path(".ff_data") / "idf_build",
                             max_attempts=args.max_attempts, tier=args.tier, think=args.think)
     out = Path(args.out)
+    if "full" in configs:
+        from .embedded.board_eval import full_eval_registry
+        from .store import FrozenStore, Store
+        db_path = Path(args.db) if args.db else out / "firmforge.db"
+        ctx.store = (FrozenStore if args.freeze else Store)(db_path)
+        ctx.full_registry = full_eval_registry(args.tier, args.think)
     try:
         evaluate(tasks, configs, args.runs, out, ctx, max_cost=args.max_cost)
     except EvalDataError as exc:
