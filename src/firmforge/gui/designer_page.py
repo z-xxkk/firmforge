@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDockWidget, QFormL
 
 from ..orchestrator.workflow import (CONDITIONS, Step, Workflow, dump_workflow, engine_problems, list_versions,
                                      load_workflow, parse_workflow, save_workflow)
+from .check_panel import CheckPanel
 from .graph import COND_NAMES, KIND_NAMES, ROLE_NAMES, STEP_H, STEP_MIME, STEP_W, FlowCanvas
 from .runner import _Worker
 from .widgets import FlowLayout, Panel, T, label
@@ -152,7 +153,7 @@ class DesignerPage(QMainWindow):
         top.addWidget(self.based_label)
         top.addWidget(self.sub_combo)
         for text, fn, kind in (("撤销", self.do_undo, "Ghost"), ("适应画布", self.canvas_fit, "Ghost"),
-                               ("检查", self.check, "Ghost"),
+                               ("检查", self.run_check, "Ghost"),
                                ("让 AI 改", self.ask_ai, "Ghost"), ("保存为新版本", self.save, ""),
                                ("试运行", self._try_run, "Primary")):
             b = QPushButton(text)
@@ -185,7 +186,8 @@ class DesignerPage(QMainWindow):
         self._fill_palette()
         self.palette.itemDoubleClicked.connect(lambda it: it.data(Qt.UserRole) and self.add_step(it.data(Qt.UserRole)))
         tip = label("把步骤拖进画布：放到连线上就插进去，放到某个步骤下面就接在它后面，放到并行分支的左右就并列成为分支；"
-                    "也可以双击加到选中步骤后面。鼠标移到连线上点 × 断开。", "Faint", wrap=True)
+                    "也可以双击加到选中步骤后面。画布上的卡片不能拖：调顺序用右键\"上移/下移\"，"
+                    "从卡片下沿拉线接到别的步骤；鼠标移到连线上点 × 断开。", "Faint", wrap=True)
         box = QWidget()
         bl = QVBoxLayout(box)
         bl.setContentsMargins(0, 0, 0, 0)
@@ -209,7 +211,12 @@ class DesignerPage(QMainWindow):
         self._code_timer.setSingleShot(True)
         self._code_timer.timeout.connect(self._apply_code)
         self._dock("代码（workflows/*.toml，和画布实时同步）", self.code, Qt.BottomDockWidgetArea, "code")
-        self.problems = QListWidget()
+        self.problems = CheckPanel()                    # 点"开始检查"才检查（负责人 2026-11-14 要求）
+        self.problems.run_clicked.connect(self.run_check)
+        self.problems.step_clicked.connect(self._goto_step)
+        self.problems.scenario_clicked.connect(self.play_trace)
+        self._play_timer = QTimer(self)
+        self._play_timer.timeout.connect(self._play_next)
         self._dock("检查", self.problems, Qt.BottomDockWidgetArea, "check")
         docks = {d.objectName(): d for d in self.findChildren(QDockWidget)}
         self.resizeDocks([docks["palette"], docks["tree"]], [170, 300], Qt.Horizontal)
@@ -278,7 +285,8 @@ class DesignerPage(QMainWindow):
         if self.code.toPlainText() != text:
             self.code.setPlainText(text)
         self._fill_props()
-        self.check(quiet=True)
+        if self.wf != getattr(self, "_checked_wf", None):   # 不自动重算：改动过才提示结果可能过期（只换个视图不算）
+            self.problems.mark_stale()
         self._syncing = False
 
     def _fill_tree(self):
@@ -295,18 +303,60 @@ class DesignerPage(QMainWindow):
                     self.tree.setCurrentItem(it)
 
     def check(self, quiet: bool = False):
+        """结构检查（保存、试运行前也用它把关）。返回问题列表。"""
         from ..agents.registry import default_registry
-        self.problems.clear()
         probs = engine_problems(self.wf, default_registry())
-        if not probs:
-            for ok in ("每个步骤都连上了", "每个循环都有次数上限", "每个 Agent 步骤都有可用的 Agent", "引擎能执行这里的每一种组合"):
-                self.problems.addItem(f"✓ {ok}")
-        for p in probs:
-            self.problems.addItem(f"✗ {p}")
-        diff = self._diff_text()
-        if diff:
-            self.problems.addItem(f"和 {self.saved.version} 相比：{diff}")
+        self.problems.show_structure(probs, self._diff_text())
         return probs
+
+    def run_check(self):
+        """点"开始检查"：结构检查，再用真正的执行代码把上板工作流空跑几种情况（预演）。"""
+        self._play_timer.stop()
+        probs = self.check()
+        errors = 0
+        if self.wf.engine != "firmware":
+            self.problems.show_preview([], "纯逻辑流程（旧引擎）还不能预演，只有上板流程能空跑")
+        elif probs:
+            self.problems.show_preview([], "结构有问题，先改好再预演")
+        else:
+            from ..embedded.fw_preview import preview
+            try:
+                traces = preview(self.wf)
+            except Exception as exc:                       # noqa: BLE001  预演本身出错也要明说
+                self.problems.show_preview([], f"预演出错：{exc}")
+                errors = 1
+            else:
+                self.problems.show_preview(traces)
+                errors = sum(1 for t in traces if t.error)
+        self.problems.finished(len(probs), errors)
+        self._checked_wf = self.wf
+        return probs
+
+    def _goto_step(self, sid: str):
+        if self._get(sid) is not None:
+            self.select(sid)
+
+    def play_trace(self, trace):
+        """画布上按预演的顺序依次点亮走过的步骤。"""
+        steps = [sid for sid in trace.step_ids if sid in self.canvas.items_by_id or self._get(sid) is not None]
+        fe = next((st for st in self.wf.main if st.kind == "foreach"), None)
+        if fe is not None and fe.subflow and fe.subflow != self.current_sub:     # 画布要显示被跑的那个模块流程
+            self.current_sub = fe.subflow
+            self.render_all(fit=False)
+        self._play, self._play_i = steps, 0
+        self._play_timer.start(420)
+        self._play_next()
+
+    def _play_next(self):
+        steps, i = getattr(self, "_play", []), getattr(self, "_play_i", 0)
+        if i > len(steps):
+            self._play_timer.stop()
+            return
+        states = {sid: "done" for sid in steps[:i]}
+        if i < len(steps):
+            states[steps[i]] = "running"
+        self.canvas.set_states(states)
+        self._play_i = i + 1
 
     def _diff_text(self) -> str:
         def ids(wf):
@@ -649,6 +699,15 @@ class DesignerPage(QMainWindow):
         elif action == "detach":
             x, y = self._parking(self._where(sid)[0])
             self._step_dropped(sid, x, y, None, True)
+        elif action == "attach":                           # 没连上的步骤接回去：就在它在列表里的位置
+            where, i = self._where(sid)
+
+            def op():
+                steps = self._steps(where)
+                steps[i] = dataclasses.replace(steps[i], detached=False, pos=None)
+                self._set_steps(where, steps)
+                self.selected = sid
+            self._change(op)
         elif action in ("up", "down"):
             self.move(sid, -1 if action == "up" else 1)
         elif action == "ask_ai":
@@ -772,8 +831,7 @@ class DesignerPage(QMainWindow):
         try:
             wf = parse_workflow(tomllib.loads(self.code.toPlainText()), "代码")
         except Exception as exc:
-            self.problems.clear()
-            self.problems.addItem(f"✗ 代码读不出来：{exc}")
+            self.problems.message(f"✗ 代码读不出来：{exc}")
             return
         if wf != self.wf:
             self.undo.append(self.wf)
@@ -831,13 +889,12 @@ class DesignerPage(QMainWindow):
         worker.finished.connect(lambda w=worker: self._ai_done(w))       # 用结束的那一个，不是"最近一个"
         self._ai = worker
         worker.start()
-        self.problems.clear()
-        self.problems.addItem("AI 正在改……")
+        self.problems.message("AI 正在改……")
 
     def _ai_done(self, worker=None):
         worker = worker or self._ai
         if worker.error or worker.result is None:
-            self.check(quiet=True)
+            self.problems.message("AI 没有改成")
             QMessageBox.warning(self, "AI 没有改成", worker.error or "没有拿到回复")
             return
         new, probs, _sent, raw = worker.result

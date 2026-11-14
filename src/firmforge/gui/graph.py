@@ -256,7 +256,8 @@ STEP_MIME = "application/x-firmforge-step"      # 从步骤箱拖出来的步骤
 
 
 class StepItem(QGraphicsObject):
-    """流程图里的一个步骤。设计器里可以拖动：小范围挪动时连线跟着走；拖远了连线断开，松手时靠近连线或步骤就吸附接上。"""
+    """流程图里的一个步骤。卡片本身不能拖动（负责人要求，避免误拖乱了流程）：调顺序用右键"上移/下移"，
+    从卡片下沿拉线可以把它接到另一个步骤；新步骤从步骤箱拖进来。"""
     moved = Signal(str, float, float)
     clicked = Signal(str)
     connect_to = Signal(str, str)
@@ -266,8 +267,7 @@ class StepItem(QGraphicsObject):
         self.step = step
         self.editable = editable
         self.state = ""            # "" | running | done | new | selected
-        self.setFlag(QGraphicsItem.ItemIsMovable, editable)
-        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, editable)
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
         self.setCursor(Qt.PointingHandCursor)
         self._drag_line = None
         self._origin: QPointF | None = None
@@ -737,9 +737,9 @@ class FlowCanvas(DotGridView):
             return
         m = QMenu(self)
         acts = [("up", "上移一步"), ("down", "下移一步"), ("detach", "从流程里拿出来（断开连线）"),
-                ("ask_ai", "让 AI 改这一步…"), ("ref", "引用到对话"), ("delete", "删除")]
+                ("attach", "接回流程（放回原来的位置）"), ("ask_ai", "让 AI 改这一步…"), ("ref", "引用到对话"), ("delete", "删除")]
         for act, text in acts:
-            if act == "detach" and item.step.detached:
+            if (act == "detach" and item.step.detached) or (act == "attach" and not item.step.detached):
                 continue
             m.addAction(text, lambda a=act, sid=item.step.id: self.context_action.emit(a, sid))
         m.exec(ev.globalPos())

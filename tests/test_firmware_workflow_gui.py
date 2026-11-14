@@ -77,6 +77,49 @@ class FirmwareWorkflowGuiTest(unittest.TestCase):
         self.assertEqual(d.wf.name, "firmware_dev")
         self.assertEqual(self.errors, [])
 
+    def test_check_button_and_preview(self):
+        # 点"开始检查"才检查；预演用真正的执行代码空跑；改动后提示过期；点问题跳到步骤；卡片不能拖（2026-11-14）
+        from PySide6.QtWidgets import QGraphicsItem
+        from firmforge.gui.designer_page import DesignerPage
+        d = DesignerPage(helpers.ROOT)
+        d.open_workflow("firmware_review")
+        self.assertIn("还没检查", d.problems.status.text())
+        d.run_check()
+        texts = d.problems.texts()
+        self.assertTrue(any("结构检查：没发现问题" in t for t in texts))
+        self.assertTrue(any("空跑 6 种情况，都能跑完" in t for t in texts))
+        self.assertTrue(any("review：按审查意见改" in t for t in texts))                # 审查要求修改那种情况
+        self.assertIn("检查完：没发现问题", d.problems.status.text())
+        d.selected = "repair"
+        d._set_field("max", 2)                                                      # 改动：结果过期
+        self.assertIn("可能过期", d.problems.status.text())
+        d._set_sub("board_module")                                                  # 只换视图：不算改动
+        d.run_check()
+        d._set_sub("board_module")
+        self.assertNotIn("可能过期", d.problems.status.text())
+        d.selected = "write"
+        d.add_step("agent:reviewer")                                                # 审查放到检查前：结构问题
+        d.run_check()
+        texts = d.problems.texts()
+        self.assertTrue(any(t.startswith("✗ 引擎") for t in texts))
+        self.assertTrue(any("结构有问题，先改好再预演" in t for t in texts))
+        d.problems.step_clicked.emit("check")                                      # 点问题：跳到步骤
+        self.assertEqual(d.selected, "check")
+        d.do_undo()
+        d.run_check()
+        from firmforge.embedded.fw_preview import preview
+        tr = preview(d.wf)[0]
+        d.play_trace(tr)                                                            # 画布上依次点亮
+        for _ in range(len(tr.step_ids) + 1):
+            d._play_next()
+        lit = {sid for sid, it in d.canvas.items_by_id.items() if it.state == "done"}
+        self.assertTrue({"write", "check", "review"} <= lit)
+        self.assertNotIn("look", lit)                                               # 没开人工确认：不经过
+        it = d.canvas.items_by_id["check"]
+        self.assertFalse(it.flags() & QGraphicsItem.ItemIsMovable)                 # 卡片不能拖
+        d.open_workflow("module_dev") if d.wf == d.saved else None
+        self.assertEqual(self.errors, [])
+
     def test_chat_asks_to_confirm_design(self):
         from firmforge.gui.chat_page import AgentMessage, ChatPage
         page = ChatPage(helpers.ROOT)
