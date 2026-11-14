@@ -78,7 +78,7 @@ class FirmwareWorkflowGuiTest(unittest.TestCase):
         self.assertEqual(self.errors, [])
 
     def test_check_button_and_preview(self):
-        # 点"开始检查"才检查；预演用真正的执行代码空跑；改动后提示过期；点问题跳到步骤；卡片不能拖（2026-11-14）
+        # 点"开始检查"才检查；预演用真正的执行代码空跑；改动后提示过期；点问题跳到步骤（2026-11-14）
         from PySide6.QtWidgets import QGraphicsItem
         from firmforge.gui.designer_page import DesignerPage
         d = DesignerPage(helpers.ROOT)
@@ -115,10 +115,29 @@ class FirmwareWorkflowGuiTest(unittest.TestCase):
         lit = {sid for sid, it in d.canvas.items_by_id.items() if it.state == "done"}
         self.assertTrue({"write", "check", "review"} <= lit)
         self.assertNotIn("look", lit)                                               # 没开人工确认：不经过
-        it = d.canvas.items_by_id["check"]
-        self.assertFalse(it.flags() & QGraphicsItem.ItemIsMovable)                 # 卡片不能拖
+        self.assertTrue(d.canvas.items_by_id["check"].flags() & QGraphicsItem.ItemIsMovable)   # 画布上的卡片照样能拖
         d.open_workflow("module_dev") if d.wf == d.saved else None
         self.assertEqual(self.errors, [])
+
+    def test_panels_are_fixed(self):
+        # 设计器的面板（步骤箱、属性、代码、检查……）不能拖走、不能浮出窗口；以前浮出去的，打开时放回原位（2026-11-14）
+        from PySide6.QtCore import QSettings, Qt
+        from PySide6.QtWidgets import QDockWidget
+        from firmforge.gui.designer_page import DesignerPage
+        d = DesignerPage(helpers.ROOT)
+        docks = {dk.objectName(): dk for dk in d.findChildren(QDockWidget)}
+        self.assertEqual(set(docks), {"palette", "tree", "props", "code", "check"})
+        for dk in docks.values():
+            self.assertEqual(dk.features(), QDockWidget.NoDockWidgetFeatures)
+        docks["props"].setFloating(True)                                           # 模拟以前版本拖出去的
+        d.addDockWidget(Qt.LeftDockWidgetArea, docks["check"])
+        d.save_layout()
+        d2 = DesignerPage(helpers.ROOT)
+        docks2 = {dk.objectName(): dk for dk in d2.findChildren(QDockWidget)}
+        self.assertFalse(docks2["props"].isFloating())
+        self.assertEqual(d2.dockWidgetArea(docks2["props"]), Qt.RightDockWidgetArea)
+        self.assertEqual(d2.dockWidgetArea(docks2["check"]), Qt.BottomDockWidgetArea)
+        QSettings().remove("designer/state")
 
     def test_chat_asks_to_confirm_design(self):
         from firmforge.gui.chat_page import AgentMessage, ChatPage

@@ -127,7 +127,8 @@ class DesignerPage(QMainWindow):
         holder = Panel(margins=(12, 6, 12, 10))
         holder.lay.addWidget(widget)
         d.setWidget(holder)
-        d.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self._home = {**getattr(self, "_home", {}), name: area}
+        d.setFeatures(QDockWidget.NoDockWidgetFeatures)   # 面板固定在原位：不能拖走、不能浮出窗口；面板之间的缝照样能拖着调大小
         self.addDockWidget(area, d)
         return d
 
@@ -186,8 +187,7 @@ class DesignerPage(QMainWindow):
         self._fill_palette()
         self.palette.itemDoubleClicked.connect(lambda it: it.data(Qt.UserRole) and self.add_step(it.data(Qt.UserRole)))
         tip = label("把步骤拖进画布：放到连线上就插进去，放到某个步骤下面就接在它后面，放到并行分支的左右就并列成为分支；"
-                    "也可以双击加到选中步骤后面。画布上的卡片不能拖：调顺序用右键\"上移/下移\"，"
-                    "从卡片下沿拉线接到别的步骤；鼠标移到连线上点 × 断开。", "Faint", wrap=True)
+                    "也可以双击加到选中步骤后面。鼠标移到连线上点 × 断开。", "Faint", wrap=True)
         box = QWidget()
         bl = QVBoxLayout(box)
         bl.setContentsMargins(0, 0, 0, 0)
@@ -224,6 +224,10 @@ class DesignerPage(QMainWindow):
         st = QSettings()
         if st.value("designer/state"):
             self.restoreState(st.value("designer/state"))
+        for dk in self.findChildren(QDockWidget):          # 以前拖出去、浮在窗口外的面板：放回原来的位置
+            if dk.isFloating() or self.dockWidgetArea(dk) != self._home[dk.objectName()]:
+                dk.setFloating(False)
+                self.addDockWidget(self._home[dk.objectName()], dk)
 
     def save_layout(self):
         QSettings().setValue("designer/state", self.saveState())
@@ -699,15 +703,6 @@ class DesignerPage(QMainWindow):
         elif action == "detach":
             x, y = self._parking(self._where(sid)[0])
             self._step_dropped(sid, x, y, None, True)
-        elif action == "attach":                           # 没连上的步骤接回去：就在它在列表里的位置
-            where, i = self._where(sid)
-
-            def op():
-                steps = self._steps(where)
-                steps[i] = dataclasses.replace(steps[i], detached=False, pos=None)
-                self._set_steps(where, steps)
-                self.selected = sid
-            self._change(op)
         elif action in ("up", "down"):
             self.move(sid, -1 if action == "up" else 1)
         elif action == "ask_ai":

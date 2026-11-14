@@ -239,8 +239,8 @@ class GuiSmokeTest(unittest.TestCase):
             w.close()
 
     def test_designer_drag_snap_and_detach(self):
-        # 照 Node-RED、n8n 的拖拽（DECISIONS 第 102 条）：从步骤箱拖到连线上插进去、拖到步骤下面接在后面、空白处没连上；
-        # 画布上的卡片不能拖（2026-11-14），用右键拿出来、接回；断开连线；有没连上的步骤不能保存
+        # 照 Node-RED、n8n 的拖拽（DECISIONS 第 102 条）：拖到连线上插进去、拖到步骤下面接在后面、空白处没连上；
+        # 已连好的步骤拖远连线消失、前后自动接上；断开连线；有没连上的步骤不能保存
         from PySide6.QtCore import QMimeData, QPointF, Qt
         from PySide6.QtGui import QDropEvent
         from firmforge.gui.graph import STEP_H, STEP_MIME, STEP_W
@@ -261,11 +261,22 @@ class GuiSmokeTest(unittest.TestCase):
         drop("agent", QPointF(-900, -900))
         self.assertEqual(ids()[-1], "agent_1!")
         self.assertTrue(any("还没连上" in p for p in d.check(quiet=True)))
-        # 画布上的卡片不能拖（2026-11-14）：右键拿出来、前后接上；右键接回原位
-        d._context("detach", "confirm_plan")
+        # 拖远：连线隐藏，松手后断开、前后接上
+        it = cv.items_by_id["confirm_plan"]
+        it._origin = QPointF(it.pos())
+        it.setPos(it.pos() + QPointF(400, 0))
+        self.assertTrue(all(not e.isVisible() for e in cv.edges if "confirm_plan" in (e.a, e.b)))
+        o, it._origin = it._origin, None
+        cv._dropped(it, o)
         self.assertIn("confirm_plan!", ids())
-        d._context("attach", "confirm_plan")
-        self.assertNotIn("confirm_plan!", ids())
+        # 拖到 plan 正下方：吸附接上
+        it = cv.items_by_id["confirm_plan"]
+        it._origin = QPointF(it.pos())
+        it.setPos(cv.items_by_id["plan"].pos() + QPointF(5, STEP_H + 25))
+        self.assertIsNotNone(cv._preview)                                  # 松手前先显示会接到哪里
+        o, it._origin = it._origin, None
+        cv._dropped(it, o)
+        self.assertEqual(ids()[:2], ["plan", "confirm_plan"])
         # 断开连线：后一步变成没连上
         cv.disconnect_edge.emit("plan", "confirm_plan")
         self.assertIn("confirm_plan!", ids())
@@ -311,14 +322,13 @@ class GuiSmokeTest(unittest.TestCase):
         pt = lambda sid, x, y: cv.mapFromScene(cv.items_by_id[sid].pos() + QPointF(x, y))     # noqa: E731
         detached = lambda sid: d._get(sid).detached                                            # noqa: E731
         a = pt("review", 30, 12)
-        drag(a, a + QPoint(0, 260))                                          # 卡片不能拖（2026-11-14）：拖了不动
-        self.assertFalse(detached("review"))
-        d._context("detach", "review")                                       # 右键"从流程里拿出来"
+        drag(a, a + QPoint(0, 260))
         self.assertTrue(detached("review"))
         drag(pt("review_gate", STEP_W / 2, STEP_H + 6), pt("review", STEP_W / 2, STEP_H / 2))
         self.assertFalse(detached("review"))
         self.assertIn("review", d._get("review_gate").then)
-        d._context("detach", "check")                                         # 从没连上的步骤往外拉线
+        a = pt("check", 30, 12)                                               # 从没连上的步骤往外拉线
+        drag(a, a + QPoint(-40, 320))                                         # 拖到下方空白处（靠近别的步骤会被吸附过去）
         self.assertTrue(detached("check"))
         drag(pt("check", STEP_W / 2, STEP_H + 6), pt("repair", STEP_W / 2, STEP_H / 2))
         self.assertFalse(detached("check") or detached("repair"))
@@ -347,8 +357,22 @@ class GuiSmokeTest(unittest.TestCase):
         branches = lambda: d._get("write").branches                                            # noqa: E731
 
         def away():
-            d._context("detach", "test")                                       # 卡片不能拖：用右键拿出来
+            a = pt("test", 30, 12)
+            drag(a, a + QPoint(-40, 330))
             self.assertEqual(branches(), ("code",))
+        away()
+        drag(pt("test", 30, 12), pt("code", STEP_W + 55, 12))                  # 右边
+        self.assertEqual(branches(), ("code", "test"))
+        away()
+        drag(pt("test", 30, 12), pt("code", -STEP_W - 25 + 30, 12))            # 左边也一样
+        self.assertEqual(set(branches()), {"code", "test"})
+        away()
+        e = next(e for e in cv.edges if e.logical == ("write", "check"))       # 汇合线上：并行做完以后的下一步
+        drag(pt("test", 30, 12), cv.mapFromScene(e.mid()) + QPoint(30 - STEP_W // 2, 12))
+        self.assertEqual(branches(), ("code",))
+        self.assertEqual([s.id for s in d._steps("module_impl") if s.id in ("write", "test", "check")],
+                         ["write", "test", "check"])
+        self.assertFalse(d._get("test").detached)
         away()
         drag(pt("code", STEP_W / 2, STEP_H + 6), pt("test", STEP_W / 2, STEP_H / 2))   # 从 code 拉线
         self.assertEqual(branches(), ("code", "test"))
@@ -394,27 +418,34 @@ class GuiSmokeTest(unittest.TestCase):
                     if abs(a.pos().x() - b.pos().x()) < STEP_W - 10 and abs(a.pos().y() - b.pos().y()) < STEP_H - 6]
         pt = lambda sid, x=30, y=12: cv.mapFromScene(cv.items_by_id[sid].pos() + QPointF(x, y))     # noqa: E731
         sub = lambda: [s.id for s in d._steps("module_impl")]                                       # noqa: E731
-        # ① 拖卡片不动（2026-11-14 起卡片不能拖），再往它前面插步骤，不能叠在一起
+        # ① 小范围挪过的步骤，再往它前面插步骤，不能叠在一起（连着的步骤不记手动位置）
         a = pt("check")
         drag(a, a + QPoint(25, 10))
         self.assertIsNone(d._get("check").pos)
         drop("human", next(e for e in cv.edges if e.logical == ("write", "check")).mid())
         self.assertEqual(overlaps(), [])
-        # ② 第一步拿出来以后，从它拉线到现在的第一步：放回最前面
+        # ② 第一步拖走以后能放回最前面（拖到现在第一步的正上方）
         reset()
-        d._context("detach", "plan")
+        a = pt("plan")
+        drag(a, a + QPoint(-260, 60))
         self.assertTrue(d._get("plan").detached)
-        drag(pt("plan", STEP_W / 2, STEP_H + 6), pt("confirm_plan", STEP_W / 2, STEP_H / 2))
+        drag(pt("plan"), cv.mapFromScene(cv.items_by_id["confirm_plan"].pos() + QPointF(30, -STEP_H - 8)))
         self.assertEqual([s.id for s in d.wf.main][:2], ["plan", "confirm_plan"])
         self.assertFalse(d._get("plan").detached)
-        # ③ 流程全拆开以后，右键"接回流程"能放回去
+        # ③ 流程全拆开以后，放回框里就是第一步
         reset()
         for sid in ("review", "review_gate", "repair", "check", "test", "code", "write"):
             d._step_dropped(sid, *d._parking("module_impl"), None, True)
         self.assertEqual(overlaps(), [])
         self.assertIn("module_impl", cv.empty_flows)
-        d._context("attach", "write")
+        frame = next(r for n, r in cv.regions if n == "module_impl")
+        drag(pt("write", 80, 10), cv.mapFromScene(frame.center()))
         self.assertFalse(d._get("write").detached)
+        # ④ 把主流程的步骤拖进子流程的框里：不接上，也不压在别的步骤上
+        reset()
+        drag(pt("integrate"), cv.mapFromScene(cv.items_by_id["repair"].pos() + QPointF(35, STEP_H + 42)))
+        self.assertTrue(d._get("integrate").detached)
+        self.assertEqual(overlaps(), [])
         # ⑤ 拖到还没有分支的并行下面：成为它的分支；空并行保存前会被检查出来
         reset()
         drop("parallel", next(e for e in cv.edges if (e.a, e.b) == ("check", "repair")).mid())
@@ -423,9 +454,10 @@ class GuiSmokeTest(unittest.TestCase):
         self.assertIn("parallel_1", sub())
         drop("agent", cv.items_by_id["parallel_1"].pos() + QPointF(STEP_W / 2, STEP_H + 20))
         self.assertEqual(d._get("parallel_1").branches, ("agent_1",))
-        # ⑥ 并行被拿出来：分支跟着它，不会画成主干上的步骤
+        # ⑥ 并行被拖走：分支跟着它，不会画成主干上的步骤
         reset()
-        d._context("detach", "write")
+        a = pt("write", 80, 10)
+        drag(a, a + QPoint(430, 60))
         self.assertTrue(d._get("write").detached)
         self.assertEqual(d._get("write").branches, ("code", "test"))
         self.assertEqual(cv.floating, {"write", "code", "test"})
