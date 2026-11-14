@@ -10,9 +10,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt
+from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QPushButton,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from .. import config
@@ -86,8 +86,32 @@ class MainWindow(QMainWindow):
         self.status = QLabel("")
         self.status.setObjectName("StatusBar")
         self.status.setTextFormat(Qt.RichText)            # 状态栏里有板子连接的小圆点（富文本）
+        # 代码改过但窗口没重启时提醒（2026-11-14：设计器面板的修复已提交，开着的旧窗口还是旧代码，面板照样能拖出去）
+        self.update_bar = QWidget()
+        self.update_bar.setObjectName("UpdateBar")
+        ub = QHBoxLayout(self.update_bar)
+        ub.setContentsMargins(12, 4, 4, 4)
+        self.update_label = QLabel("软件的代码已经更新，这个窗口还在用打开时的旧代码。重启后才生效。")
+        self.update_label.setWordWrap(True)
+        restart = QPushButton("重启软件")
+        restart.setObjectName("Primary")
+        restart.clicked.connect(self.restart)
+        ub.addWidget(self.update_label, 1)
+        ub.addWidget(restart)
+        self.update_bar.setVisible(False)
+        self.update_bar.setAttribute(Qt.WA_StyledBackground, True)   # 圆角背景
+        bar_row = QHBoxLayout()
+        bar_row.addSpacing(68)                                         # 和内容区对齐，不压在左边导航栏下面
+        bar_row.addWidget(self.update_bar, 1)
+        outer.addLayout(bar_row)
         outer.addWidget(self.status)
         self.setCentralWidget(root)
+        self._code_stamp = code_stamp()
+        self._restart = False
+        self.code_changed = False
+        self._update_timer = QTimer(self)
+        self._update_timer.timeout.connect(self.check_code_update)
+        self._update_timer.start(20000)
 
         rail = QWidget()
         rail.setObjectName("Rail")
@@ -247,6 +271,19 @@ class MainWindow(QMainWindow):
             names.append("一次模型调用")
         return names
 
+    def check_code_update(self) -> bool:
+        """代码文件比窗口打开时新：显示"重启软件"提示条。返回是否显示。"""
+        if not self.code_changed and code_stamp() > self._code_stamp + 1:
+            self.code_changed = True
+            self.update_bar.setVisible(True)
+        return self.code_changed
+
+    def restart(self) -> None:
+        """关掉窗口（照常保存布局；还有运行没结束时先问），关成了再用同样的命令重新打开。"""
+        self._restart = True
+        if not self.close():
+            self._restart = False
+
     def closeEvent(self, ev):
         from PySide6.QtWidgets import QMessageBox
         from .runner import shutdown_workers
@@ -273,6 +310,18 @@ class MainWindow(QMainWindow):
         self.hardware.save_layout()
         self.designer.save_layout()
         super().closeEvent(ev)
+        if self._restart:
+            from PySide6.QtCore import QProcess
+            QProcess.startDetached(sys.executable, sys.argv)
+
+
+def code_stamp() -> float:
+    """firmforge 包里所有 .py 文件最新的修改时间（判断开着的窗口是不是旧代码）。"""
+    pkg = Path(__file__).resolve().parents[1]
+    try:
+        return max((f.stat().st_mtime for f in pkg.rglob("*.py")), default=0.0)
+    except OSError:
+        return 0.0
 
 
 def main(argv: list[str] | None = None) -> int:

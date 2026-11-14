@@ -140,4 +140,6 @@ QMenu {{ background: {c['surface']}; border: 1px solid {c['line']}; border-radiu
 QMenu::item {{ padding: 6px 18px; border-radius: 8px; }}
 QMenu::item:selected {{ background: {c['bg']}; }}
 #StatusBar {{ color: {c['ink2']}; font-size: 12px; padding-left: 76px; }}
+#UpdateBar {{ background: {c['run_soft']}; border-radius: 10px; }}
+#UpdateBar QLabel {{ color: {c['ink']}; }}
 """

@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -125,6 +126,24 @@ class GuiSmokeTest(unittest.TestCase):
         w = MainWindow(helpers.ROOT)
         w.apply_theme()
         return w
+
+    def test_old_window_offers_restart_when_code_changes(self):
+        # 2026-11-14：设计器面板的修复提交后，开着的旧窗口还是旧代码，负责人以为没修好。代码变新时要提示重启
+        from unittest import mock
+        from PySide6.QtCore import QProcess
+        from firmforge.gui import app as app_mod
+        w = self.window()
+        self.assertFalse(w.check_code_update())
+        self.assertFalse(w.update_bar.isVisibleTo(w))
+        with mock.patch.object(app_mod, "code_stamp", return_value=w._code_stamp + 60):
+            self.assertTrue(w.check_code_update())
+        self.assertTrue(w.update_bar.isVisibleTo(w))
+        started = []
+        with mock.patch.object(QProcess, "startDetached", side_effect=lambda *a: started.append(a) or True):
+            w.restart()
+        self.assertEqual(len(started), 1)                       # 关成了才重新打开
+        self.assertEqual(started[0][0], sys.executable)
+        self.assertGreater(app_mod.code_stamp(), 0)
 
     def test_pages_build_and_switch(self):
         w = self.window()
