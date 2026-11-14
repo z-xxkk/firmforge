@@ -127,6 +127,19 @@ def coder_repair_message(attempt: int, max_attempts: int, problems: str, diagnos
 
 # ---------------------------------------------------------------- 写测试
 
+def platform_headers_block(profile: HardwareProfile, rules: RuleSet | None, scopes) -> str:
+    """测试 Agent 能用的宏：hw_config.h 全文 + ff_regs.h 里的寄存器宏名单（基线评测发现它常编出不存在的宏、
+    或者忘了 include，测试文件编译不过，第 122 条）。"""
+    from ..target.esp_idf import hw_config_header
+    from ..target.harness import regs_header
+    regs = [ln for ln in regs_header(rules, None, set(scopes) if scopes else None).splitlines() if "FF_REG_" in ln]
+    names = sorted({ln.split("FF_REG_", 1)[1].split()[0].rstrip("：") for ln in regs})
+    reg_txt = ("\n".join(f"#define FF_REG_{n} ..." for n in names) if names else
+               "/* 这个模块没有可用的 FF_REG_* 宏：不要用 FF_REG_ 开头的名字 */")
+    return (f"```c\n/* main/include/hw_config.h */\n{hw_config_header(profile).rstrip()}\n```\n\n"
+            f"```c\n/* main/include/ff_regs.h（地址由平台按芯片资料生成） */\n{reg_txt}\n```")
+
+
 def tester_messages(requirement: str, profile: HardwareProfile, rules: RuleSet | None, module: DesignModule,
                     header: str, dep_headers: dict[str, str], where: str = "") -> list[dict]:
     board = module.layer == "hardware"
@@ -136,8 +149,12 @@ def tester_messages(requirement: str, profile: HardwareProfile, rules: RuleSet |
     b.ref(f"module {module.id}", json.dumps(module.to_dict(), ensure_ascii=False, indent=2), "json")
     b.constraints += [f"只能写 main/{test_file(module)}", "你看不到实现代码，只根据需求、接口、验收标准和规则写测试"]
     if board:
-        b.constraints.append("读寄存器、计时用平台提供的 ff_test.h；寄存器地址用 ff_regs.h 里的 FF_REG_* 宏")
+        b.constraints.append("读寄存器、计时用平台提供的 ff_test.h；片内外设寄存器地址用 ff_regs.h 里的 FF_REG_* 宏")
+        b.constraints.append('用到的宏必须在下面"平台头文件"里真的存在，并且自己 #include 对应的头文件（hw_config.h、ff_regs.h）；'
+                             "外接器件（I2C 传感器等）的寄存器没有宏，按需求和规则里写的地址直接写数字")
     b.attach("需求文档", requirement)
+    if board:
+        b.attach("平台头文件（测试能用的宏只有这些）", platform_headers_block(profile, rules, _module_scopes(module)))
     b.attach(f"本模块公共头文件 main/{module.header}", f"```c\n{header.rstrip()}\n```")
     b.attach("依赖模块的公共头文件（只读）", _deps_block(dep_headers))
     return [{"role": "system", "content": system}, {"role": "user", "content": b.render()}]

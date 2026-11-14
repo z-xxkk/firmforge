@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -119,6 +120,14 @@ class _Agents:
         self.bus.emit("agent_finished", node, agent=agent.name, role=agent.role, attempt=attempt,
                       tokens=resp.prompt_tokens + resp.completion_tokens, latency_s=round(resp.latency_s, 3))
         return resp
+
+
+_BUILD_ERR = re.compile(r"([\w./-]+\.[ch]):\d+(?::\d+)?:\s*(?:fatal )?error:")
+
+
+def build_error_files(report: str) -> set[str]:
+    """编译报告里出错的源文件名（只取文件名，不带目录）。"""
+    return {Path(f).name for f in _BUILD_ERR.findall(report or "")}
 
 
 class EmbeddedFlow:
@@ -543,7 +552,16 @@ class EmbeddedFlow:
 
     def _diagnose(self, m: DesignModule, mr: ModuleResult, rules: RuleSet, layer: str, report: str,
                   attempt: int) -> dict:
-        if layer in ("compliance", "build"):                 # 编译错误、合规违规几乎总是代码的错，不花钱诊断
+        if layer == "build":                                 # 编译错误不花钱诊断：看报错落在谁写的文件里
+            where = build_error_files(report)
+            mine = {Path(p).name for p in mr.tests}
+            if where and where <= mine:                      # 报错全在 Agent 写的测试里：交给测试 Agent（第 122 条）
+                diag = {"blame": "test", "rule": "", "evidence": f"编译报错都在测试文件 {'、'.join(sorted(where))}",
+                        "instruction": "测试文件编译不过。按编译器报错改测试文件；用到的宏必须在平台头文件里真的存在，"
+                                       "并自己 #include 对应头文件；外接器件的寄存器地址没有宏，直接写数字"}
+                self.bus.emit("diagnosis", m.id, attempt=attempt, **diag)
+                return diag
+        if layer in ("compliance", "build"):                 # 驱动代码编译不过、合规违规：代码的错
             return {"blame": "code", "instruction": "", "evidence": layer, "rule": ""}
         msgs = diagnoser_messages(self.profile, rules, m, mr.files, mr.tests, report)
         resp = self.agents.call("diagnoser", msgs, m.id, attempt=attempt, purpose="诊断")
