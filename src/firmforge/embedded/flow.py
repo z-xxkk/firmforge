@@ -497,6 +497,8 @@ class EmbeddedFlow:
             if attempt == self.max_attempts:
                 break
             diag = self._diagnose(m, mr, rules, layer, report, attempt)
+            if diag["blame"] == "hardware":                    # 先实测接线，不靠模型判断（第 124 条）
+                diag = self._recheck_hardware(m, mr, rules, layer, report, attempt, diag)
             last = (layer, report, diag)
             if diag["blame"] == "hardware":
                 mr.verdict = "hardware"
@@ -585,6 +587,38 @@ class EmbeddedFlow:
                 diag = {"blame": "code", "instruction": "", "evidence": f"诊断输出不合格（{exc}），按代码问题处理", "rule": ""}
         self.bus.emit("diagnosis", m.id, attempt=attempt, **diag)
         return diag
+
+    def _recheck_hardware(self, m: DesignModule, mr: ModuleResult, rules: RuleSet, layer: str, report: str,
+                          attempt: int, diag: dict) -> dict:
+        """诊断说硬件或接线有问题：先烧平台的接线自检程序实测（target/selfcheck.py，第 124 条）。
+        全部正常 → 带着实测结果重新诊断，还说硬件就按代码问题处理；有不通 → 维持硬件问题并附上证据；
+        测不了（没有板子、自检编译不过）→ 维持原诊断。同一次运行只实测一次。"""
+        from ..target.selfcheck import run_check, select_items
+        chk = getattr(self, "_hw_check", None)
+        if chk is None:
+            used = getattr(self, "_wiring_used", None)
+            gpios = {f.value for f in self.profile.pins.values() if isinstance(f.value, int)}
+            items = select_items(self.profile, set(used) if used is not None else None, gpios)
+            self.bus.emit("verify_started", m.id, attempt=attempt, scope="wiring")
+            chk = run_check(self.profile, items, self.idf, self.board,
+                            Path(config.project_root()) / ".ff_data" / "idf_build" / f"{self.rd.run_id}-wiring",
+                            self.rd.attempt_dir(m.id, attempt) / "wiring_serial.log")
+            self.bus.emit("verify_finished", m.id, attempt=attempt, scope="wiring", ok=chk.all_ok,
+                          failed_layer=None if chk.all_ok else ("skipped" if chk.skipped else "wiring"))
+            if not chk.skipped:
+                self._hw_check = chk
+        self.bus.emit("hardware_check", m.id, attempt=attempt, ok=chk.all_ok, skipped=chk.skipped,
+                      items=chk.items, evidence=chk.evidence()[:600])
+        if not chk.all_ok:
+            return {**diag, "evidence": f"{diag['evidence']}；平台接线自检：{chk.evidence()}"[:1500]}
+        note = (f"\n\n【平台接线自检（刚在板子上实测）】{chk.evidence()}。"
+                "接线和器件都正常，这次没通过不是硬件或接线问题，请从代码和测试里找原因。")
+        d2 = self._diagnose(m, mr, rules, layer, report + note, attempt)
+        if d2["blame"] == "hardware":
+            d2 = {"blame": "code", "rule": "",
+                  "evidence": f"诊断仍说是硬件问题，但接线自检全部正常（{chk.evidence()[:300]}），按代码问题处理",
+                  "instruction": (d2.get("instruction") or "") + "（平台已实测接线正常，请按测试报告检查代码）"}
+        return d2
 
     def _dispute_rule(self, rules: RuleSet, diag: dict) -> RuleSet:
         """诊断认为某条规则有问题：先把它退回"待核对"，不再给编码 Agent，等查资料 Agent 或人复核。"""

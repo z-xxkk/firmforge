@@ -11,7 +11,8 @@ testing）：用一个"模拟世界"代替编译器和板子——驱动代码�
   I5 最终判"通过"时，最后一次检查真的是通过；
   I6 不抛异常；结论只能是 pass / fail / hardware / skipped；
   I7 判没过时，机会一定用完了；
-  I8 最后一次检查之后不再叫 Agent（不白花钱）。
+  I8 最后一次检查之后不再叫 Agent（不白花钱）；
+  I9 接线自检全部正常时，不会因为"硬件问题"的诊断停下（第 124 条）。
 
 基线评测里"测试编译不过却一直交给编码 Agent"的错误（第 122 条修掉的）在这里几秒就会被 I2 抓住。
 命令行可以跑更多种子：python tests/test_repair_sim.py --seeds 0-999
@@ -104,8 +105,13 @@ class World:
 
 def run_world(seed: int, workflow: bool, max_attempts: int = 4) -> tuple[World, object]:
     w = World(seed)
+    from firmforge.target import selfcheck as sc
+    w.wiring_ok = seed % 2 == 0                          # 一半的世界接线实测正常，另一半测不了（没有板子）
+    check = (sc.WiringCheck(items=[{"name": "接线自检：GPIO6 和 GPIO7 之间的跳线连通", "kind": "loop", "ok": True,
+                                    "detail": ""}]) if w.wiring_ok else sc.WiringCheck(skipped="没有板子"))
     m = DesignModule("imu", "IMU", "hardware", (DRIVER, "include/imu.h"), provides=("int imu_read(void)",))
-    with tempfile.TemporaryDirectory() as d, mock.patch.object(EmbeddedFlow, "_check", lambda self, *a, **k: w.check()):
+    with tempfile.TemporaryDirectory() as d, mock.patch.object(EmbeddedFlow, "_check", lambda self, *a, **k: w.check()), \
+            mock.patch("firmforge.target.selfcheck.run_check", lambda *a, **k: check):
         f = EmbeddedFlow(llm=FakeLLM(w), settings=SETTINGS, profile=profile(), spec="x", rules=RuleSet(), library=None,
                          verifier=None, runs_root=Path(d), rule_mode="none", idf=None, board=None, design=Design([m]),
                          locked={"include/imu.h": "int imu_read(void);\n"}, build_rules=False, max_attempts=max_attempts,
@@ -127,6 +133,8 @@ def violations(w: World, res, max_attempts: int) -> list[str]:
         out.append("I5 判了通过，最后一次检查却没过")
     if verdict == "fail" and len(checks) != max_attempts:
         out.append(f"I7 判没过时只检查了 {len(checks)} 次，没用完 {max_attempts} 次机会")
+    if verdict == "hardware" and getattr(w, "wiring_ok", False):
+        out.append("I9 接线自检全部正常，却因为硬件问题的诊断停下了")
     if checks and verdict in ("pass", "fail"):
         last = max(i for i, e in enumerate(w.log) if e[0] == "check")
         after = [e for e in w.log[last + 1:] if e[0] in ("agent", "diag")]

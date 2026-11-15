@@ -171,6 +171,10 @@ class _StubFlow:
     def _dispute_rule(self, rules, diag):
         return rules
 
+    def _recheck_hardware(self, m, mr, rules, layer, report, attempt, diag):
+        self._note("接线自检（预演不上板，按测不了处理，维持硬件问题）")
+        return diag
+
     def _confirm_module(self, m, mr, verdict):
         self._note("等你看结果" + (f"，你写了意见：{self.sc.comment}" if self.sc.comment else "，你点了通过"))
         return self.sc.comment

@@ -285,6 +285,8 @@ class FirmwareInterpreter:
         limit = self._max_attempts(run)
         while run.verdict == "fail" and run.attempt < limit and not run.stopped:
             diag = f._diagnose(m, mr, run.rules, run.layer, run.report, run.attempt)
+            if diag["blame"] == "hardware":                    # 先实测接线，不靠模型判断（第 124 条）
+                diag = f._recheck_hardware(m, mr, run.rules, run.layer, run.report, run.attempt, diag)
             run.last = (run.layer, run.report, diag)
             if diag["blame"] == "hardware":
                 run.stopped = "hardware"

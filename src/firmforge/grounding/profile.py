@@ -43,6 +43,9 @@ class Device:
     # 不写进 hw_config.h
     reset: Fact | None = None
     category: str = ""          # 知识库目录里的类别，例如 运动传感器（DECISIONS 第 114 条）；不进提示词
+    # 怎样让器件在 INT 脚上产生一次中断（接线自检用，第 124 条）：{"setup": [[寄存器, 值], ...], "active": "high"/"low",
+    # "clear": 读哪个寄存器清除, "wait_ms": 等多久, "pull": "up"/"down"/""，"off": [[寄存器, 值], ...] 测完关掉}。不进提示词
+    int_probe: Fact | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,9 @@ class HardwareProfile:
     pins: dict[str, Fact] = field(default_factory=dict)        # 信号 → GPIO，例如 "i2c0.sda" → 8
     reserved_pins: dict[int, str] = field(default_factory=dict)  # 不能用的 GPIO → 原因
     devices: tuple[Device, ...] = ()
+    # 板子上用杜邦线连在一起的两个 GPIO（接线自检用，第 124 条）：({"a": 6, "b": 7, "note": ...}, ...)。
+    # 用 GPIO 编号而不是信号名：线是焊在物理引脚上的，项目给信号起什么名字都不影响
+    loopbacks: tuple[dict, ...] = ()
 
     def problems(self) -> list[str]:
         """自洽检查：同一个 GPIO 不能分给两个信号，也不能用保留引脚。"""
@@ -80,6 +86,25 @@ class HardwareProfile:
                 out.append(f"外接器件 {d.name} 有 reset，但不是有地址的 I2C 器件，测试程序没法复位它")
             elif not {f"{d.bus}.sda", f"{d.bus}.scl"} <= set(self.pins):
                 out.append(f"外接器件 {d.name} 有 reset，但档案里没有 {d.bus}.sda / {d.bus}.scl 引脚")
+        for lb in self.loopbacks:
+            ends = [lb.get("a"), lb.get("b")] if isinstance(lb, dict) else []
+            if len(ends) != 2 or not all(isinstance(g, int) and not isinstance(g, bool) for g in ends) or ends[0] == ends[1]:
+                out.append(f"回环 {lb!r} 要写成 {{\"a\": GPIO, \"b\": GPIO}}（两个不同的 GPIO 编号）")
+            elif any(g in self.reserved_pins for g in ends):
+                out.append(f"回环 GPIO{ends[0]}–GPIO{ends[1]} 用了保留引脚")
+        for d in self.devices:
+            if d.int_probe is None:
+                continue
+            v = d.int_probe.value
+            ok = (isinstance(v, dict) and v.get("active") in ("high", "low") and isinstance(v.get("clear"), int)
+                  and isinstance(v.get("wait_ms"), int) and isinstance(v.get("setup"), list)
+                  and all(isinstance(x, list) and len(x) == 2 and all(isinstance(y, int) for y in x)
+                          for x in v["setup"] + v.get("off", [])))
+            if not ok:
+                out.append(f"外接器件 {d.name} 的 int_probe 要写成 {{\"setup\": [[寄存器, 值]], \"active\": \"high\"/\"low\", "
+                           f"\"clear\": 寄存器, \"wait_ms\": 毫秒}}")
+            elif "int" not in d.pins or d.address is None or not d.bus.startswith("i2c"):
+                out.append(f"外接器件 {d.name} 有 int_probe，但不是带 INT 脚的 I2C 器件")
         names = [d.name for d in self.devices]
         for n in sorted({n for n in names if names.count(n) > 1}):
             out.append(f"外接器件重名：{n}")
@@ -166,8 +191,10 @@ class HardwareProfile:
                 pins={k: fact(v) for k, v in d.get("pins", {}).items()},
                 reserved_pins={int(k): v for k, v in d.get("reserved_pins", {}).items()},
                 devices=tuple(Device(**{**x, "params": {k: fact(v) for k, v in x.get("params", {}).items()},
-                                        "reset": fact(x["reset"]) if x.get("reset") is not None else None})
-                              for x in d.get("devices", [])))
+                                        "reset": fact(x["reset"]) if x.get("reset") is not None else None,
+                                        "int_probe": fact(x["int_probe"]) if x.get("int_probe") is not None else None})
+                              for x in d.get("devices", [])),
+                loopbacks=tuple(dict(x) for x in d.get("loopbacks", [])))
         except (KeyError, TypeError) as exc:
             raise ProfileError(f"硬件档案缺字段或字段不对：{exc}") from exc
 

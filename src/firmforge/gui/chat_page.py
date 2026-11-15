@@ -1272,6 +1272,15 @@ class ChatPage(QWidget):
             self.add_line(Dot(T()["run"]), f"{node} 按审查意见改了以后没通过检查，退回改之前通过的版本")
         elif t == "human_reverted":
             self.add_line(Dot(T()["run"]), f"{node} 按你的意见改了以后没通过检查，退回改之前通过的版本；可以换个说法再提")
+        elif t == "hardware_check":                            # 诊断说硬件问题时平台的接线自检（第 124 条）
+            items = d.get("items") or []
+            if d.get("skipped"):
+                self.add_line(Dot(T()["run"]), f"{node} 诊断说是硬件问题；接线自检没能运行（{d['skipped'][:80]}），停下等你查")
+            elif d.get("ok"):
+                self.add_line(Dot(T()["pass"]), f"{node} 诊断说是硬件问题，平台实测接线 {len(items)} 项都正常，改回从代码里找原因")
+            else:
+                bad = "、".join(i["name"].removeprefix("接线自检：") for i in items if i.get("ok") is False)
+                self.add_line(Dot(T()["fail"]), f"{node} 接线自检发现不通：{bad}，停下等你查线")
         elif t == "human_wait" and node != "rules":
             self.add_agent("FirmForge", "reviewer", f"模块 **{node}** 停下了：{d.get('reason', '')}\n\n{d.get('instruction', '')}")
         elif t == "escalated" and d.get("level") == "rule":

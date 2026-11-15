@@ -116,7 +116,45 @@
         "origin": "document",
         "note": "mpu6050-rm p.42 PWR_MGMT_1 的 DEVICE_RESET：When set to 1, this bit resets all internal registers to their default values；等待 100 ms 是默认值"
       },
-      "category": "运动传感器"
+      "category": "运动传感器",
+      "int_probe": {
+        "value": {
+          "setup": [
+            [
+              107,
+              1
+            ],
+            [
+              25,
+              9
+            ],
+            [
+              26,
+              3
+            ],
+            [
+              55,
+              48
+            ],
+            [
+              56,
+              1
+            ]
+          ],
+          "active": "high",
+          "clear": 58,
+          "wait_ms": 50,
+          "pull": "down",
+          "off": [
+            [
+              56,
+              0
+            ]
+          ]
+        },
+        "origin": "document",
+        "note": "mpu6050-rm：PWR_MGMT_1(0x6B)=0x01 唤醒；SMPLRT_DIV(0x19)=9、CONFIG(0x1A)=0x03 即 100 Hz；INT_PIN_CFG(0x37)=0x30 即 INT_LEVEL=0 高有效、推挽、LATCH_INT_EN=1、INT_RD_CLEAR=1（p.27）；INT_ENABLE(0x38)=0x01 只开 DATA_RDY；读 INT_STATUS(0x3A) 清除"
+      }
     },
     {
       "name": "ppg",
@@ -135,7 +173,49 @@
         "origin": "document",
         "note": "max30102-ds Mode Configuration(0x09) Bit 6 RESET：registers are reset to their power-on-state"
       },
-      "category": "光学传感器"
+      "category": "光学传感器",
+      "int_probe": {
+        "value": {
+          "setup": [
+            [
+              3,
+              2
+            ],
+            [
+              33,
+              1
+            ]
+          ],
+          "active": "low",
+          "clear": 1,
+          "wait_ms": 60,
+          "pull": "up",
+          "pre_clear": [
+            0,
+            1
+          ],
+          "off": [
+            [
+              3,
+              0
+            ]
+          ]
+        },
+        "origin": "document",
+        "note": "max30102-ds：INT 是开漏低有效（要上拉）；Interrupt Enable 2(0x03)=0x02 开 DIE_TEMP_RDY_EN，TEMP_CONFIG(0x21)=0x01 启动测温，读 Interrupt Status 2(0x01) 清除；实测 M-003：约 27.5 ms 后 DIE_TEMP_RDY 置位。先读 0x00、0x01 清掉上电时挂着的中断"
+      }
+    }
+  ],
+  "loopbacks": [
+    {
+      "a": 6,
+      "b": 7,
+      "note": "杜邦线连接 pwm.out(GPIO6) 与 pwm.in(GPIO7)，LEDC 输出给 RMT/GPIO 输入测（ledc_pwm、rmt_pulse_meter、gpio_edge_count 用）"
+    },
+    {
+      "a": 0,
+      "b": 1,
+      "note": "杜邦线连接 uart1.tx(GPIO0) 与 uart1.rx(GPIO1)（uart_loopback、imu_uart_logger 用）"
     }
   ]
 }

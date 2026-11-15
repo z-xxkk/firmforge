@@ -28,6 +28,7 @@ EVENT_TYPES = {
     "step_started",                 # 解释器开始执行主流程里的一步（DECISIONS 第 117 条）
     "review", "review_reverted",    # 审查 Agent 的意见；按意见改坏了退回通过的版本
     "human_reverted",               # 按人的意见改坏了已经通过的模块，退回通过的版本
+    "hardware_check",               # 诊断说硬件问题时平台的接线自检结果（第 124 条）
     # 经验库
     "experience_saved", "experience_used",
     # 工具（DECISIONS 第 63 条）
