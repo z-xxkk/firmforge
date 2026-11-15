@@ -73,9 +73,16 @@ class EventFollower(QObject):
 LIVE_WORKERS: set = set()           # 还在跑的后台线程；关窗口前要等它们结束（否则 Qt 直接中止程序）
 
 
+class RunCancelled(BaseException):
+    """人点了停止（或关窗口）：后台运行在下一个检查点自己退出。
+    继承 BaseException，免得核心库里 except Exception 把它吞掉（DECISIONS 第 128 条）。"""
+
+
 def friendly_error(exc: BaseException) -> str:
     """后台运行出错时给人看的一句话：说清楚是哪一类问题、怎么办。"""
     from ..llm import LLMError
+    if isinstance(exc, RunCancelled):
+        return "已按要求停止；已经完成的部分保留在运行记录里"
     if isinstance(exc, LLMError):
         return f"模型调用失败：{exc}。检查网络和 .env 里的 API key；已经完成的部分保留在运行记录里"
     if isinstance(exc, PermissionError):
@@ -113,6 +120,37 @@ class Backend(QObject):
     def answer(self, value) -> None:
         raise NotImplementedError
 
+    # 停止运行不能用 QThread.terminate()：强杀正在跑 Python 代码的线程会让它带着解释器锁死掉，
+    # 主线程从此卡住（界面"未响应"，DECISIONS 第 128 条）。改成请求停止，运行在下一个检查点自己退出：
+    # 等人回答的地方马上退出；其他时候在下一个运行事件处退出（正在进行的模型调用或烧录会先做完）。
+    def _cancel_event(self) -> threading.Event:
+        ev = self.__dict__.get("_cancel")
+        if ev is None:
+            ev = self._cancel = threading.Event()
+        return ev
+
+    def cancelled(self) -> bool:
+        return self._cancel_event().is_set()
+
+    def request_cancel(self) -> None:
+        self._cancel_event().set()
+
+    def _check_cancel(self) -> None:
+        if self.cancelled():
+            raise RunCancelled()
+
+    def _guard(self, fn):
+        """包一层运行事件回调：请求停止后，事件照常显示，然后抛一次 RunCancelled 让运行退出
+        （只抛一次，运行收尾时发的事件照常通过）。"""
+        state = {"raised": False}
+
+        def sub(ev):
+            fn(ev)
+            if self.cancelled() and not state["raised"]:
+                state["raised"] = True
+                raise RunCancelled()
+        return sub
+
     def stop(self) -> None:
         raise NotImplementedError
 
@@ -128,9 +166,11 @@ class LocalBackend(Backend):
         self._manager = None
 
     def _wait(self, kind: str, payload: dict):
+        self._check_cancel()
         self._got.clear()
         self.ask.emit(kind, payload)
         self._got.wait()
+        self._check_cancel()
         return self._answer
 
     def answer(self, value) -> None:
@@ -174,7 +214,7 @@ class LocalBackend(Backend):
             store = Store()
             try:
                 return run_config(task, cfg, llm=llm, settings=settings, runs_root=runs_dir, store=store,
-                                  subscribers=(self.event.emit,), secrets=secrets, human_review=human_review,
+                                  subscribers=(self._guard(self.event.emit),), secrets=secrets, human_review=human_review,
                                   human=plan_cb if human_review else None, hint=hint_cb if human_review else None,
                                   checkpoint=checkpoint_cb if human_review else None, tools=box,
                                   approve=approve_cb, tier_override=tier, thinking=thinking, workflow=workflow)
@@ -193,19 +233,21 @@ class LocalBackend(Backend):
                             "error": self.worker.error or getattr(r, "error", "") or ""})
 
     def stop(self) -> None:
-        # 后台线程里的 LLM 调用不能硬停：把人工等待放行，并标记中断，运行会在下一个检查点结束
+        # 后台线程不能硬停：标记停止并放行人工等待，运行会在下一个检查点结束
+        self.request_cancel()
         self.answer("")
-        if self.worker is not None and self.worker.isRunning():
-            self.worker.terminate()
 
 
-def shutdown_workers(timeout_ms: int = 3000) -> None:
-    """关窗口前：等后台线程结束，等不到就强行停掉（模型调用卡在网络上时）。"""
+def shutdown_workers(timeout_ms: int = 3000) -> list:
+    """关窗口前：等后台线程结束。等不到的（模型调用卡在网络上、正在烧录）不强杀——强杀 Python 线程会让
+    整个程序卡死（DECISIONS 第 128 条）——返回给调用方，由它直接结束进程。"""
+    left = []
     for w in list(LIVE_WORKERS):
         if w.isRunning() and not w.wait(timeout_ms):
-            w.terminate()
-            w.wait(2000)
+            left.append(w)
+            continue
         LIVE_WORKERS.discard(w)
+    return left
 
 
 def rule_review_payload(pending, escalated, results: dict | None = None) -> dict:
@@ -248,9 +290,11 @@ class EmbeddedBackend(Backend):
         self.row = None
 
     def _wait(self, kind: str, payload: dict):
+        self._check_cancel()
         self._got.clear()
         self.ask.emit(kind, payload)
         self._got.wait()
+        self._check_cancel()
         return self._answer
 
     def answer(self, value) -> None:
@@ -286,7 +330,7 @@ class EmbeddedBackend(Backend):
         if board is not None and board.port is None:
             board = None
             self.log.emit("没找到板子：硬件层只做到编译和合规检查")
-        sub = (self.event.emit,)
+        sub = (self._guard(self.event.emit),)
 
         if task_id:
             from ..embedded.board_eval import run_once
@@ -358,9 +402,8 @@ class EmbeddedBackend(Backend):
         self.finished.emit(info)
 
     def stop(self) -> None:
+        self.request_cancel()                          # 不能硬停线程，见 Backend._guard
         self.answer({})
-        if self.worker is not None and self.worker.isRunning():
-            self.worker.terminate()
 
 
 class DockerBackend(Backend):

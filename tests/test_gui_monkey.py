@@ -199,6 +199,67 @@ class MonkeyFoundTest(unittest.TestCase):
         self.assertFalse(any(x.isRunning() for x in LIVE_WORKERS))
         w.chat.backend = None
 
+    def test_stop_without_terminate(self):
+        # 停止运行不强杀线程（第 128 条）：等人回答时马上退出；其他时候在下一个运行事件处退出
+        import time
+        from unittest import mock
+        from firmforge.gui.runner import EmbeddedBackend, RunCancelled, _Worker
+        killed = []
+        with mock.patch.object(_Worker, "terminate", lambda self: killed.append(self)):
+            b = EmbeddedBackend()
+            job = _Worker(lambda: (b._wait("look", {}), "没停下")[1])
+            b.worker = job
+            job.start()
+            time.sleep(0.2)
+            b.stop()
+            self.assertTrue(job.wait(3000))
+            self.assertIn("已按要求停止", job.error)
+            b2 = EmbeddedBackend()
+            seen = []
+            sub = b2._guard(seen.append)
+
+            def run():
+                for i in range(200):
+                    sub({"i": i})
+                    time.sleep(0.01)
+                return "没停下"
+            job2 = _Worker(run)
+            job2.start()
+            time.sleep(0.1)
+            b2.stop()
+            self.assertTrue(job2.wait(3000))
+            self.assertIn("已按要求停止", job2.error)
+            self.assertLess(len(seen), 200)
+            sub({"end": 1})                               # 只抛一次：收尾事件照常通过
+            self.assertEqual(seen[-1], {"end": 1})
+            with self.assertRaises(RunCancelled):
+                b2._wait("plan", {})                      # 停止后再等人回答：直接退出
+        self.assertEqual(killed, [])
+
+    def test_restart_with_stuck_worker(self):
+        # 点"重启软件"时后台线程还卡着（模型调用）：不强杀，存好布局后直接结束进程，新窗口照常打开
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        from firmforge.gui.runner import LIVE_WORKERS, _Worker
+        import threading
+        w = self.window()
+        gate = threading.Event()
+        killed, exited, started = [], [], []
+        stuck = _Worker(lambda: gate.wait(10))
+        stuck.start()
+        with mock.patch.object(_Worker, "terminate", lambda self: killed.append(self)), \
+                mock.patch("PySide6.QtWidgets.QMessageBox.question", lambda *a, **k: QMessageBox.Yes), \
+                mock.patch("firmforge.gui.runner.shutdown_workers.__defaults__", (200,)), \
+                mock.patch("PySide6.QtCore.QProcess.startDetached", lambda *a: started.append(a)), \
+                mock.patch.object(type(w), "hard_exit", lambda self: exited.append(1)):
+            w.restart()
+        self.assertEqual(killed, [])
+        self.assertEqual(exited, [1])
+        self.assertEqual(len(started), 1)
+        gate.set()
+        stuck.wait(3000)
+        LIVE_WORKERS.discard(stuck)
+
     def test_settings_worker_without_result(self):
         # 设置页的后台任务被中途停掉、没有结果时：提示，不报错
         from unittest import mock

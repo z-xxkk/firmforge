@@ -1053,7 +1053,7 @@ class ChatPage(QWidget):
     def stop(self):
         if self.backend is not None:
             self.backend.stop()
-            self.add_line("已请求停止。", bg=True)
+            self.add_line("已请求停止：正在等你确认的地方会马上停；正在调用模型或烧录时，做完这一步就停。", bg=True)
 
     def on_finished(self, info: dict):
         self.stop_btn.setVisible(False)

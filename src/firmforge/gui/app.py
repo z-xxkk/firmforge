@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
                         b.stop()
                     except Exception:                    # noqa: BLE001  停的时候出错也要继续关
                         pass
-        shutdown_workers()                               # 等后台线程结束，否则 Qt 会直接中止程序
+        left = shutdown_workers()                        # 等后台线程在检查点自己退出（不强杀，第 128 条）
         st = QSettings()
         st.setValue("window/geometry", self.saveGeometry())
         st.setValue("window/page_key", self.page_keys[self.stack.currentIndex()])
@@ -313,6 +313,14 @@ class MainWindow(QMainWindow):
         if self._restart:
             from PySide6.QtCore import QProcess
             QProcess.startDetached(sys.executable, sys.argv)
+        if left:                                         # 还卡在模型调用或烧录上：布局已存好，直接结束进程
+            st.sync()
+            self.hard_exit()
+
+    def hard_exit(self) -> None:
+        """后台线程还没退出时结束整个进程（Qt 在线程还跑着时正常退出会中止程序）。测试里会替换掉。"""
+        import os
+        os._exit(0)
 
 
 def code_stamp() -> float:
