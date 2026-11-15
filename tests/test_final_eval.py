@@ -167,10 +167,10 @@ class SplitAndCompareCliTest(unittest.TestCase):
         from firmforge.cli import task_split
         from firmforge.embedded.board_task import discover_board_tasks
         tune, test = task_split(ROOT / "tasks_board", "tune"), task_split(ROOT / "tasks_board", "test")
-        self.assertEqual(len(tune), 5)
-        self.assertEqual(len(test), 6)
-        self.assertFalse(set(tune) & set(test))
-        self.assertEqual(set(tune) | set(test), {t.id for t in discover_board_tasks(ROOT / "tasks_board")})
+        hold = task_split(ROOT / "tasks_board", "holdout")
+        self.assertEqual((len(tune), len(test), len(hold)), (5, 6, 4))
+        self.assertFalse(set(tune) & set(test) or set(tune) & set(hold) or set(test) & set(hold))
+        self.assertEqual(set(tune) | set(test) | set(hold), {t.id for t in discover_board_tasks(ROOT / "tasks_board")})
         self.assertEqual(task_split(ROOT / "tasks_board", "ledc_pwm, tune")[0], "ledc_pwm")
 
     def test_board_compare_command(self):

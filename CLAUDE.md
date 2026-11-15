@@ -88,6 +88,8 @@ firmforge board-eval --tasks test --configs single,none,verified --runs 3 --out 
 firmforge board-eval --tasks tune --configs none,full --runs 2 --out results/final_tune --max-cost 10        # 调优题；full 的调度成绩和经验库写进 results/final_tune/firmforge.db
 firmforge board-eval --tasks test --configs none,full --runs 3 --out results/final_after --db results/final_tune/firmforge.db --freeze --max-cost 12   # 复测（冻结）
 firmforge board-compare results/final_before results/final_after --out results/final_compare.md   # 前后逐题配对对比（不调用模型）
+firmforge board-eval --tasks holdout --configs single,none,full --runs 3 --out results/final_holdout --db results/final_tune/firmforge.db --freeze --max-cost 10   # 留出题（第 126 条，4 道新外设题）
+python scripts/audit_runs.py --since 20261115                 # 运行记录体检（第 123 条）
 QT_QPA_PLATFORM=offscreen python tests/monkey_designer.py --seeds 0-29 --steps 400   # 设计器随机操作长测（固定种子，可重现）；加 --workflow firmware_dev 测上板工作流
 QT_QPA_PLATFORM=offscreen python tests/monkey_pages.py --seeds 0-14 --steps 300      # 其他几页随机点击长测（在项目副本里跑）
 python tests/mutation.py                         # 变异测试：故意改错判定代码，看测试能否发现（约 2 分钟，结果在 results/mutation/）

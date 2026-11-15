@@ -1,0 +1,27 @@
+id = "nvs_config"
+title = "NVS 掉电保存配置"
+category = "peripheral"
+difficulty = 2
+source = "ESP-IDF v6.1 nvs_flash/include/nvs.h、nvs_flash.h（键名最长 15 个字符 NVS_KEY_NAME_MAX_SIZE-1；ESP_ERR_NVS_NO_FREE_PAGES / ESP_ERR_NVS_NEW_VERSION_FOUND 时擦除分区后重新初始化）；DECISIONS 第 126 条"
+target = "esp32c3"
+wiring = []
+scopes = ["nvs"]   # 规则适用范围（评测时只给这些范围的规则）
+requires = ["nvs_flash"]
+
+[[mutants]]
+file = "not_found_raw.c"
+replaces = "kv.c"
+expect_fail = "board_test"
+why = "读不存在的键直接把 NVS 自己的错误码 ESP_ERR_NVS_NOT_FOUND 返回出去，没按接口约定换成 ESP_ERR_NOT_FOUND"
+
+[[mutants]]
+file = "key_len_unchecked.c"
+replaces = "kv.c"
+expect_fail = "board_test"
+why = "没检查键名长度，超过 15 个字符时返回 NVS 的 ESP_ERR_NVS_KEY_TOO_LONG 而不是 ESP_ERR_INVALID_ARG"
+
+[[mutants]]
+file = "ram_cache.c"
+replaces = "kv.c"
+expect_fail = "board_test"
+why = "数据只存在内存里，没写进 NVS，重启以后就没了"

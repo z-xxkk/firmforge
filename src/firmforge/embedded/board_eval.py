@@ -65,7 +65,7 @@ def task_design(task: BoardTask) -> Design:
     mid = Path(hpath).stem
     files = tuple(sorted(p for p in task.reference_files() if p.endswith(".c")))
     return Design([DesignModule(mid, task.title, "hardware", files, tuple(declared_functions(htext)),
-                                task.scopes or ("all",))])
+                                task.scopes or ("all",))], wiring=dict(task.pins))
 
 
 def parse_configs(text: str) -> list[str]:
@@ -135,6 +135,7 @@ def run_single(task: BoardTask, ctx: EvalContext, name: str) -> tuple[FlowResult
     """一个编码 Agent，只看编译错误。返回 (结果, 最后的代码, 尝试次数)。"""
     design = task_design(task)
     m = design.modules[0]
+    profile = task.task_profile(ctx.profile)              # 题目自己的接线（第 126 条）
     rd = RunDir.create(ctx.runs_root, name)
     bus = EventBus(rd.run_id, rd.events_path)
     for s in ctx.subscribers:
@@ -142,12 +143,12 @@ def run_single(task: BoardTask, ctx: EvalContext, name: str) -> tuple[FlowResult
     res = FlowResult(rd.path)
     agents = _Agents(ctx.llm, ctx.settings, ctx.registry or default_registry(), bus,
                      CallLogger(rd.path, list(ctx.secrets)), res, None)
-    bus.emit("run_started", None, task=task.id, config="embedded/single", board=ctx.profile.board.value)
+    bus.emit("run_started", None, task=task.id, config="embedded/single", board=profile.board.value)
     header = task.public_files()[m.header]
-    msgs = coder_messages(task.spec_path.read_text(encoding="utf-8"), ctx.profile, None, design, m, {},
+    msgs = coder_messages(task.spec_path.read_text(encoding="utf-8"), profile, None, design, m, {},
                           locked_header=header)
     files: dict[str, str] = {}
-    proj = (IdfProject(ctx.build_root / f"{rd.run_id}-single", ctx.idf, target=str(ctx.profile.chip.value),
+    proj = (IdfProject(ctx.build_root / f"{rd.run_id}-single", ctx.idf, target=str(profile.chip.value),
                        requires=DEFAULT_REQUIRES + TEST_REQUIRES + task.requires) if ctx.idf is not None else None)
     attempt = 0
     try:
@@ -186,7 +187,7 @@ def _single_loop(task: BoardTask, ctx: EvalContext, m: DesignModule, msgs: list[
         if proj is None:
             break
         # 带上平台的测试主程序（没有用例），否则缺 app_main 链接不过，Agent 会收到和它的代码无关的报错
-        proj.write(ctx.profile, {**task.public_files(), **files, **harness_files(None, None, profile=ctx.profile)})
+        proj.write(task.task_profile(ctx.profile), {**task.public_files(), **files, **harness_files(None, None, profile=task.task_profile(ctx.profile))})
         b = proj.build()
         bus.emit("verify_finished", m.id, attempt=attempt, scope="build", ok=b.ok, failed_layer=None if b.ok else "build")
         if b.ok:

@@ -1,0 +1,31 @@
+id = "adc_volt"
+title = "ADC 读电压（带校准）"
+category = "peripheral"
+difficulty = 2
+source = "ESP-IDF v6.1 esp_adc/include/esp_adc/adc_oneshot.h、adc_cali_scheme.h（ESP32-C3 支持曲线拟合校准 ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED）；esp32c3-ds p.21 GPIO0 = ADC1_CH0；复用 GPIO0–GPIO1 跳线，测试从 GPIO1 输出高低电平；DECISIONS 第 126 条"
+target = "esp32c3"
+wiring = ["adc.in", "adc.drive"]
+scopes = ["adc"]   # 规则适用范围（评测时只给这些范围的规则）
+requires = ["esp_adc"]
+
+[pins]
+"adc.in" = 0       # ADC1_CH0
+"adc.drive" = 1    # 测试用：经跳线接到 adc.in
+
+[[mutants]]
+file = "raw_counts.c"
+replaces = "volt.c"
+expect_fail = "board_test"
+why = "返回的是 ADC 原始读数（0–4095），没换算成毫伏"
+
+[[mutants]]
+file = "atten_0db.c"
+replaces = "volt.c"
+expect_fail = "board_test"
+why = "衰减用了 0 dB，量程只有约 0.75 V，高电平读不出来"
+
+[[mutants]]
+file = "no_unit_delete.c"
+replaces = "volt.c"
+expect_fail = "board_test"
+why = "反初始化没删除 ADC 单元，之后再初始化失败"

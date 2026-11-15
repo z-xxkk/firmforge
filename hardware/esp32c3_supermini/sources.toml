@@ -273,3 +273,93 @@ version = "v6.1"
 url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_rmt/src/rmt_rx.c"
 file = "idf_v6.1/components__esp_driver_rmt__src__rmt_rx.c"
 sha256 = "5a44ce2d4be67b5b28b0d930af388792df524f82394bc8ad9fdaae16f022e198"
+
+[[doc]]
+id = "idf-driver-spi-master-h"
+title = "ESP-IDF v6.1 esp_driver_spi/include/driver/spi_master.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_spi/include/driver/spi_master.h"
+file = "idf_v6.1/components__esp_driver_spi__include__driver__spi_master.h"
+sha256 = "1f553eca0093c40c8b3108e662c0479090a271db46f30e98ff6938b1573e74ef"
+
+[[doc]]
+id = "idf-driver-spi-common-h"
+title = "ESP-IDF v6.1 esp_driver_spi/include/driver/spi_common.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_spi/include/driver/spi_common.h"
+file = "idf_v6.1/components__esp_driver_spi__include__driver__spi_common.h"
+sha256 = "1943645cd9700f203c3ad79c76a2dc5a82393d2467ef8ece27c7c9344b692b96"
+
+[[doc]]
+id = "idf-adc-oneshot-h"
+title = "ESP-IDF v6.1 esp_adc/include/esp_adc/adc_oneshot.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_adc/include/esp_adc/adc_oneshot.h"
+file = "idf_v6.1/components__esp_adc__include__esp_adc__adc_oneshot.h"
+sha256 = "5d49ae0137bbc5fe90758ac02be1e9a1ed8ab478d1ce24d91880c7a301becaf1"
+
+[[doc]]
+id = "idf-adc-cali-h"
+title = "ESP-IDF v6.1 esp_adc/include/esp_adc/adc_cali.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_adc/include/esp_adc/adc_cali.h"
+file = "idf_v6.1/components__esp_adc__include__esp_adc__adc_cali.h"
+sha256 = "62936d4277c937b5a9d56db275cded2c66b11d28aea4f2197f3cc122afb731ea"
+
+[[doc]]
+id = "idf-adc-cali-scheme-h"
+title = "ESP-IDF v6.1 esp_adc/include/esp_adc/adc_cali_scheme.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_adc/include/esp_adc/adc_cali_scheme.h"
+file = "idf_v6.1/components__esp_adc__include__esp_adc__adc_cali_scheme.h"
+sha256 = "b9aee964f483cfcc706291ae9e7e54b581ba471fe8c2deb2d5c8d854fd4286e0"
+
+[[doc]]
+id = "idf-driver-tsens-h"
+title = "ESP-IDF v6.1 esp_driver_tsens/include/driver/temperature_sensor.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_driver_tsens/include/driver/temperature_sensor.h"
+file = "idf_v6.1/components__esp_driver_tsens__include__driver__temperature_sensor.h"
+sha256 = "fa0bda49375dfc35d3daa8d492662eee4eacd01e9288ba3e7adf17463a137cc3"
+
+[[doc]]
+id = "idf-c3-tsens-periph-c"
+title = "ESP-IDF v6.1 esp_hal_ana_conv/esp32c3/temperature_sensor_periph.c"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/esp_hal_ana_conv/esp32c3/temperature_sensor_periph.c"
+file = "idf_v6.1/components__esp_hal_ana_conv__esp32c3__temperature_sensor_periph.c"
+sha256 = "a513b2667f074d0ce9555bbfa540739f6f59bd93709f07334453d20a5134f67a"
+
+[[doc]]
+id = "idf-nvs-h"
+title = "ESP-IDF v6.1 nvs_flash/include/nvs.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/nvs_flash/include/nvs.h"
+file = "idf_v6.1/components__nvs_flash__include__nvs.h"
+sha256 = "bc1548e1ea0c12a29b72186f4110e1d19db9073611742ef40a7f4189c9aacab1"
+
+[[doc]]
+id = "idf-nvs-flash-h"
+title = "ESP-IDF v6.1 nvs_flash/include/nvs_flash.h"
+kind = "header"
+tier = "official_code"
+version = "v6.1"
+url = "https://raw.githubusercontent.com/espressif/esp-idf/v6.1/components/nvs_flash/include/nvs_flash.h"
+file = "idf_v6.1/components__nvs_flash__include__nvs_flash.h"
+sha256 = "8f820448b0bfd9a81cd9d55c1fdb237d080ca8257fb5c9b741cc978565ed07e6"

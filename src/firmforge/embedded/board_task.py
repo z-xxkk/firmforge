@@ -7,6 +7,8 @@ task.toml 多出的字段：
 - target：目标芯片（esp32s3）
 - wiring：用到的接线（硬件档案里的信号名），自检前先核对硬件档案里有这些信号
 - requires：额外的 ESP-IDF 组件（例如 esp_driver_pcnt）
+- [pins]：这道题自己的接线（信号名 → GPIO），例如 SPI 题复用 GPIO0–GPIO1 那根跳线当 MOSI–MISO（第 126 条）；
+  写了就按"项目接线"处理：生成 hw_config.h、编码、测试、判定都只用这些信号（profile.with_wiring）
 - scopes：涉及的外设和器件（规则适用范围，例如 ["i2c", "mpu6050"]）
 - 变异体的 expect_fail：compliance（合规检查拦下）/ build（编译不过）/ board_test（隐藏测试抓住）
 
@@ -56,6 +58,11 @@ class BoardTask:
     requires: tuple[str, ...] = ()
     mutants: tuple[BoardMutant, ...] = ()
     scopes: tuple[str, ...] = ()       # 涉及的外设和器件（规则适用范围），评测时只把这些范围的规则给 Agent
+    pins: dict = field(default_factory=dict)   # 这道题自己的接线（第 126 条）；空表示用硬件档案的默认接线
+
+    def task_profile(self, profile: HardwareProfile) -> HardwareProfile:
+        """这道题用的硬件档案：写了 [pins] 就换成它的接线，否则原样返回。"""
+        return profile.with_wiring(dict(self.pins), note=f"{self.id} 的接线") if self.pins else profile
 
     @property
     def spec_path(self) -> Path:
@@ -106,7 +113,7 @@ def load_board_task(path: Path | str) -> BoardTask:
         muts.append(BoardMutant(m["file"], m["replaces"], m["expect_fail"], m.get("why", "")))
     return BoardTask(d["id"], d["title"], d["category"], int(d["difficulty"]), d.get("source", ""), root.resolve(),
                      d.get("target", "esp32s3"), tuple(d.get("wiring", [])), tuple(d.get("requires", [])), tuple(muts),
-                     tuple(d.get("scopes", [])))
+                     tuple(d.get("scopes", [])), {str(k): int(v) for k, v in d.get("pins", {}).items()})
 
 
 def judge_rules(tasks_root: Path | str, profile: HardwareProfile) -> RuleSet:
@@ -160,6 +167,7 @@ class TaskCheck:
 def check_without_board(task: BoardTask, profile: HardwareProfile, rules: RuleSet | None, idf: IdfEnv | None,
                         build_root: Path) -> TaskCheck:
     out = TaskCheck(task.id)
+    profile = task.task_profile(profile)
     missing = [w for w in task.wiring if w not in profile.pins]
     if missing:
         out.problems.append("硬件档案里没有这些信号：" + "、".join(missing))
@@ -223,6 +231,7 @@ def judge_on_board(task: BoardTask, profile: HardwareProfile, judge: RuleSet | N
                    files: dict[str, str], build_dir: Path, log_path: Path | None) -> JudgeResult:
     """files：被测代码（相对 main/ 的路径 → 内容），公共头文件一律用题目自带的（Agent 改了也不算）。"""
     total = hidden_case_count(task)
+    profile = task.task_profile(profile)
     files = {k: v for k, v in files.items() if k not in task.public_files()}
     comp = check_code(files, judge.select(None, "approved") if judge is not None else [])
     if not comp.ok:

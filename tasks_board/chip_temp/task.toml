@@ -1,0 +1,27 @@
+id = "chip_temp"
+title = "片内温度传感器"
+category = "peripheral"
+difficulty = 1
+source = "ESP-IDF v6.1 esp_driver_tsens/include/driver/temperature_sensor.h；ESP32-C3 测量档 esp_hal_ana_conv/esp32c3/temperature_sensor_periph.c（-10–80 °C 档误差 1 °C）；DECISIONS 第 126 条"
+target = "esp32c3"
+wiring = []
+scopes = ["temp_sensor"]   # 规则适用范围（评测时只给这些范围的规则）
+requires = ["esp_driver_tsens"]
+
+[[mutants]]
+file = "fahrenheit.c"
+replaces = "chip_temp.c"
+expect_fail = "board_test"
+why = "返回华氏度（摄氏度 × 1.8 + 32），不是要求的摄氏度"
+
+[[mutants]]
+file = "double_init_ok.c"
+replaces = "chip_temp.c"
+expect_fail = "board_test"
+why = "已经初始化过再调 chip_temp_init 直接返回 ESP_OK，没按要求返回 ESP_ERR_INVALID_STATE"
+
+[[mutants]]
+file = "deinit_no_disable.c"
+replaces = "chip_temp.c"
+expect_fail = "board_test"
+why = "反初始化时没先 disable 就 uninstall，卸载失败、句柄没释放，之后再初始化失败"

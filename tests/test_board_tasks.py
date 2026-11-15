@@ -14,14 +14,15 @@ TASKS = ROOT / "tasks_board"
 PROFILE = HardwareProfile.load(ROOT / "hardware" / "esp32c3_supermini" / "profile.json")
 JUDGE = judge_rules(TASKS, PROFILE)
 EXPECTED = {"gpio_edge_count", "rmt_pulse_meter", "ledc_pwm", "gptimer_tick", "uart_loopback", "i2c_bus_scan",
-            "mpu6050_drv_idf", "mpu6050_drdy", "max30102_fifo", "max30102_temp", "imu_uart_logger"}
+            "mpu6050_drv_idf", "mpu6050_drdy", "max30102_fifo", "max30102_temp", "imu_uart_logger",
+            "adc_volt", "chip_temp", "nvs_config", "spi_loopback"}      # 后 4 道：2026-11-15 新外设留出题（第 126 条）
 
 
 class BoardTasksTest(unittest.TestCase):
     def setUp(self):
         self.tasks = discover_board_tasks(TASKS)
 
-    def test_all_eleven_present_and_well_formed(self):
+    def test_all_present_and_well_formed(self):
         self.assertEqual({t.id for t in self.tasks}, EXPECTED)
         for t in self.tasks:
             with self.subTest(task=t.id):
@@ -32,7 +33,7 @@ class BoardTasksTest(unittest.TestCase):
                 self.assertGreaterEqual(len(t.mutants), 3)
                 for m in t.mutants:
                     self.assertNotEqual(t.mutant_files(m)[m.replaces], t.reference_files()[m.replaces], m.file)
-                missing = [w for w in t.wiring if w not in PROFILE.pins]
+                missing = [w for w in t.wiring if w not in t.task_profile(PROFILE).pins]   # 题目可以自带接线
                 self.assertEqual(missing, [], "接线信号不在硬件档案里")
                 spec = t.spec_path.read_text(encoding="utf-8")
                 for h in t.public_files():
@@ -70,6 +71,27 @@ class BoardTasksTest(unittest.TestCase):
                                                encoding="utf-8")
             with self.assertRaises(BoardTaskError):
                 load_board_task(d)
+
+
+class TaskPinsTest(unittest.TestCase):
+    """题目自带接线（第 126 条）：复用 GPIO0–GPIO1 跳线的题用自己的信号名，生成的 hw_config.h 只有这些信号。"""
+
+    def test_spi_task_profile(self):
+        from firmforge.embedded.board_eval import task_design
+        from firmforge.target.esp_idf import hw_config_header
+        t = load_board_task(TASKS / "spi_loopback")
+        p = t.task_profile(PROFILE)
+        self.assertEqual({k: f.value for k, f in p.pins.items()}, {"spi2.mosi": 0, "spi2.miso": 1, "spi2.sclk": 6})
+        self.assertEqual(p.wiring_problems(dict(t.pins), set()), [])   # 板子档案的自洽检查（problems）不适用于项目接线：
+        from firmforge.target.harness import main_source        # I2C 器件还在档案里但这道题没接总线，复位代码要跳过它们
+        self.assertNotIn("ff_reset_devices();", main_source(p))
+        h = hw_config_header(p)
+        self.assertIn("#define FF_PIN_SPI2_MOSI 0", h)
+        self.assertNotIn("FF_PIN_UART1_TX", h)                  # 默认接线里同一个 GPIO 的信号不再出现
+        self.assertEqual(task_design(t).wiring, t.pins)
+        old = load_board_task(TASKS / "uart_loopback")
+        self.assertIs(old.task_profile(PROFILE), PROFILE)        # 没写 [pins] 的老题不变
+        self.assertEqual(task_design(old).wiring, {})
 
 
 if __name__ == "__main__":

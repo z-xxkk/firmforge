@@ -1,0 +1,32 @@
+id = "spi_loopback"
+title = "SPI 主机全双工收发（回环）"
+category = "peripheral"
+difficulty = 2
+source = "ESP-IDF v6.1 esp_driver_spi/include/driver/spi_master.h、spi_common.h（transaction 的 length 单位是位；max_transfer_sz 单位字节；SPI_DEVICE_HALFDUPLEX）；复用 GPIO0–GPIO1 跳线当 MOSI–MISO，SCLK 在 GPIO6；DECISIONS 第 126 条"
+target = "esp32c3"
+wiring = ["spi2.mosi", "spi2.miso", "spi2.sclk"]
+scopes = ["spi"]   # 规则适用范围（评测时只给这些范围的规则）
+requires = ["esp_driver_spi"]
+
+[pins]
+"spi2.mosi" = 0
+"spi2.miso" = 1    # 跳线接 MOSI，发什么收什么
+"spi2.sclk" = 6
+
+[[mutants]]
+file = "bits_vs_bytes.c"
+replaces = "spi_link.c"
+expect_fail = "board_test"
+why = "transaction 的 length 按字节填了（应该是位数），只传了 1/8 的数据"
+
+[[mutants]]
+file = "half_duplex.c"
+replaces = "spi_link.c"
+expect_fail = "board_test"
+why = "设备配成了半双工，先发后收，收不到同时回来的数据"
+
+[[mutants]]
+file = "fixed_clock.c"
+replaces = "spi_link.c"
+expect_fail = "board_test"
+why = "时钟固定用 1 MHz，没按参数设置"

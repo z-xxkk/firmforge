@@ -874,7 +874,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_firmware)
     s = sub.add_parser("board-eval", help="上板评测：上板题 × 配置（single/none/unverified/verified）× 次数（调用模型）")
     s.add_argument("--configs", default="single,none,unverified,verified", help="配置列表，逗号分隔（默认四种都跑）")
-    s.add_argument("--tasks", default="all", help="all、tune（调优题）、test（测试题，见 tasks_board/splits.toml）或题目 id 列表，逗号分隔")
+    s.add_argument("--tasks", default="all", help="all、tune（调优题）、test（测试题）、holdout（留出题，见 tasks_board/splits.toml）或题目 id 列表，逗号分隔")
     s.add_argument("--runs", type=int, default=3, help="每个组合跑几次（默认 3）")
     s.add_argument("--out", required=True, help="输出目录，如 results/board_first；中断后用同一目录重跑会接着跑")
     s.add_argument("--db", help="full 配置用的实验数据库（调度成绩、经验库），默认 <输出目录>/firmforge.db；不碰平时用的数据库")
@@ -1087,11 +1087,11 @@ def cmd_firmware(args) -> int:
 
 
 def task_split(root: Path, text: str) -> list[str]:
-    """--tasks 的值：tune / test 按 tasks_board/splits.toml 展开（DECISIONS 第 119 条），其余按逗号分隔的题目 id。"""
+    """--tasks 的值：tune / test / holdout 按 tasks_board/splits.toml 展开（DECISIONS 第 119、126 条），其余按逗号分隔的题目 id。"""
     names = [t.strip() for t in text.split(",") if t.strip()]
     out: list[str] = []
     for n in names:
-        if n in ("tune", "test"):
+        if n in ("tune", "test", "holdout"):
             f = Path(root) / "splits.toml"
             try:
                 out += list(tomllib.loads(f.read_text(encoding="utf-8"))[n])
