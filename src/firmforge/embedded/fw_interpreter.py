@@ -45,6 +45,8 @@ class ModuleRun:
     review: dict | None = None
     stopped: str = ""                              # 停下的原因（hardware：诊断为硬件问题，等人处理）
     passed_files: dict = field(default_factory=dict)   # 最近一次通过时的代码（审查改坏了退回）
+    hardened: bool = False                         # 做过变异体补测试了（第 125 条，每个模块最多一次）
+    hardened_backup: dict | None = None            # 补测试前通过的代码（补强后没修好就交付它）
 
 
 class FirmwareInterpreter:
@@ -278,6 +280,13 @@ class FirmwareInterpreter:
             if run.last is not None and run.last[2].get("blame") == "code":
                 f._save_experience(m, *run.last)
                 run.last = None
+            if not run.hardened and run.t_conv and run.attempt < self._max_attempts(run):
+                run.hardened = True
+                run.t_conv, changed = f._harden_tests(self.design, m, mr, run.rules, run.attempt, run.t_conv,
+                                                      run.tester_pin or "tester")
+                if changed:                                   # 用补强后的测试再测一次原来的代码（算一次尝试）
+                    run.hardened_backup = dict(mr.files)
+                    self._verify(run)
 
     def _repair_loop(self, run: ModuleRun) -> None:
         """诊断 → 按责任交给编码或测试 Agent（硬件问题停下等人，规则问题先退回规则）→ 再检查，直到通过或次数用完。"""
@@ -361,6 +370,8 @@ class FirmwareInterpreter:
             mr.verdict = "hardware"
             return
         mr.verdict = run.verdict if run.verdict in ("pass", "skipped") else "fail"
+        if mr.verdict == "fail":
+            f._restore_before_hardening(m, mr, run.hardened_backup)
         if mr.verdict == "pass" and run.passed_files and mr.files != run.passed_files:
             mr.files.clear()
             mr.files.update(run.passed_files)

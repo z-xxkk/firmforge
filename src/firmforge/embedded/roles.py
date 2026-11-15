@@ -127,6 +127,28 @@ def coder_repair_message(attempt: int, max_attempts: int, problems: str, diagnos
 
 # ---------------------------------------------------------------- 写测试
 
+# 测试 Agent 的通用检查清单（第 125 条）：只写通用的测试设计常识（等价类、边界、错误路径、可重复性、独立核对），
+# 不写从测试题标准答案或隐藏测试里看来的具体知识
+TEST_CHECKLIST = """- 接口里每个参数的每一类取值都至少测一次（每个枚举值、每种模式），不只测默认值；
+- 边界值和非法值：最小、最大、刚好越界、空指针；非法参数要断言返回规定的错误码，而且不改动已有状态；
+- 需求里每一条带数字的要求（频率、个数、时长、精度、范围）都按数字断言，并写清允许的误差；
+- 初始化、反初始化、再初始化以后还能正常工作；重复调用、调用顺序不对时的行为符合需求；
+- 能独立观察到的东西（寄存器、引脚电平、收到的数据）就自己读出来，和被测函数给出的结果互相核对，不要只信被测函数的返回值；
+- 和时间有关的要求（超时、等待、采样率）要测时间本身，不只测"最后有结果"；
+- 每个断言都要能在实现写错时失败：想一想"如果实现把这里写错了，这条断言会不会发现"。"""
+
+
+def tester_mutant_message(survived, total: int) -> str:
+    """变异体补测试（第 125 条）：告诉测试 Agent 哪些改动它的测试没发现。只描述改了什么，不给实现代码。"""
+    lines = [f"你的测试已经通过。平台把被测代码故意改坏了 {total} 处，分别用你的测试去测，"
+             f"下面 {len(survived)} 处改动你的测试没有发现（改坏了测试照样通过）：", ""]
+    lines += [f"{i}. {mu.describe}" for i, mu in enumerate(survived, 1)]
+    lines += ["", "请补充或加强测试，让这些改动会让测试失败（按需求和接口该有的行为来断言，不要猜实现细节）。"
+                  "如果你确定某处改动按需求本来就不影响行为（例如多余的等待），说明理由，不用硬写测试。",
+              "请输出修改后的完整测试文件。"]
+    return "\n".join(lines)
+
+
 def platform_headers_block(profile: HardwareProfile, rules: RuleSet | None, scopes) -> str:
     """测试 Agent 能用的宏：hw_config.h 全文 + ff_regs.h 里的寄存器宏名单（基线评测发现它常编出不存在的宏、
     或者忘了 include，测试文件编译不过，第 122 条）。"""
@@ -148,6 +170,7 @@ def tester_messages(requirement: str, profile: HardwareProfile, rules: RuleSet |
               location=where or f"测试 › {module.id}")
     b.ref(f"module {module.id}", json.dumps(module.to_dict(), ensure_ascii=False, indent=2), "json")
     b.constraints += [f"只能写 main/{test_file(module)}", "你看不到实现代码，只根据需求、接口、验收标准和规则写测试"]
+    b.attach("测试要点（通用检查清单）", TEST_CHECKLIST)
     if board:
         b.constraints.append("读寄存器、计时用平台提供的 ff_test.h；片内外设寄存器地址用 ff_regs.h 里的 FF_REG_* 宏")
         b.constraints.append('用到的宏必须在下面"平台头文件"里真的存在，并且自己 #include 对应的头文件（hw_config.h、ff_regs.h）；'

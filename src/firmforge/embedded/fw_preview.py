@@ -171,6 +171,13 @@ class _StubFlow:
     def _dispute_rule(self, rules, diag):
         return rules
 
+    def _harden_tests(self, design, m, mr, rules, attempt, t_conv, tester):
+        self._note("通过后用变异体检查测试够不够严（预演不上板，跳过）")
+        return t_conv, False
+
+    def _restore_before_hardening(self, m, mr, backup):
+        pass
+
     def _recheck_hardware(self, m, mr, rules, layer, report, attempt, diag):
         self._note("接线自检（预演不上板，按测不了处理，维持硬件问题）")
         return diag

@@ -12,7 +12,8 @@ testing）：用一个"模拟世界"代替编译器和板子——驱动代码�
   I6 不抛异常；结论只能是 pass / fail / hardware / skipped；
   I7 判没过时，机会一定用完了；
   I8 最后一次检查之后不再叫 Agent（不白花钱）；
-  I9 接线自检全部正常时，不会因为"硬件问题"的诊断停下（第 124 条）。
+  I9 接线自检全部正常时，不会因为"硬件问题"的诊断停下（第 124 条）；
+  I10 每个模块最多做一次变异体补测试（第 125 条）。
 
 基线评测里"测试编译不过却一直交给编码 Agent"的错误（第 122 条修掉的）在这里几秒就会被 I2 抓住。
 命令行可以跑更多种子：python tests/test_repair_sim.py --seeds 0-999
@@ -78,7 +79,9 @@ class World:
                 self.driver = "ok"
             elif r.random() < self.p_break:
                 self.driver = r.choice(["compile", "logic"])
-            return f"<<<FILE {DRIVER}\nint imu_read(void){{return {self.rng.randint(0, 9)};}}\n>>>FILE\n"
+            return (f"<<<FILE {DRIVER}\nint imu_read(void)\n{{\n    write_reg(0x6B, 0x01);\n"
+                    f"    vTaskDelay(pdMS_TO_TICKS(50));\n    if (x == 1) {{\n        return ESP_ERR_INVALID_ARG;\n    }}\n"
+                    f"    return {self.rng.randint(0, 9)};\n}}\n>>>FILE\n")
         if self.test != "ok" and r.random() < self.p_tester_fix:
             self.test = "ok"
         elif r.random() < self.p_break:
@@ -111,7 +114,9 @@ def run_world(seed: int, workflow: bool, max_attempts: int = 4) -> tuple[World, 
                                     "detail": ""}]) if w.wiring_ok else sc.WiringCheck(skipped="没有板子"))
     m = DesignModule("imu", "IMU", "hardware", (DRIVER, "include/imu.h"), provides=("int imu_read(void)",))
     with tempfile.TemporaryDirectory() as d, mock.patch.object(EmbeddedFlow, "_check", lambda self, *a, **k: w.check()), \
-            mock.patch("firmforge.target.selfcheck.run_check", lambda *a, **k: check):
+            mock.patch("firmforge.target.selfcheck.run_check", lambda *a, **k: check), \
+            mock.patch.object(EmbeddedFlow, "_run_variant",
+                              lambda self, *a, **k: w.rng.choice(["killed", "killed", "survived", "invalid"])):
         f = EmbeddedFlow(llm=FakeLLM(w), settings=SETTINGS, profile=profile(), spec="x", rules=RuleSet(), library=None,
                          verifier=None, runs_root=Path(d), rule_mode="none", idf=None, board=None, design=Design([m]),
                          locked={"include/imu.h": "int imu_read(void);\n"}, build_rules=False, max_attempts=max_attempts,
@@ -133,11 +138,17 @@ def violations(w: World, res, max_attempts: int) -> list[str]:
         out.append("I5 判了通过，最后一次检查却没过")
     if verdict == "fail" and len(checks) != max_attempts:
         out.append(f"I7 判没过时只检查了 {len(checks)} 次，没用完 {max_attempts} 次机会")
+    hardenings = sum(1 for e in w.log if e[0] == "agent" and e[1] == "tester" and "故意改坏" in e[2])
+    if hardenings > 1:
+        out.append(f"I10 变异体补测试做了 {hardenings} 次")
     if verdict == "hardware" and getattr(w, "wiring_ok", False):
         out.append("I9 接线自检全部正常，却因为硬件问题的诊断停下了")
     if checks and verdict in ("pass", "fail"):
         last = max(i for i, e in enumerate(w.log) if e[0] == "check")
-        after = [e for e in w.log[last + 1:] if e[0] in ("agent", "diag")]
+        # 通过以后的那一次"按变异体补测试"是设计如此（补了没改就不重测），由 I10 限制只做一次
+        # （它的补交文件提醒也算在这一次里，最多 2 次）
+        after = [e for e in w.log[last + 1:] if e[0] in ("agent", "diag")
+                 and not (e[0] == "agent" and e[1] == "tester" and ("故意改坏" in e[2] or "没有找到这些文件" in e[2]))]
         if after:
             out.append(f"I8 最后一次检查之后还叫了 {len(after)} 次 Agent（白花钱）")
     log = w.log

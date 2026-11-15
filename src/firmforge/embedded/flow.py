@@ -52,7 +52,7 @@ from ..tools.loop import call_with_tools
 from .design import Design, DesignModule, design_from_text, designer_messages, designer_retry_message
 from .firmware_workflow import FirmwarePlan, firmware_plan
 from .roles import (coder_messages, coder_repair_message, diagnoser_messages, diagnosis_format_reminder, format_reminder,
-                    parse_diagnosis,
+                    parse_diagnosis, tester_mutant_message,
                     parse_output, test_file, tester_messages, tester_repair_message)
 
 RULE_MODES = ("verified", "unverified", "none")
@@ -480,6 +480,7 @@ class EmbeddedFlow:
         self._new_facts(out.facts)
         mr.tests.update(tout.files)
         last: tuple[str, str, dict] | None = None             # 上一轮没过的层、报告、诊断（修好后存经验）
+        hardened, backup = False, None                         # 变异体补测试（第 125 条）：每个模块最多一次
         for attempt in range(1, self.max_attempts + 1):
             mr.attempts = attempt
             verdict, layer, report = self._check(design, m, mr, rules, attempt)
@@ -489,6 +490,12 @@ class EmbeddedFlow:
             turn = None
             if verdict == "pass" and last is not None and last[2].get("blame") == "code":
                 self._save_experience(m, *last)
+            if verdict == "pass" and not hardened and attempt < self.max_attempts:
+                hardened = True
+                t_conv, changed = self._harden_tests(design, m, mr, rules, attempt, t_conv, self.plan.tester or "tester")
+                if changed:                                     # 用补强后的测试再测一次原来的代码（算一次尝试）
+                    backup = dict(mr.files)
+                    continue
             if verdict in ("pass", "skipped"):
                 mr.verdict = verdict
                 self.bus.emit("node_done" if verdict == "pass" else "node_failed", m.id, verdict=verdict,
@@ -524,6 +531,7 @@ class EmbeddedFlow:
                 mr.files.update(o.files)
                 self._new_facts(o.facts)
         mr.verdict = "fail"
+        self._restore_before_hardening(m, mr, backup)
         self.bus.emit("node_failed", m.id, verdict="fail", attempts=mr.attempts, note=mr.last_report[-300:])
         return mr
 
@@ -587,6 +595,70 @@ class EmbeddedFlow:
                 diag = {"blame": "code", "instruction": "", "evidence": f"诊断输出不合格（{exc}），按代码问题处理", "rule": ""}
         self.bus.emit("diagnosis", m.id, attempt=attempt, **diag)
         return diag
+
+    # ---------------------------------------------------------------- 变异体补测试（第 125 条）
+    def _harden_tests(self, design: Design, m: DesignModule, mr: ModuleResult, rules: RuleSet, attempt: int,
+                      t_conv: list | None, tester: str) -> tuple[list | None, bool]:
+        """模块通过了自己的测试以后：把代码故意改坏几处（embedded/mutate.py），用 Agent 自己的测试去测；
+        没被发现的改动交给测试 Agent 补测试。返回 (测试 Agent 的对话, 测试文件有没有改)。
+        变异体只是平台内部的检查，不发 verify_* 事件，不算尝试次数；补完测试后重测原代码才算一次尝试。"""
+        from .mutate import pick
+        n = int((getattr(self.agents.settings, "loop", None) or {}).get("mutants", 3) or 0)
+        if n <= 0 or not mr.tests or not t_conv:
+            return t_conv, False
+        tried, valid = [], 0
+        for mu in pick({p: c for p, c in mr.files.items() if p.endswith(".c")}, n + 2):
+            if valid >= n:
+                break
+            r = self._run_variant(design, m, {**mr.files, mu.file: mu.content}, mr.tests, rules, f"m{len(tried) + 1}")
+            tried.append((mu, r))
+            if r == "skipped":                                  # 没有板子或编译器：测不了，整个跳过
+                break
+            valid += r in ("killed", "survived")
+        survived = [mu for mu, r in tried if r == "survived"]
+        self.bus.emit("mutation_test", m.id, attempt=attempt, total=valid,
+                      killed=sum(1 for _, r in tried if r == "killed"), survived=len(survived),
+                      mutants=[{"kind": mu.kind, "what": mu.describe, "result": r} for mu, r in tried])
+        if not survived:
+            return t_conv, False
+        msg = tester_mutant_message(survived, valid)
+        before = dict(mr.tests)
+        t_conv, tout = self._ask_files(tester, t_conv + [{"role": "user", "content": msg}], m.id, {test_file(m)},
+                                       {test_file(m)}, attempt=attempt + 1, purpose="按变异体补测试")
+        mr.tests.update(tout.files)
+        return t_conv, mr.tests != before
+
+    def _run_variant(self, design: Design, m: DesignModule, files: dict[str, str], tests: dict[str, str],
+                     rules: RuleSet, tag: str) -> str:
+        """用 Agent 自己的测试测一个变异体：killed（测试发现了）/ survived（没发现）/ invalid（编译不过）/ skipped（测不了）。"""
+        deps = self._dep_files(design, m)
+        if m.layer == "logic":
+            r = run_host_tests({**self.locked, **deps, **files, **tests}, test_file(m), self.rd.path / "mutants" / m.id / tag)
+            if r.skipped:
+                return "skipped"
+            if not r.compiled:
+                return "invalid"
+            return "survived" if r.ok else "killed"
+        if self.idf is None or self.board is None:
+            return "skipped"
+        proj = IdfProject(Path(config.project_root()) / ".ff_data" / "idf_build" / f"{self.rd.run_id}-{m.id}-mut", self.idf,
+                          target=str(self.profile.chip.value),
+                          requires=DEFAULT_REQUIRES + TEST_REQUIRES + self.extra_requires, whole_archive=True)
+        proj.write(self.profile, {**self.locked, **deps, **files, **tests,
+                                  **harness_files(rules, getattr(self.verifier, "svd", None), set(m.scopes), profile=self.profile)})
+        if not proj.build().ok:
+            return "invalid"
+        r = self.board.run(proj, self.rd.path / "mutants" / m.id / f"{tag}.log")
+        if r.skipped:
+            return "skipped"
+        return "survived" if r.ok else "killed"
+
+    def _restore_before_hardening(self, m: DesignModule, mr: ModuleResult, backup: dict | None) -> None:
+        """补强测试以后没修好：交付补强前通过的那一版代码（结论仍记没通过，如实）。"""
+        if backup and mr.files != backup:
+            mr.files.clear()
+            mr.files.update(backup)
+            self.bus.emit("hardened_reverted", m.id, note="补强后的测试没通过，交付补强前通过的那一版代码")
 
     def _recheck_hardware(self, m: DesignModule, mr: ModuleResult, rules: RuleSet, layer: str, report: str,
                           attempt: int, diag: dict) -> dict:

@@ -55,5 +55,17 @@ class PreviewTest(unittest.TestCase):
         self.assertEqual(t["logic_fix"].error, "")                         # 逻辑层不走审查：照常跑完
 
 
+class StubInterfaceTest(unittest.TestCase):
+    def test_stub_flow_has_every_method_the_interpreter_calls(self):
+        """预演的替身要有解释器调用的每个流程方法（2026-11-15：加了 _harden_tests 忘了加替身，预演全部报错）。"""
+        import re
+        from pathlib import Path
+        from firmforge.embedded.fw_preview import _StubFlow
+        src = (Path(helpers.ROOT) / "src" / "firmforge" / "embedded" / "fw_interpreter.py").read_text(encoding="utf-8")
+        called = set(re.findall(r"\b(?:f|self\.flow|flow)\.(_[a-z]\w*)\(", src))
+        self.assertTrue(called)
+        self.assertEqual(sorted(x for x in called if not hasattr(_StubFlow, x)), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,7 @@ verify = 4                        # 同时进行的判定数
 max_attempts_per_module = 6
 rounds_before_escalation = 3
 repeat_threshold = 2              # 同一签名连续出现几次就升级
+mutants = 3                       # 模块通过后造几个变异体检查测试够不够严（第 125 条）；0 = 不做
 
 [scheduler]
 alpha = 0.3                       # 成本权重

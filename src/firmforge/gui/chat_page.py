@@ -1272,6 +1272,13 @@ class ChatPage(QWidget):
             self.add_line(Dot(T()["run"]), f"{node} 按审查意见改了以后没通过检查，退回改之前通过的版本")
         elif t == "human_reverted":
             self.add_line(Dot(T()["run"]), f"{node} 按你的意见改了以后没通过检查，退回改之前通过的版本；可以换个说法再提")
+        elif t == "mutation_test":                             # 变异体补测试（第 125 条）
+            if d.get("total"):
+                self.add_line(Dot(T()["pass"] if not d.get("survived") else T()["run"]),
+                              f"{node} 平台把代码故意改坏 {d['total']} 处，测试发现了 {d.get('killed', 0)} 处"
+                              + (f"；没发现的 {d['survived']} 处交给测试 Agent 补测试" if d.get("survived") else ""))
+        elif t == "hardened_reverted":
+            self.add_line(Dot(T()["run"]), f"{node} 补强后的测试没通过，也没修好：交付补强前通过的那一版代码")
         elif t == "hardware_check":                            # 诊断说硬件问题时平台的接线自检（第 124 条）
             items = d.get("items") or []
             if d.get("skipped"):
