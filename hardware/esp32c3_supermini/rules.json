@@ -1,5 +1,377 @@
 [
   {
+    "id": "R-ADC-001",
+    "kind": "api",
+    "scope": [
+      "adc"
+    ],
+    "text": "ADC 一次性（oneshot）模式的单元句柄用 adc_oneshot_new_unit(&init_cfg, &handle) 创建",
+    "cite": {
+      "doc": "idf-adc-oneshot-h",
+      "page": null,
+      "section": "adc_oneshot.h",
+      "quote": "esp_err_t adc_oneshot_new_unit(const adc_oneshot_unit_init_cfg_t *init_config, adc_oneshot_unit_handle_t *ret_unit);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "adc_oneshot_new_unit",
+      "header": "esp_adc/adc_oneshot.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-002",
+    "kind": "api",
+    "scope": [
+      "adc"
+    ],
+    "text": "每个通道用 adc_oneshot_config_channel(handle, channel, &chan_cfg) 配 atten 和 bitwidth，再读该通道",
+    "cite": {
+      "doc": "idf-adc-oneshot-h",
+      "page": null,
+      "section": "adc_oneshot.h",
+      "quote": "esp_err_t adc_oneshot_config_channel(adc_oneshot_unit_handle_t handle, adc_channel_t channel, const adc_oneshot_chan_cfg_t *config);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "adc_oneshot_config_channel",
+      "header": "esp_adc/adc_oneshot.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-003",
+    "kind": "api",
+    "scope": [
+      "adc"
+    ],
+    "text": "读一次原始值用 adc_oneshot_read(handle, chan, &out_raw)；该接口不能在中断（ISR）上下文调用",
+    "cite": {
+      "doc": "idf-adc-oneshot-h",
+      "page": null,
+      "section": "adc_oneshot_read",
+      "quote": "This API should NOT be called in an ISR context"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "adc_oneshot_read",
+      "header": "esp_adc/adc_oneshot.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-004",
+    "kind": "api",
+    "scope": [
+      "adc"
+    ],
+    "text": "adc_oneshot_read 返回原始码，不要直接当电压解释；要 mV 就过 adc_cali_raw_to_voltage() 换算",
+    "cite": {
+      "doc": "idf-adc-oneshot-h",
+      "page": null,
+      "section": "adc_oneshot_read",
+      "quote": "Raw ADC codes are intended for further processing. To obtain a voltage in mV, it is recommended to use"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "adc_cali_raw_to_voltage",
+      "header": "esp_adc/adc_cali.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-005",
+    "kind": "api",
+    "scope": [
+      "adc"
+    ],
+    "text": "adc_oneshot_read 返回 ESP_ERR_TIMEOUT 时本次结果无效，要丢弃重读，不能当有效采样使用",
+    "cite": {
+      "doc": "idf-adc-oneshot-h",
+      "page": null,
+      "section": "adc_oneshot_read",
+      "quote": "ESP_ERR_TIMEOUT:       Timeout, the ADC result is invalid"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-006",
+    "kind": "api",
+    "scope": [
+      "adc"
+    ],
+    "text": "校准句柄用 adc_cali_create_scheme_curve_fitting()（或 line_fitting 版本）创建，配置里的 unit_id/atten/bitwidth 必须与通道配置一致",
+    "cite": {
+      "doc": "idf-adc-cali-scheme-h",
+      "page": null,
+      "section": "adc_cali_scheme.h",
+      "quote": "esp_err_t adc_cali_create_scheme_curve_fitting(const adc_cali_curve_fitting_config_t *config, adc_cali_handle_t *ret_handle);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "adc_cali_create_scheme_curve_fitting",
+      "header": "esp_adc/adc_cali_scheme.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-007",
+    "kind": "api",
+    "scope": [
+      "adc"
+    ],
+    "text": "先用 adc_cali_check_scheme(&scheme_mask) 查询芯片支持哪种校准方案，再选对应的 create_scheme 函数，不要硬编码",
+    "cite": {
+      "doc": "idf-adc-cali-h",
+      "page": null,
+      "section": "adc_cali.h",
+      "quote": "esp_err_t adc_cali_check_scheme(adc_cali_scheme_ver_t *scheme_mask);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "adc_cali_check_scheme",
+      "header": "esp_adc/adc_cali.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-008",
+    "kind": "api",
+    "scope": [
+      "adc"
+    ],
+    "text": "一次完成“读原始值+校准成 mV”用 adc_oneshot_get_calibrated_result(handle, cali_handle, chan, &mv)",
+    "cite": {
+      "doc": "idf-adc-oneshot-h",
+      "page": null,
+      "section": "adc_oneshot_get_calibrated_result",
+      "quote": "This is an all-in-one function which does:"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "adc_oneshot_get_calibrated_result",
+      "header": "esp_adc/adc_oneshot.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-009",
+    "kind": "api",
+    "scope": [
+      "adc"
+    ],
+    "text": "ADC 单元用完用 adc_oneshot_del_unit(handle) 释放，不要只丢弃句柄",
+    "cite": {
+      "doc": "idf-adc-oneshot-h",
+      "page": null,
+      "section": "adc_oneshot.h",
+      "quote": "esp_err_t adc_oneshot_del_unit(adc_oneshot_unit_handle_t handle);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "adc_oneshot_del_unit",
+      "header": "esp_adc/adc_oneshot.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-010",
+    "kind": "peripheral",
+    "scope": [
+      "adc"
+    ],
+    "text": "ESP32-C3 有 2 个 ADC 单元：ADC1 有 5 个通道、ADC2 只有 1 个通道，按此规划通道数",
+    "cite": {
+      "doc": "idf-c3-soc-caps-h",
+      "page": null,
+      "section": "ADC CAPS",
+      "quote": "#define SOC_ADC_CHANNEL_NUM(PERIPH_NUM)         ((PERIPH_NUM==0)? 5 : 1)"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-011",
+    "kind": "peripheral",
+    "scope": [
+      "adc"
+    ],
+    "text": "只有 ADC1（unit 0）支持数字（DMA 连续）控制器，要用连续采样模式只能选 unit 0",
+    "cite": {
+      "doc": "idf-c3-soc-caps-h",
+      "page": null,
+      "section": "ADC CAPS",
+      "quote": "#define SOC_ADC_DIG_SUPPORTED_UNIT(UNIT)        ((UNIT == 0) ? 1 : 0)"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-012",
+    "kind": "peripheral",
+    "scope": [
+      "adc"
+    ],
+    "text": "衰减 atten 在 ESP32-C3 上只有 4 档可选，不要按更多档位规划",
+    "cite": {
+      "doc": "idf-c3-soc-caps-h",
+      "page": null,
+      "section": "ADC CAPS",
+      "quote": "#define SOC_ADC_ATTEN_NUM                       (4)"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-013",
+    "kind": "pin",
+    "scope": [
+      "adc"
+    ],
+    "text": "ADC1 通道固定在 GPIO0–GPIO4：GPIO0=ADC1_CH0、GPIO1=ADC1_CH1、GPIO2=ADC1_CH2、GPIO3=ADC1_CH3、GPIO4=ADC1_CH4",
+    "cite": {
+      "doc": "esp32c3-ds",
+      "page": 21,
+      "section": "Table 2-6 Analog Functions",
+      "quote": "4 GPIO0 XTAL_32K_P ADC1_CH0 … 9 GPIO4 ADC1_CH4"
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ADC-014",
+    "kind": "pin",
+    "scope": [
+      "adc"
+    ],
+    "text": "ADC2 可用的引脚只有 GPIO5，其模拟功能为 ADC2_CH0；要采 ADC2 通道就配成 GPIO5 这一脚",
+    "cite": {
+      "doc": "esp32c3-ds",
+      "page": 21,
+      "section": "Table 2-6 Analog Functions",
+      "quote": "10 GPIO5 ADC2_CH0"
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ERR-001",
+    "kind": "sequence",
+    "scope": [
+      "adc"
+    ],
+    "text": "ADC 在 DMA 连续转换模式下停掉再重启前，必须先把 SYSTEM_APB_SARADC_RST 置位再清零复位 ADC，并把 APB_SARADC_APB_ADC_EOF_NUM 从原值逐次递减到 0 以清采样计数器（约 14 ms）",
+    "cite": {
+      "doc": "esp32c3-errata",
+      "page": 9,
+      "section": "3.3 [ADC-270] SAR ADC Cannot Sample Sufficient Data in DMA Continuous Conversion Mode After Restart",
+      "quote": "Reset the ADC by first setting and then clearing SYSTEM_APB_SARADC_RST … Sequentially configure the 16-bit APB_SARADC_APB_ADC_EOF_NUM field with all values ranging from the previously configured value down to 0, so as to clear the ADC sample counter"
+    },
+    "tier": "official_errata",
+    "status": "trusted",
+    "check": {
+      "type": "call_order",
+      "before": "SYSTEM_APB_SARADC_RST",
+      "after": "APB_SARADC_APB_ADC_EOF_NUM"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-ERR-002",
+    "kind": "forbidden",
+    "scope": [
+      "all"
+    ],
+    "text": "跨字边界的错位 load 紧跟 store（两地址 PMP/PMA 权限不同）可能触发 load access fault；不要依赖硬件支持错位访问，无法避免时在二者之间插入 nop",
+    "cite": {
+      "doc": "esp32c3-errata",
+      "page": 8,
+      "section": "3.1 [CPU-863]",
+      "quote": "Insert one or morenopinstructions between the misalignedloadand the followingstore."
+    },
+    "tier": "official_errata",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
     "id": "R-GPIO-001",
     "kind": "pin",
     "scope": [
@@ -1210,6 +1582,182 @@
     ]
   },
   {
+    "id": "R-NVS-001",
+    "kind": "api",
+    "scope": [
+      "nvs"
+    ],
+    "text": "使用 NVS 前先调 nvs_flash_init() 初始化默认分区（分区表里标签为 \"nvs\" 的那个），返回 ESP_OK 才可继续",
+    "cite": {
+      "doc": "idf-nvs-flash-h",
+      "page": null,
+      "section": "nvs_flash_init",
+      "quote": "This API initialises the default NVS partition."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "nvs_flash_init",
+      "header": "nvs_flash.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-NVS-002",
+    "kind": "sequence",
+    "scope": [
+      "nvs"
+    ],
+    "text": "nvs_flash_init 返回 ESP_ERR_NVS_NO_FREE_PAGES 时，先擦除整个 NVS 分区再重新 init，不要直接重试",
+    "cite": {
+      "doc": "idf-nvs-h",
+      "page": null,
+      "section": "NVS error codes",
+      "quote": "Erase the whole partition and call nvs_flash_init again."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-NVS-003",
+    "kind": "sequence",
+    "scope": [
+      "nvs"
+    ],
+    "text": "遇到 ESP_ERR_NVS_INVALID_STATE 表示 NVS 处于不一致状态，要重新调用 nvs_flash_init 和 nvs_open 后重试",
+    "cite": {
+      "doc": "idf-nvs-h",
+      "page": null,
+      "section": "NVS error codes",
+      "quote": "Call nvs_flash_init and nvs_open again, then retry."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-NVS-004",
+    "kind": "api",
+    "scope": [
+      "nvs"
+    ],
+    "text": "自定义 NVS 分区用 nvs_flash_init_partition(label)，label 长度不得超过 16 个字符",
+    "cite": {
+      "doc": "idf-nvs-flash-h",
+      "page": null,
+      "section": "nvs_flash_init_partition",
+      "quote": "Label of the partition. Must be no longer than 16 characters."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "nvs_flash_init_partition",
+      "header": "nvs_flash.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-NVS-005",
+    "kind": "api",
+    "scope": [
+      "nvs"
+    ],
+    "text": "键名（含结尾 null）最多 16 字节，namespace 名同样受 16 字节上限，键名不要超长",
+    "cite": {
+      "doc": "idf-nvs-h",
+      "page": null,
+      "section": "nvs.h",
+      "quote": "#define NVS_KEY_NAME_MAX_SIZE               16   /*!< Maximum length of NVS key name (including null terminator) */"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-NVS-006",
+    "kind": "api",
+    "scope": [
+      "nvs"
+    ],
+    "text": "NVS 句柄类型用 nvs_handle_t（typedef uint32_t）；旧名 nvs_handle 仅为兼容保留，已标注 IDF_DEPRECATED(\"Replace with nvs_handle_t\")",
+    "cite": {
+      "doc": "idf-nvs-h",
+      "page": null,
+      "section": "nvs.h",
+      "quote": "typedef nvs_handle_t nvs_handle IDF_DEPRECATED(\"Replace with nvs_handle_t\");"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-NVS-007",
+    "kind": "api",
+    "scope": [
+      "nvs"
+    ],
+    "text": "打开模式 nvs_open_mode_t 有三个枚举值：NVS_READONLY（只读）、NVS_READWRITE（读写）、NVS_READWRITE_PURGE（读写）",
+    "cite": {
+      "doc": "idf-nvs-h",
+      "page": null,
+      "section": "nvs_open_mode_t",
+      "quote": "NVS_READWRITE_PURGE /*!< Read and write */"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-NVS-008",
+    "kind": "api",
+    "scope": [
+      "nvs"
+    ],
+    "text": "默认 NVS 分区名的宏是 NVS_DEFAULT_PART_NAME，值为 \"nvs\"，注释说明它是分区表中 NVS 分区的默认名",
+    "cite": {
+      "doc": "idf-nvs-h",
+      "page": null,
+      "section": "nvs.h",
+      "quote": "Default partition name of the NVS partition in the partition table"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
     "id": "R-RMT-001",
     "kind": "api",
     "scope": [
@@ -1388,6 +1936,366 @@
     "tier": "official_manual",
     "status": "trusted",
     "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-SPI-001",
+    "kind": "api",
+    "scope": [
+      "spi"
+    ],
+    "text": "SPI 主机的阻塞式轮询事务用 spi_device_transmit(handle, &trans_desc) 发一次收发",
+    "cite": {
+      "doc": "idf-driver-spi-master-h",
+      "page": null,
+      "section": "spi_master.h",
+      "quote": "esp_err_t spi_device_transmit(spi_device_handle_t handle, spi_transaction_t *trans_desc);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "spi_device_transmit",
+      "header": "driver/spi_master.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-SPI-002",
+    "kind": "api",
+    "scope": [
+      "spi"
+    ],
+    "text": "SPI 从设备句柄用完用 spi_bus_remove_device() 移除，不要只丢弃句柄",
+    "cite": {
+      "doc": "idf-driver-spi-master-h",
+      "page": null,
+      "section": "spi_master.h",
+      "quote": "esp_err_t spi_bus_remove_device(spi_device_handle_t handle);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "spi_bus_remove_device",
+      "header": "driver/spi_master.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-SPI-003",
+    "kind": "api",
+    "scope": [
+      "spi"
+    ],
+    "text": "spi_device_interface_config_t.spics_io_num 填该从机的 CS 引脚 GPIO 编号，不用 CS 时填 -1",
+    "cite": {
+      "doc": "idf-driver-spi-master-h",
+      "page": null,
+      "section": "spi_device_interface_config_t",
+      "quote": "int spics_io_num;               ///< CS GPIO pin for this device, or -1 if not used"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-SPI-004",
+    "kind": "api",
+    "scope": [
+      "spi"
+    ],
+    "text": "总线引脚在 spi_bus_config_t 里逐根填 mosi_io_num/miso_io_num/sclk_io_num，不用的信号填 -1 而不是 0",
+    "cite": {
+      "doc": "idf-driver-spi-common-h",
+      "page": null,
+      "section": "spi_bus_config_t",
+      "quote": "int miso_io_num;    ///< [1] GPIO pin for Master In Slave Out (=spi_q) signal, or -1 if not used."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-SPI-005",
+    "kind": "api",
+    "scope": [
+      "spi"
+    ],
+    "text": "spi_device_interface_config_t.mode 取 0~3，分别对应 (CPOL,CPHA) 的 (0,0)、(0,1)、(1,0)、(1,1)",
+    "cite": {
+      "doc": "idf-driver-spi-master-h",
+      "page": null,
+      "section": "spi_device_interface_config_t",
+      "quote": "SPI mode, representing a pair of (CPOL, CPHA) configuration:"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-SPI-007",
+    "kind": "peripheral",
+    "scope": [
+      "spi"
+    ],
+    "text": "SPI_MAX_DMA_LEN 的值是 (4096-4)，头文件注释说明它是单个 DMA 描述符里能放入的最大字节数",
+    "cite": {
+      "doc": "idf-driver-spi-common-h",
+      "page": null,
+      "section": "spi_common.h",
+      "quote": "Maximum amount of bytes that can be put in one DMA descriptor"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-SPI-008",
+    "kind": "peripheral",
+    "scope": [
+      "spi"
+    ],
+    "text": "GP-SPI2 主机模式时钟最高 80 MHz，从机模式最高 60 MHz，规划速率不要超过",
+    "cite": {
+      "doc": "esp32c3-trm",
+      "page": 610,
+      "section": "27.3 Features",
+      "quote": "Master: up to 80 MHz"
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-SPI-009",
+    "kind": "peripheral",
+    "scope": [
+      "spi"
+    ],
+    "text": "EP32-C3 的 GP-SPI2 主机模式最多 6 条片选 CS0~CS5，挂从机数量按 6 片以内规划",
+    "cite": {
+      "doc": "esp32c3-trm",
+      "page": 610,
+      "section": "27.3 Features",
+      "quote": "Six CS lines in master mode: CS0~CS5"
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-SPI-011",
+    "kind": "timing",
+    "scope": [
+      "spi"
+    ],
+    "text": "全双工模式高频读没有 dummy bits 保护，从机数据有效时间不足时会读错；高频读优先用半双工（SPI_DEVICE_HALFDUPLEX）",
+    "cite": {
+      "doc": "idf-driver-spi-master-h",
+      "page": null,
+      "section": "SPI_DEVICE_NO_DUMMY",
+      "quote": "In full-duplex mode, however, the hardware cannot use dummy bits, so there is no way to prevent data being read from getting corrupted."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-TSENS-001",
+    "kind": "api",
+    "scope": [
+      "temp_sensor"
+    ],
+    "text": "片上温度传感器用 temperature_sensor_install(&cfg, &handle) 安装驱动拿句柄",
+    "cite": {
+      "doc": "idf-driver-tsens-h",
+      "page": null,
+      "section": "temperature_sensor.h",
+      "quote": "esp_err_t temperature_sensor_install(const temperature_sensor_config_t *tsens_config, temperature_sensor_handle_t *ret_tsens);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "temperature_sensor_install",
+      "header": "driver/temperature_sensor.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-TSENS-002",
+    "kind": "sequence",
+    "scope": [
+      "temp_sensor"
+    ],
+    "text": "读温度前必须先 temperature_sensor_enable(handle)；未使能时 temperature_sensor_get_celsius 返回 ESP_ERR_INVALID_STATE",
+    "cite": {
+      "doc": "idf-driver-tsens-h",
+      "page": null,
+      "section": "temperature_sensor_get_celsius",
+      "quote": "ESP_ERR_INVALID_STATE Temperature sensor is not enabled yet."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "temperature_sensor_enable",
+      "header": "driver/temperature_sensor.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-TSENS-003",
+    "kind": "api",
+    "scope": [
+      "temp_sensor"
+    ],
+    "text": "读摄氏温度用 temperature_sensor_get_celsius(handle, &out_celsius)；该接口不能在中断中调用",
+    "cite": {
+      "doc": "idf-driver-tsens-h",
+      "page": null,
+      "section": "temperature_sensor_get_celsius",
+      "quote": "Should not be called from interrupt."
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "temperature_sensor_get_celsius",
+      "header": "driver/temperature_sensor.h"
+    },
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-TSENS-004",
+    "kind": "api",
+    "scope": [
+      "temp_sensor"
+    ],
+    "text": "配置结构用 TEMPERATURE_SENSOR_CONFIG_DEFAULT(min, max) 初始化，range_min/range_max 填实际要测的温度范围",
+    "cite": {
+      "doc": "idf-driver-tsens-h",
+      "page": null,
+      "section": "temperature_sensor_config_t",
+      "quote": "#define TEMPERATURE_SENSOR_CONFIG_DEFAULT(min, max)    \\"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-TSENS-006",
+    "kind": "peripheral",
+    "scope": [
+      "temp_sensor"
+    ],
+    "text": "驱动内置 5 组量程对照表（offset / reg_val / min / max / 误差），按目标量程选 offset，误差随量程在 ±1~±3 °C 之间",
+    "cite": {
+      "doc": "idf-c3-tsens-periph-c",
+      "page": null,
+      "section": "temperature_sensor_attributes",
+      "quote": "{-2,     5,    50,  125,   3},"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-TSENS-007",
+    "kind": "peripheral",
+    "scope": [
+      "temp_sensor"
+    ],
+    "text": "直接读寄存器时温度按 T(°C)=0.4386×VALUE–27.88×offset–20.52 换算，offset 由所处温度区间决定（50~125:−2，20~100:−1，−10~80:0，−30~50:1，−40~20:2）",
+    "cite": {
+      "doc": "esp32c3-trm",
+      "page": 877,
+      "section": "34.3.3 Functional Description",
+      "quote": "The temperature offset varies in different actual environment (the temperature range)."
+    },
+    "tier": "official_manual",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认"
+    ]
+  },
+  {
+    "id": "R-TSENS-008",
+    "kind": "api",
+    "scope": [
+      "temp_sensor"
+    ],
+    "text": "驱动用完用 temperature_sensor_uninstall(handle) 卸载，不要只丢弃句柄",
+    "cite": {
+      "doc": "idf-driver-tsens-h",
+      "page": null,
+      "section": "temperature_sensor.h",
+      "quote": "esp_err_t temperature_sensor_uninstall(temperature_sensor_handle_t tsens);"
+    },
+    "tier": "official_code",
+    "status": "trusted",
+    "check": {
+      "type": "api_exists",
+      "symbol": "temperature_sensor_uninstall",
+      "header": "driver/temperature_sensor.h"
+    },
     "notes": [
       "规则判定器通过",
       "人工确认"
