@@ -58,7 +58,7 @@ class DesignTest(unittest.TestCase):
 
     def test_problems(self):
         bad = json.loads(json.dumps(GOOD))
-        bad["modules"][0]["scopes"] = ["spi"]                                  # 不在硬件档案里
+        bad["modules"][0]["scopes"] = ["can"]                                  # 不在硬件档案里
         bad["modules"][1]["scopes"] = ["i2c"]                                  # 逻辑层不能有 scope
         bad["modules"][1]["depends_on"] = ["imu"]                              # 逻辑层依赖硬件层
         bad["modules"][2]["files"] = ["main/app_logic.c", "imu.c", "include/hw_config.h"]
@@ -66,7 +66,7 @@ class DesignTest(unittest.TestCase):
         d, problems = parse_design(bad, profile())
         self.assertIsNone(d)
         text = "\n".join(problems)
-        for word in ("spi", "逻辑层不能涉及外设", "不能依赖硬件层", "不要带 main/", "同时属于", "hw_config.h",
+        for word in ("can", "逻辑层不能涉及外设", "不能依赖硬件层", "不要带 main/", "同时属于", "hw_config.h",
                      "include/app_logic.h", "编号只能用", "layer 只能是"):
             self.assertIn(word, text)
         self.assertIn("没有通过检查", designer_retry_message(problems))
@@ -87,6 +87,33 @@ class DesignTest(unittest.TestCase):
         self.assertIn("R-IMU-002 |", msgs[0]["content"])                       # 设计 Agent 看全部已确认规则
         self.assertIn("读 MPU6050 并打印", msgs[1]["content"])
         self.assertIn("hw_config.h", msgs[1]["content"])
+
+    def test_onchip_scopes(self):
+        """片内外设不用接线也能写进 scopes，设计 Agent 被告知可选列表（第 127 条）。"""
+        d = {"modules": [
+            {"id": "tsens", "title": "片内温度", "layer": "hardware", "scopes": ["temp_sensor"],
+             "files": ["tsens.c", "include/tsens.h"]},
+            {"id": "volt", "title": "ADC", "layer": "hardware", "scopes": ["adc"], "files": ["volt.c", "include/volt.h"]},
+            {"id": "store", "title": "NVS", "layer": "hardware", "scopes": ["nvs"], "files": ["store.c", "include/store.h"]}]}
+        _, problems = parse_design(d, profile())
+        self.assertEqual(problems, [])
+        d["modules"][0]["scopes"] = ["tsens"]               # 名字写错仍要拒
+        _, problems = parse_design(d, profile())
+        self.assertTrue(any("tsens 不在硬件档案里" in p for p in problems))
+        content = designer_messages("x", profile(), None)[1]["content"]
+        self.assertIn("temp_sensor", content)
+        self.assertIn("nvs", content)
+
+    def test_product_flow_requires(self):
+        """产品流程编译带上常用驱动组件，评测仍只用题目自己声明的（第 127 条）。"""
+        from firmforge.target.esp_idf import DEFAULT_REQUIRES, PRODUCT_REQUIRES
+        self.assertIn("esp_driver_tsens", PRODUCT_REQUIRES)
+        self.assertIn("esp_adc", PRODUCT_REQUIRES)
+        self.assertIn("nvs_flash", PRODUCT_REQUIRES)
+        self.assertNotIn("esp_adc", DEFAULT_REQUIRES)
+        import inspect
+        from firmforge.embedded import workspace
+        self.assertIn("extra_requires=PRODUCT_REQUIRES", inspect.getsource(workspace.make_firmware_flow))
 
 
 if __name__ == "__main__":

@@ -24,6 +24,10 @@ DEFAULT_IDF = Path.home() / "esp" / "esp-idf-v6.1"
 BUILD_TIMEOUT_S = 900
 # 硬件层代码常用的驱动组件（ESP-IDF 5.3 起驱动拆成独立组件）
 DEFAULT_REQUIRES = ("esp_driver_gpio", "esp_driver_i2c", "esp_driver_uart", "esp_driver_ledc", "esp_timer")
+# 产品流程（用户自己的需求）再多带的驱动组件：评测题会自己声明 requires，用户的需求没人声明，
+# 不带上的话 Agent 用官方驱动会编译不过（找不到头文件），只能退去直接写寄存器（DECISIONS 第 127 条）
+PRODUCT_REQUIRES = ("esp_driver_tsens", "esp_adc", "nvs_flash", "esp_driver_spi", "esp_driver_gptimer",
+                    "esp_driver_rmt", "esp_driver_pcnt")
 # 每种芯片的默认配置：S3 的控制台走芯片自带的 USB 串口；经典 ESP32 走 UART0（接板上的 USB 转串口芯片）
 SDKCONFIG_DEFAULTS = {
     "esp32s3": "# FirmForge 生成：ESP32-S3（4 MB Flash，控制台走芯片自带的 USB 串口）\n"

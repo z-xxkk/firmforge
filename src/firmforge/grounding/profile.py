@@ -19,6 +19,9 @@ class ProfileError(ValueError):
     """硬件档案内容不合法。"""
 
 
+# 不用接线（或接线不在档案的 pins 里）的片内外设，规则库里有这些 scope 的规则（DECISIONS 第 127 条）
+ONCHIP_SCOPES = ("adc", "temp_sensor", "nvs", "spi", "gptimer", "rmt")
+
 @dataclass(frozen=True)
 class Fact:
     value: object
@@ -120,6 +123,10 @@ class HardwareProfile:
             out.add(d.part.lower())
             out.add(_peripheral(d.bus))
         return out
+
+    def design_scopes(self) -> set[str]:
+        """设计时模块能写的 scopes：接了线的外设和器件，加上不用接线的片内外设（DECISIONS 第 127 条）。"""
+        return self.scopes() | set(ONCHIP_SCOPES)
 
     def summary_lines(self) -> list[str]:
         """拼进 system prompt 的硬件档案（程序生成，不经模型改写，DECISIONS 第 67 条）。"""

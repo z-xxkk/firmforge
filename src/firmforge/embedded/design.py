@@ -98,7 +98,7 @@ def parse_design(data: dict, profile: HardwareProfile, max_modules: int = MAX_MO
         return None, ["缺少 modules 数组"]
     if len(raw) > max_modules:
         problems.append(f"模块太多（{len(raw)} 个），最多 {max_modules} 个")
-    known_scopes = profile.scopes()
+    known_scopes = profile.design_scopes()
     mods, owner = [], {}
     for i, m in enumerate(raw, 1):
         if not isinstance(m, dict):
@@ -186,7 +186,9 @@ def designer_messages(requirement: str, profile: HardwareProfile, rules: RuleSet
     b = Brief(intent="把需求拆成模块，分出硬件层和逻辑层", location=where or "设计 › 设计分层")
     b.constraints += [f"最多 {MAX_MODULES} 个模块", "逻辑层不能依赖硬件层",
                       f"开发框架：{profile.framework.value} {profile.framework_version.value}",
-                      "引脚和器件地址一律用 hw_config.h 里的宏（程序按硬件档案生成）"]
+                      "引脚和器件地址一律用 hw_config.h 里的宏（程序按硬件档案生成）",
+                      "硬件层的 scopes 只能从这些里选，按模块实际用到的外设写（片内温度传感器写 temp_sensor，"
+                      "不要写成 gpio）：" + ", ".join(sorted(profile.design_scopes()))]
     b.attach("需求文档", requirement)
     if prior_wiring:                                   # 同一个项目上一次的接线：需求没要求改就沿用（第 108 条）
         b.attach("这个项目上一次的接线（需求没要求改就照抄进 wiring）",

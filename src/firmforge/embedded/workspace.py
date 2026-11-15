@@ -93,6 +93,7 @@ def make_firmware_flow(hw: HwContext, spec: str, *, llm, settings: config.Settin
     from ..agents.registry import default_registry
     from ..grounding.research import llm_semantic_checker
     from ..grounding.verifier import RuleVerifier
+    from ..target.esp_idf import PRODUCT_REQUIRES
     from .flow import EmbeddedFlow
     reg = default_registry().with_overrides(tier, think) if (tier or think) else default_registry()
     verifier = None
@@ -113,7 +114,7 @@ def make_firmware_flow(hw: HwContext, spec: str, *, llm, settings: config.Settin
                         name=name, rule_mode=rule_mode, human=human, idf=idf, board=board, registry=reg,
                         subscribers=subscribers, secrets=secrets_of(settings), workflow=wf, store=store,
                         human_review=human_review, confirm_design=confirm_design, prior_wiring=prior_wiring,
-                        confirm_module=confirm_module)
+                        confirm_module=confirm_module, extra_requires=PRODUCT_REQUIRES)
 
 
 def make_rule_builder(hw: HwContext, *, llm, settings: config.Settings, runs_root: Path, human=None,
