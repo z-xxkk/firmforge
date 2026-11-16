@@ -1325,6 +1325,15 @@ class ChatPage(QWidget):
             pins = d.get("pins") or {}
             src = "设计 Agent 按需求定的" if d.get("source") == "design" else "沿用硬件档案的默认接线"
             self.add_line(f"接线（{src}）：" + "，".join(f"{s}=GPIO{g}" for s, g in sorted(pins.items())))
+        elif t == "wiring_selfcheck":                 # 接线自检结果（第 134 条第 3 阶段）
+            if d.get("skipped"):
+                self.add_line(f"接线自检没跑：{d['skipped']}；按你确认的接线往下走", bg=True)
+            else:
+                for it in d.get("items", []):
+                    ok = it.get("ok")
+                    self.add_line(Dot(T()["pass"] if ok else T()["fail"]),
+                                  f"{it['name'].removeprefix('接线自检：')}：{'对上了' if ok else '没对上'}"
+                                  + (f"（{it['detail']}）" if it.get("detail") else ""))
         elif t == "chip_detected":
             if d.get("mismatch"):
                 self.add_line(Dot(T()["fail"]), d["mismatch"])
@@ -1435,6 +1444,21 @@ class ChatPage(QWidget):
             m = self.add_agent("planner", "planner", "规划好了，请确认。确认后开始编写；有意见就写在下面输入框里发送，让规划 Agent 重做。")
             m.add_action("提修改意见", lambda: self._focus_input("写下对规划的修改意见，发送后让规划 Agent 重做"))
             m.add_action("确认，开始写", lambda: self._resolve("", m, "你已确认"), primary=True)
+        elif kind == "wiring":                         # 接线一步（第 134 条第 3 阶段）
+            conns, states, fails = payload.get("connections", []), payload.get("states", {}), payload.get("failures", [])
+            rows = []
+            for c in conns:
+                st = states.get(c["signal"], "计划")
+                rows.append(f"- **GPIO{c['gpio']}** → {c['to']}　`{c['signal']}`　{c.get('why', '')}"
+                            + (f"\n  先拔掉原来的线：{c['unplug']}" if c.get("unplug") else "")
+                            + (f"\n  上次已实测：{st}" if st == "实测" else ""))
+            head = ("自检没对上，请检查下面这几根线，改好后再点按钮重新自检：\n\n"
+                    + "\n".join(f"- {f['name'].removeprefix('接线自检：')}：{f.get('detail') or '没有测到结果'}" for f in fails)
+                    + "\n\n完整的接线清单：\n\n") if fails else \
+                "开始写代码之前，请按这张清单接好线（每根线两端都写在这里）。接好后点按钮，平台会烧一个自检程序实测每根线：\n\n"
+            m = self.add_agent("FirmForge", "reviewer", head + "\n".join(rows))
+            m.add_action("停止", lambda: self._resolve("cancel", m, "你停在了接线这一步"))
+            m.add_action("已接好，开始自检", lambda: self._resolve("ok", m, "你已接好线，正在自检"), primary=True)
         elif kind == "checkpoint":
             where = f"模块 {payload.get('node')} 的" if payload.get("node") and payload.get("node") != payload.get("step") else ""
             m = self.add_agent("FirmForge", "reviewer", f"{where}步骤 **{payload.get('step')}** 等你确认：{payload.get('note') or ''}"
@@ -1491,8 +1515,9 @@ class ChatPage(QWidget):
         kind, payload, msg = self.pending
         if not text:
             return
-        if kind in ("rules", "approve"):                   # 这两种只能点按钮：打的字不能当成审核结果或"允许"
-            where = "上面的规则卡片里逐条点通过或驳回" if kind == "rules" else "上面点「允许」或「拒绝」"
+        if kind in ("rules", "approve", "wiring"):         # 这几种只能点按钮：打的字不能当成审核结果、"允许"或"接好了"
+            where = {"rules": "上面的规则卡片里逐条点通过或驳回", "approve": "上面点「允许」或「拒绝」",
+                     "wiring": "接好线后点上面的「已接好，开始自检」，或者点「停止」"}[kind]
             self.add_line(f"这句话没有发出去：现在要先在{where}。", bg=True)
             return
         self.input.clear()

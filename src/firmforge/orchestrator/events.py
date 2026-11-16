@@ -30,7 +30,8 @@ EVENT_TYPES = {
     "human_reverted",               # 按人的意见改坏了已经通过的模块，退回通过的版本
     "hardware_check",               # 诊断说硬件问题时平台的接线自检结果（第 124 条）
     "mutation_test", "hardened_reverted",   # 变异体补测试的结果；补强后没修好、交付补强前的版本（第 125 条）
-    "app_checked", "firmware_ready",        # 集成：主程序上板跑两轮的核对结果；完整工程已交付（第 131 条）
+    "app_checked", "firmware_ready",
+    "wiring_selfcheck",                     # 接线一步的自检结果（第 134 条第 3 阶段）        # 集成：主程序上板跑两轮的核对结果；完整工程已交付（第 131 条）
     # 经验库
     "experience_saved", "experience_used",
     # 工具（DECISIONS 第 63 条）

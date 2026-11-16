@@ -112,6 +112,8 @@ class FirmwareInterpreter:
                     res.error = "设计几次都没有通过检查"
                     return
                 f._use_wiring(design)
+                if not f._wiring_gate(design):            # 接线一步（第 134 条）：接好、自检对上才写代码
+                    return
             elif s.kind == "verify" and s.scope == "all":    # 集成：写主程序、上板跑（第 131 条）
                 if design is not None:
                     self.integrate(s, design, rules, confirm)

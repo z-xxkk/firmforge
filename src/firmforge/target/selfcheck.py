@@ -30,6 +30,8 @@ class Item:
     name: str                   # 用例名（也给人看）
     device: str = ""
     gpios: tuple[int, ...] = ()
+    signals: tuple[str, ...] = ()   # 对应项目接线里的哪几根线（第 134 条：结果写回每根线的状态）
+    params: tuple = ()              # adc：(min, max)；level：(value,)
 
 
 @dataclass
@@ -213,9 +215,131 @@ TEST_CASE("{it.name}", "[ffwire]")
 """
 
 
+def items_for_connections(profile: HardwareProfile, connections) -> list[Item]:
+    """按项目的完整连线（embedded/wiring.py 的 Connection）生成自检项（第 134 条第 3 阶段）。
+    profile 要用已经换成项目接线的档案（with_wiring），I2C 的总线引脚从里面取。look 类平台测不了，不生成。"""
+    out: list[Item] = []
+    devs = {d.name: d for d in profile.devices}
+    by_sig = {c.signal: c for c in connections}
+    done_loops: set[frozenset] = set()
+    i2c_done: dict[str, Item] = {}
+    for c in connections:
+        e, k = c.expect or {}, (c.expect or {}).get("kind")
+        if k == "i2c_ack" and e.get("device") in devs:
+            d = devs[e["device"]]
+            if d.name in i2c_done:                       # 同一个器件的 SDA、SCL 合成一项
+                it = i2c_done[d.name]
+                i2c_done[d.name] = Item(it.kind, it.name, it.device, it.gpios, it.signals + (c.signal,))
+                out[out.index(it)] = i2c_done[d.name]
+                continue
+            if d.address is None or _bus_pins(profile, d.bus) is None:
+                continue
+            it = Item("i2c", f"{CASE_PREFIX}{d.name}（{d.part}）在 {d.bus} 的 0x{d.address:02X} 应答", d.name, (), (c.signal,))
+            i2c_done[d.name] = it
+            out.append(it)
+        elif k == "loopback" and e.get("with") in by_sig:
+            o = by_sig[e["with"]]
+            pair = frozenset((c.gpio, o.gpio))
+            if pair in done_loops:
+                continue
+            done_loops.add(pair)
+            out.append(Item("loop", f"{CASE_PREFIX}GPIO{c.gpio}（{c.signal}）和 GPIO{o.gpio}（{o.signal}）之间连通",
+                            gpios=(c.gpio, o.gpio), signals=(c.signal, o.signal)))
+        elif k == "adc_mv":
+            out.append(Item("adc", f"{CASE_PREFIX}{c.signal}（GPIO{c.gpio}）接 {c.to}，电压在 {e['min']}–{e['max']} mV",
+                            gpios=(c.gpio,), signals=(c.signal,), params=(int(e["min"]), int(e["max"]))))
+        elif k == "level":
+            out.append(Item("level", f"{CASE_PREFIX}{c.signal}（GPIO{c.gpio}）接 {c.to}，电平是 {e['value']}",
+                            gpios=(c.gpio,), signals=(c.signal,), params=(int(e["value"]),)))
+    return out
+
+
+_ADC_HEAD = """
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+
+/* 读 GPIO 上的电压（mV，8 次平均，用芯片支持的校准方案换算）；读不了返回 -1。 */
+static int ffw_adc_mv(int gpio)
+{
+    adc_unit_t unit;
+    adc_channel_t chan;
+    if (adc_oneshot_io_to_channel(gpio, &unit, &chan) != ESP_OK) {
+        ff_log("GPIO%d 不是 ADC 引脚", gpio);
+        return -1;
+    }
+    adc_oneshot_unit_handle_t h = NULL;
+    adc_oneshot_unit_init_cfg_t uc = {.unit_id = unit};
+    if (adc_oneshot_new_unit(&uc, &h) != ESP_OK) {
+        return -1;
+    }
+    adc_oneshot_chan_cfg_t cc = {.atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
+    adc_oneshot_config_channel(h, chan, &cc);
+    adc_cali_handle_t cal = NULL;
+    esp_err_t ce = ESP_FAIL;
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    adc_cali_curve_fitting_config_t cf = {.unit_id = unit, .chan = chan, .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
+    ce = adc_cali_create_scheme_curve_fitting(&cf, &cal);
+#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    adc_cali_line_fitting_config_t lf = {.unit_id = unit, .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
+    ce = adc_cali_create_scheme_line_fitting(&lf, &cal);
+#endif
+    long sum = 0;
+    int n = 0;
+    for (int i = 0; i < 8; i++) {
+        int raw = 0, mv = 0;
+        if (adc_oneshot_read(h, chan, &raw) != ESP_OK) {
+            continue;
+        }
+        if (ce == ESP_OK && adc_cali_raw_to_voltage(cal, raw, &mv) == ESP_OK) {
+            sum += mv;
+        } else {
+            sum += (long)raw * 3100 / 4095;          /* 没有校准时粗略换算 */
+        }
+        n++;
+        esp_rom_delay_us(500);
+    }
+    adc_oneshot_del_unit(h);
+    return n ? (int)(sum / n) : -1;
+}
+"""
+
+
+def _adc_case(it: Item) -> str:
+    g, (lo, hi) = it.gpios[0], it.params
+    return f"""
+TEST_CASE("{it.name}", "[ffwire]")
+{{
+    int mv = ffw_adc_mv({g});
+    ff_log("ADC GPIO{g}：%d mV（应在 {lo}–{hi} mV）", mv);
+    TEST_ASSERT_TRUE_MESSAGE(mv >= {lo} && mv <= {hi}, "电压不在设计说的范围：线没接、接错地方，或者脚上还连着别的线");
+}}
+"""
+
+
+def _level_case(it: Item) -> str:
+    g, (v,) = it.gpios[0], it.params
+    pull = "GPIO_PULLDOWN_ONLY" if v else "GPIO_PULLUP_ONLY"           # 反着拉：读到 v 才说明外面真的接着
+    return f"""
+TEST_CASE("{it.name}", "[ffwire]")
+{{
+    gpio_reset_pin({g});
+    gpio_set_direction({g}, GPIO_MODE_INPUT);
+    gpio_set_pull_mode({g}, {pull});
+    esp_rom_delay_us(200);
+    int a = gpio_get_level({g});
+    esp_rom_delay_us(2000);
+    int b = gpio_get_level({g});
+    gpio_reset_pin({g});
+    ff_log("电平 GPIO{g}：%d、%d（应为 {v}）", a, b);
+    TEST_ASSERT_TRUE_MESSAGE(a == {v} && b == {v}, "电平不对：线没接、接错地方，或者脚上还连着别的线");
+}}
+"""
+
+
 def check_source(profile: HardwareProfile, items: list[Item]) -> str:
     devs = {d.name: d for d in profile.devices}
-    parts = [_HEAD]
+    parts = [_HEAD] + ([_ADC_HEAD] if any(it.kind == "adc" for it in items) else [])
     for it in items:
         if it.kind == "i2c":
             parts.append(_i2c_case(profile, it, devs[it.device]))
@@ -223,6 +347,10 @@ def check_source(profile: HardwareProfile, items: list[Item]) -> str:
             parts.append(_int_case(profile, it, devs[it.device]))
         elif it.kind == "loop":
             parts.append(_loop_case(it))
+        elif it.kind == "adc":
+            parts.append(_adc_case(it))
+        elif it.kind == "level":
+            parts.append(_level_case(it))
     return "".join(parts)
 
 
@@ -240,9 +368,12 @@ def results_from(items: list[Item], board_result) -> WiringCheck:
             detail = re.sub(r"\s+", " ", c.message)[:120]
         hint = next((ln for ln in logs if (it.kind == "loop" and f"GPIO{it.gpios[0]}→" in ln)
                      or (it.kind == "int" and f"INT 脚 GPIO{it.gpios[0]}" in ln)
+                     or (it.kind == "adc" and f"ADC GPIO{it.gpios[0]}：" in ln)
+                     or (it.kind == "level" and f"电平 GPIO{it.gpios[0]}：" in ln)
                      or (it.kind == "i2c" and "探测" in ln and it.name.split("的 ")[-1].split(" ")[0] in ln)), "")
         out.append({"name": it.name, "kind": it.kind, "ok": None if c is None else c.status == "pass",
-                    "detail": detail or hint[:120]})
+                    "detail": (hint[:120] if it.kind in ("adc", "level") and hint else detail or hint[:120]),
+                    "signals": list(it.signals)})
     return WiringCheck(items=out)
 
 
@@ -255,8 +386,9 @@ def run_check(profile: HardwareProfile, items: list[Item], idf, board, build_dir
         return WiringCheck(skipped="硬件档案里没有和这个模块有关的接线自检项")
     if idf is None or board is None:
         return WiringCheck(skipped="没有 ESP-IDF 或没有板子")
+    extra = ("esp_adc",) if any(it.kind == "adc" for it in items) else ()
     proj = IdfProject(Path(build_dir), idf, target=str(profile.chip.value),
-                      requires=DEFAULT_REQUIRES + TEST_REQUIRES, whole_archive=True)
+                      requires=DEFAULT_REQUIRES + TEST_REQUIRES + extra, whole_archive=True)
     proj.write(profile, {**harness_files(None, None, None, profile=profile), TEST_FILE: check_source(profile, items)})
     b = proj.build()
     if not b.ok:

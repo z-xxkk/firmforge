@@ -141,7 +141,7 @@ class EmbeddedFlow:
                  coder: str | None = "coder-strong", design: Design | None = None, locked: dict[str, str] | None = None,
                  extra_requires: tuple[str, ...] = (), build_rules: bool = True, workflow=None, store=None,
                  human_review: bool = False, confirm_design: Callable[[Design], str | None] | None = None,
-                 prior_wiring=None, rules_path: Path | None = None, project=None,
+                 prior_wiring=None, rules_path: Path | None = None, project=None, confirm_wiring=None,
                  confirm_module: Callable[[DesignModule, "ModuleResult", str], str | None] | None = None):
         """workflow：上板工作流（firmware_dev.toml，DECISIONS 第 110 条）决定走哪些步骤、在哪停下、最多试几次、
         编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder（coder=None 时由调度器挑）；
@@ -166,6 +166,7 @@ class EmbeddedFlow:
         self.store, self.human_review, self.confirm_design = store, human_review, confirm_design
         # 同一个项目上一次的接线（第 108 条）：给了项目就用项目里存的完整连线（第 134 条），否则用传进来的
         self.project = project
+        self.confirm_wiring = confirm_wiring             # 接线一步等人接好线的回调（第 134 条第 3 阶段）；None：不等，直接自检
         self.prior_wiring = (list(project.wiring) if project is not None and project.wiring else prior_wiring) or None
         self.exp = None
         if store is not None:                            # 给了数据库就用经验库（评测的 full 配置也用，第 119 条）
@@ -347,6 +348,56 @@ class EmbeddedFlow:
         self.rd.write_json("wiring.json", {"source": source, "pins": wiring, "devices": devices, "connections": conns})
         self.bus.emit("wiring_ready", "design", source=source, pins=wiring, devices=devices, connections=conns)
         self._wiring_used, self._wiring_checked = used, False
+
+    def _wiring_gate(self, design: Design) -> bool:
+        """设计之后、写代码之前（第 134 条第 3 阶段，ARCHITECTURE §15.4）：列出接线清单等人接好，平台按每根线的
+        expect 烧自检程序实测，全部对上才往下；对不上把哪根线、实测多少告诉人，等改好再测。返回 False 表示停下。
+        项目里每根线的状态跟着改：人确认接好 → 已接，自检通过 → 实测，没通过 → 不符。"""
+        conns = list(getattr(design, "connections", []))
+        if not conns:
+            return True
+        from ..target.selfcheck import items_for_connections, run_check
+        items = items_for_connections(self.profile, conns)
+        proj, failures = self.project, []
+        for round_ in range(1, 4):
+            states = {c.signal: (proj.state(c.signal) if proj is not None else "计划") for c in conns}
+            need_user = bool(failures) or any(c.unplug or states[c.signal] != "实测" for c in conns)
+            if need_user and self.confirm_wiring is not None:
+                self.bus.emit("human_wait", "wiring", step="wire", reason="请按接线清单接好线，接好后平台自检",
+                              connections=[c.to_dict() for c in conns], states=states, failures=failures, round=round_)
+                ans = (self.confirm_wiring(conns, states, failures) or "").strip()
+                if ans == "cancel":
+                    self.result.error = "停在了接线这一步（你选择了停止）"
+                    return False
+                if proj is not None:
+                    for c in conns:
+                        if proj.state(c.signal) != "实测" or failures:
+                            proj.set_state(c.signal, "已接", "负责人确认接好")
+            if not items:
+                self.bus.emit("wiring_selfcheck", "wiring", round=round_, ok=None, items=[],
+                              skipped="这些线平台测不了（都是只能看的），按你确认的为准")
+                return True
+            chk = run_check(self.profile, items, self.idf, self.board,
+                            Path(config.project_root()) / ".ff_data" / "idf_build" / f"{self.rd.run_id}-wiring",
+                            self.rd.path / "wiring" / f"selfcheck_{round_}.log")
+            if chk.skipped:                               # 测不了（没板子、没 ESP-IDF）：不下结论，状态停在"已接"
+                self.bus.emit("wiring_selfcheck", "wiring", round=round_, ok=None, items=[], skipped=chk.skipped)
+                return True
+            for it in chk.items:
+                for sig in it.get("signals", []):
+                    if proj is not None and it["ok"] is not None:
+                        proj.set_state(sig, "实测" if it["ok"] else "不符", it.get("detail", ""))
+            self.rd.write_json("wiring_check.json", {"round": round_, "items": chk.items})
+            self.bus.emit("wiring_selfcheck", "wiring", round=round_, ok=chk.all_ok, items=chk.items)
+            if chk.all_ok:
+                return True
+            failures = [{"name": i["name"], "detail": i.get("detail", ""), "signals": i.get("signals", [])}
+                        for i in chk.items if i["ok"] is not True]
+            if self.confirm_wiring is None:
+                self.result.error = "接线自检没通过：" + "；".join(f"{f['name']}（{f['detail']}）" for f in failures)
+                return False
+        self.result.error = "接线自检 3 次都没通过，停在接线这一步"
+        return False
 
     def _check_chip(self) -> str:
         """第一次上板前识别板子上的芯片（DECISIONS 第 114 条）；和硬件档案对不上返回说明，不烧录。"""

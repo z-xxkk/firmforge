@@ -365,6 +365,12 @@ class EmbeddedBackend(Backend):
                                                         f"。代码在右边\"代码\"标签里看"})
                 return ans if isinstance(ans, str) else ""
 
+            def confirm_wiring(conns, states, failures):
+                """接线一步（第 134 条第 3 阶段）：列出接线清单等你接好；"ok" 接好了开始自检，"cancel" 停下。"""
+                ans = self._wait("wiring", {"connections": [c.to_dict() for c in conns], "states": dict(states),
+                                            "failures": list(failures)})
+                return ans if isinstance(ans, str) else "cancel"
+
             def human(pending, escalated):
                 b = holder.get("builder")
                 results = getattr(b, "results", {}) if b is not None else {}
@@ -380,7 +386,8 @@ class EmbeddedBackend(Backend):
                                       runs_root=runs_dir, name=name, human=human, tier=tier, think=thinking,
                                       subscribers=sub, workflow=workflow or "firmware_dev", store=db,
                                       human_review=human_review, confirm_design=confirm_design,
-                                      prior_wiring=prior_wiring, confirm_module=confirm_module, project=project_rec)
+                                      prior_wiring=prior_wiring, confirm_module=confirm_module, project=project_rec,
+                                      confirm_wiring=confirm_wiring)
             flow.on_builder = lambda b: holder.__setitem__("builder", b)
 
             def job():

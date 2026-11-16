@@ -183,6 +183,9 @@ class _StubFlow:
         self._note("接线自检（预演不上板，按测不了处理，维持硬件问题）")
         return diag
 
+    def _wiring_gate(self, design):
+        return True                                  # 预演不接线、不上板
+
     def _check_chip(self):
         return ""
 
