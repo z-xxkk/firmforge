@@ -33,7 +33,8 @@ EVENT_TYPES = {
     "app_checked", "firmware_ready",
     "wiring_selfcheck",                     # 接线一步的自检结果（第 134 条第 3 阶段）
     "handoff_checked", "design_revised",
-    "repair_resumed", "module_released",    # 负责人选了接着修；人工放行（第 139 条）    # 诊断要删的用例是否真删了；设计改了验收条件（第 134 条第 5 阶段）        # 集成：主程序上板跑两轮的核对结果；完整工程已交付（第 131 条）
+    "repair_resumed", "module_released",
+    "expect_changed",                       # 写主程序的 Agent 改了锁定的期望（第 140 条）    # 负责人选了接着修；人工放行（第 139 条）    # 诊断要删的用例是否真删了；设计改了验收条件（第 134 条第 5 阶段）        # 集成：主程序上板跑两轮的核对结果；完整工程已交付（第 131 条）
     # 经验库
     "experience_saved", "experience_used",
     # 工具（DECISIONS 第 63 条）

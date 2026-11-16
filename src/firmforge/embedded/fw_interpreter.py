@@ -198,6 +198,8 @@ class FirmwareInterpreter:
         conv, out = f._ask_files(agent, integrator_messages(f.spec, f.profile, rules, design, headers), m.id, allowed,
                                  allowed, attempt=1, purpose="写主程序", tools=tools)
         mr.files.update(out.files)
+        locked = mr.files.get(EXPECT_FILE, "")             # 期望第一次交上来就锁定（第 140 条）
+        changes: list[dict] = []
         verdict = "fail"
         for attempt in range(1, limit + 1):
             verdict, mr.last_report = self._check_app(design, mr, module_files, rules, attempt)
@@ -206,6 +208,11 @@ class FirmwareInterpreter:
             conv, o = f._ask_files(agent, conv + [{"role": "user", "content": integrator_repair_message(attempt, limit, mr.last_report)}],
                                    m.id, allowed, None, attempt=attempt + 1, purpose="改主程序", tools=tools)
             mr.files.update(o.files)
+            note = self._guard_expectations(mr, locked, attempt + 1)
+            if note:
+                changes.append(note)
+                locked = mr.files[EXPECT_FILE]
+        self._expect_changes = changes                     # 改过期望：交付时写进验证报告，给负责人看
         ask = getattr(f, "confirm_module", None)
         if confirm and ask is not None and verdict in ("pass", "fail"):
             f.bus.emit("human_wait", m.id, step="confirm_app", reason="主程序上板跑完了，等你看结果（串口记录在运行目录里）",
@@ -228,6 +235,36 @@ class FirmwareInterpreter:
         self._deliver(mr, module_files)
         f.bus.emit("node_done" if verdict == "pass" else "node_failed", m.id, verdict=verdict, attempts=mr.attempts,
                    note=mr.last_report[-300:])
+
+    def _guard_expectations(self, mr, locked: str, attempt: int) -> dict | None:
+        """期望锁定（第 140 条）：对话测试里写主程序的 Agent 第一轮没看到"无历史记录"，第 3 次把这条期望删掉就"通过"了。
+        现在改期望必须在 app_expect.json 里写 change_reason；没写就退回原来的期望（当作没改）。写了就照用，
+        但把删了什么、加了什么、理由是什么记下来，在对话和报告里给负责人看。返回这次的改动（没改返回 None）。"""
+        import json as _json
+        from .integrate import EXPECT_FILE
+        f = self.flow
+        new = mr.files.get(EXPECT_FILE, "")
+        if not locked or new == locked:
+            return None
+        try:
+            old_d, new_d = _json.loads(locked), _json.loads(new)
+        except ValueError:
+            mr.files[EXPECT_FILE] = locked
+            return None
+        pats = lambda d: [e.get("pattern") for e in (d.get("expect") or []) if isinstance(e, dict)]   # noqa: E731
+        old_p, new_p = pats(old_d), pats(new_d)
+        if (old_d.get("expect") == new_d.get("expect")):
+            mr.files[EXPECT_FILE] = locked
+            return None
+        reason = str(new_d.get("change_reason") or "").strip()
+        removed = [p for p in old_p if p not in new_p]
+        added = [p for p in new_p if p not in old_p]
+        if not reason:
+            mr.files[EXPECT_FILE] = locked
+            f.bus.emit("expect_changed", "app", attempt=attempt, accepted=False, removed=removed, added=added, reason="")
+            return None
+        f.bus.emit("expect_changed", "app", attempt=attempt, accepted=True, removed=removed, added=added, reason=reason)
+        return {"attempt": attempt, "removed": removed, "added": added, "reason": reason}
 
     def _check_app(self, design: Design, mr, module_files: dict, rules: RuleSet, attempt: int) -> tuple[str, str]:
         """合规 → 编译整个工程 → 烧录、跑两轮、核对串口。返回 (结论, 报告)；结论 pass / fail / skipped。"""
@@ -293,7 +330,11 @@ class FirmwareInterpreter:
         dest = f.rd.path / "firmware"
         IdfProject(dest, f.idf, target=str(f.profile.chip.value),
                    requires=DEFAULT_REQUIRES + tuple(f.extra_requires)).write(f.profile, {**module_files, APP_FILE: mr.files[APP_FILE]})
-        (dest / "验证报告.txt").write_text(f"主程序检查结论：{mr.verdict}（共 {mr.attempts} 次）\n\n{mr.last_report}\n",
+        changes = getattr(self, "_expect_changes", [])
+        note = ("\n\n期望被改过（写主程序的 Agent 自己改的，理由是它写的）：\n" + "\n".join(
+            f"- 第 {c['attempt']} 次：删了 {('、'.join(c['removed']) or '无')}；加了 {('、'.join(c['added']) or '无')}；"
+            f"理由：{c['reason']}" for c in changes)) if changes else ""
+        (dest / "验证报告.txt").write_text(f"主程序检查结论：{mr.verdict}（共 {mr.attempts} 次）\n\n{mr.last_report}{note}\n",
                                          encoding="utf-8")
         f.bus.emit("firmware_ready", "app", path=str(dest), verdict=mr.verdict)
 

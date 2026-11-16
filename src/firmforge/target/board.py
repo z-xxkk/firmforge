@@ -88,10 +88,11 @@ class BoardRunner:
             return f"找不到板子的串口（{self.port or '没有乐鑫 USB 设备'}），请插上板子或设置 FF_SERIAL_PORT"
         return ""
 
-    def _flash(self, project: IdfProject) -> str:
-        """烧录；成功返回空字符串，否则返回跳过的原因。"""
+    def _flash(self, project: IdfProject, erase: bool = False) -> str:
+        """烧录；成功返回空字符串，否则返回跳过的原因。erase：先擦掉整块 flash（NVS 里上一个程序留下的数据也清掉）。"""
         try:
-            fl = self.idf.idf(["-p", self.port, "flash"], project.root, FLASH_TIMEOUT_S)
+            fl = self.idf.idf(["-p", self.port, *(["erase-flash"] if erase else []), "flash"], project.root,
+                              FLASH_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             return f"烧录超过 {FLASH_TIMEOUT_S} 秒"
         if fl.returncode != 0:
@@ -101,12 +102,30 @@ class BoardRunner:
             return f"烧录失败{hint}：{tail.strip()[-300:]}"
         return ""
 
+    def _erase_nvs_no_reset(self) -> str:
+        """擦 nvs 分区，擦完不复位（芯片停在下载模式）。成功返回空字符串；没有 nvs 分区等失败返回说明，不挡运行。"""
+        tool = Path(self.idf.root) / "components" / "partition_table" / "parttool.py"
+        try:
+            r = subprocess.run([self.idf.python, str(tool), "--esptool-args", "after=no_reset", "--port", self.port,
+                                "erase_partition", "--partition-name=nvs"], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=120, env=self.idf.env)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"擦 NVS 分区没成功：{exc}"
+        return "" if r.returncode == 0 else f"擦 NVS 分区没成功：{(r.stdout + r.stderr).strip()[-300:]}"
+
     def run_app(self, project: IdfProject, seconds: float, phases: tuple[str, ...], log_dir: Path | None = None
                 ) -> tuple[dict[str, str], str]:
-        """烧录主程序（DECISIONS 第 131 条），每一轮复位一次、读 seconds 秒串口。返回 ({轮次: 串口原文}, 跳过原因)。"""
+        """烧录主程序（DECISIONS 第 131 条），每一轮复位一次、读 seconds 秒串口。返回 ({轮次: 串口原文}, 跳过原因)。
+        烧录后擦掉 NVS 分区、芯片停在下载模式不启动（第 140 条），第一轮读串口时的复位才是真正的第一次上电：
+        模块测试往 NVS 里写过数据（对话测试里读到了测试存的 42.5 °C）；idf.py flash 烧完会自动复位，程序在读串口
+        之前就先跑了一次、存了数据，所以光擦整块 flash 也不够（真板上试过）。"""
         why = self._usable() or self._flash(project)
         if why:
             return {}, why
+        note = self._erase_nvs_no_reset()
+        if note and log_dir is not None:
+            Path(log_dir).mkdir(parents=True, exist_ok=True)
+            (Path(log_dir) / "erase_nvs.txt").write_text(note, encoding="utf-8")
         outs: dict[str, str] = {}
         for phase in phases:
             try:

@@ -1325,6 +1325,12 @@ class ChatPage(QWidget):
             pins = d.get("pins") or {}
             src = "设计 Agent 按需求定的" if d.get("source") == "design" else "沿用硬件档案的默认接线"
             self.add_line(f"接线（{src}）：" + "，".join(f"{s}=GPIO{g}" for s, g in sorted(pins.items())))
+        elif t == "expect_changed":                    # 主程序的期望被改（第 140 条）
+            what = f"删了 {'、'.join(d.get('removed') or []) or '无'}，加了 {'、'.join(d.get('added') or []) or '无'}"
+            if d.get("accepted"):
+                self.add_line(Dot(T()["run"]), f"写主程序的 Agent 改了期望（{what}），理由：{d.get('reason')}")
+            else:
+                self.add_line(f"写主程序的 Agent 想改期望（{what}）但没写理由，没有采纳，按原来的期望检查", bg=True)
         elif t == "module_released":                   # 人工放行（第 139 条）
             self.add_line(Dot(T()["run"]), f"模块 {node} 人工放行（不算通过）：{d.get('reason', '')}")
         elif t == "repair_resumed":

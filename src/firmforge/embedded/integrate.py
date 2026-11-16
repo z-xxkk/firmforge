@@ -187,5 +187,7 @@ EXPECT_HELP = """```json
 
 def integrator_repair_message(attempt: int, max_attempts: int, report: str) -> str:
     return "\n".join([f"第 {attempt} 次没有通过（最多 {max_attempts} 次）。问题如下：", "", report.strip(), "",
-                      f"请输出修改后的 main/{APP_FILE} 和 main/{EXPECT_FILE}（没改动的可以不输出）。"
-                      "模块代码不能改；如果确实是某个模块的问题，在说明里写清楚。"])
+                      f"请输出修改后的 main/{APP_FILE}。模块代码不能改；如果确实是某个模块的问题，在说明里写清楚。",
+                      f"main/{EXPECT_FILE} 已经锁定（第一次交的期望就是验收标准）：应该改程序让它打印出期望的内容，"
+                      "而不是删掉或放宽期望。只有原来的期望本身写错了（和需求不符）才能改，这时必须在 JSON 里加 "
+                      "\"change_reason\" 写清为什么原来的不对——会原样告诉负责人；没写理由的改动不算数。"])

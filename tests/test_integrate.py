@@ -89,7 +89,7 @@ class ExpectationTest(unittest.TestCase):
 class IntegrateInFlowTest(unittest.TestCase):
     """解释器里的集成步骤：模块都过了才做；没通过带着报告改；结论影响整次运行；交付完整工程。"""
 
-    def run_flow(self, checks, app_checks, *, module_pass=True, idf=True, human_review=False, comment=""):
+    def run_flow(self, checks, app_checks, *, module_pass=True, idf=True, human_review=False, comment="", expects=None):
         seen = []
 
         def team(messages):
@@ -97,8 +97,9 @@ class IntegrateInFlowTest(unittest.TestCase):
             if "主程序" in last or "app_main" in last or "主程序" in (messages[1]["content"] or "")[:200]:
                 seen.append(("integrator", last))
                 n = sum(1 for k, _ in seen if k == "integrator")
+                exp = (expects or [EXPECT])[min(n, len(expects or [EXPECT])) - 1]
                 return (f"<<<FILE {APP_FILE}\nvoid app_main(void) {{ /* 第 {n} 版 */ }}\n>>>FILE\n"
-                        f"<<<FILE {EXPECT_FILE}\n{EXPECT}\n>>>FILE\n")
+                        f"<<<FILE {EXPECT_FILE}\n{exp}\n>>>FILE\n")
             if "资深嵌入式 C 工程师" in system:
                 seen.append(("coder", last))
                 return "<<<FILE imu.c\nint imu_read(void) { return 1; }\n>>>FILE\n<<<FILE include/imu.h\nint imu_read(void);\n>>>FILE\n"
@@ -184,6 +185,22 @@ class IntegrateInFlowTest(unittest.TestCase):
         self.assertEqual(res.verdict, "incomplete")
         self.assertFalse(any(k == "integrator" for k, _ in seen))
 
+    def test_expectations_locked(self):
+        """第 140 条：期望第一次交上来就锁定；没写理由的改动不算数，写了理由的照用但记下来给负责人看。"""
+        loose = json.dumps({"expect": [{"pattern": r"温度 [-0-9.]+", "every_s": 2}]}, ensure_ascii=False)
+        res, seen, ev, answers, delivered, _ = self.run_flow([self.PASS], [("fail", "x"), ("pass", "")],
+                                                             expects=[EXPECT, loose])
+        self.assertEqual(json.loads(answers[1][EXPECT_FILE]), json.loads(EXPECT))          # 没写理由：退回原来的期望
+        ch = [e["data"] for e in ev if e["type"] == "expect_changed"]
+        self.assertEqual((ch[0]["accepted"], ch[0]["removed"]), (False, ["上次保存的最高温度"]))
+        self.assertIn("锁定", [t for k, t in seen if k == "integrator"][1])
+        why = json.dumps({"expect": json.loads(loose)["expect"], "change_reason": "需求没要求复位后打印"}, ensure_ascii=False)
+        res, seen, ev, answers, delivered, _ = self.run_flow([self.PASS], [("fail", "x"), ("pass", "")],
+                                                             expects=[EXPECT, why])
+        self.assertEqual(json.loads(answers[1][EXPECT_FILE])["change_reason"], "需求没要求复位后打印")
+        ch = [e["data"] for e in ev if e["type"] == "expect_changed"]
+        self.assertEqual((ch[0]["accepted"], ch[0]["reason"]), (True, "需求没要求复位后打印"))
+
     def test_human_comment_revises_and_rechecks(self):
         res, seen, ev, answers, *_ = self.run_flow([self.PASS], [("pass", ""), ("pass", "")], human_review=True,
                                                    comment="温度保留一位小数")
@@ -244,6 +261,38 @@ class CheckAppTest(unittest.TestCase):
         self.assertIn("上次保存的最高温度", report)
         verdict, report, *_ = self.run_check({}, why="找不到板子的串口")
         self.assertEqual(verdict, "skipped")
+
+
+class BoardEraseTest(unittest.TestCase):
+    def test_app_run_erases_flash_first(self):
+        """第 140 条：烧完主程序先擦 NVS 分区、不复位，第一轮才是真正的第一次上电。"""
+        from firmforge.target.board import BoardRunner
+        calls = []
+
+        class Idf:
+            python, env = "python", {}
+
+            def idf(self, args, cwd, timeout):
+                calls.append(args)
+                return mock.Mock(returncode=1, stdout="", stderr="stop here")
+        Idf.idf = lambda self, args, cwd, timeout: (calls.append(args), mock.Mock(returncode=0, stdout="", stderr=""))[1]
+        Idf.root = "/idf"
+        b = BoardRunner.__new__(BoardRunner)
+        b.idf, b.port, b.run_timeout, b._chip = Idf(), "/dev/null", 60, None
+        runs = []
+
+        def fake_run(args, **k):
+            runs.append(args)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        with mock.patch("firmforge.target.board.Path.exists", return_value=True), \
+                mock.patch("firmforge.target.board.subprocess.run", fake_run):
+            b.run_app(mock.Mock(root="."), 1, ("first",))
+        self.assertEqual(calls[0][-1], "flash")
+        erase = runs[0]
+        self.assertIn("parttool.py", erase[1])
+        self.assertEqual(erase[2:4], ["--esptool-args", "after=no_reset"])               # 擦完不复位
+        self.assertIn("--partition-name=nvs", erase)
+        self.assertIn("-c", runs[1])                                                     # 然后才读串口（这次复位是第一次上电）
 
 
 class BoardRunAppTest(unittest.TestCase):
