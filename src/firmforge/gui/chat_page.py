@@ -100,6 +100,36 @@ class Bubble(QFrame):
         lay.addWidget(lab)
 
 
+def is_gui_run(rd: Path) -> bool:
+    """对话页里写需求跑的上板运行（运行目录名以 -gui 结尾，同一秒重名时带 -2、-3）。"""
+    parts = rd.name.split("-")
+    return "gui" in parts[2:] and parts[-1] in ("gui",) + tuple(str(i) for i in range(2, 10))
+
+
+def run_title(rd: Path, width: int = 24) -> str:
+    """对话列表里的标题：需求原文的开头。旧的运行没存 spec.md，从设计 Agent 收到的任务单里取"需求文档"一节。"""
+    text = ""
+    spec = rd / "spec.md"
+    try:
+        if spec.is_file():
+            text = spec.read_text(encoding="utf-8")
+        else:
+            for p in sorted((rd / "llm_calls").glob("*.json"))[:80]:
+                d = json.loads(p.read_text(encoding="utf-8"))
+                if d.get("agent") != "designer":
+                    continue
+                body = next((m.get("content") or "" for m in d.get("messages", []) if m.get("role") == "user"), "")
+                if "### 需求文档" in body:
+                    text = body.split("### 需求文档", 1)[1].split("\n### ", 1)[0]
+                    break
+    except (OSError, ValueError):
+        text = ""
+    text = " ".join(text.split())
+    if not text:
+        return f"运行 {rd.name}"
+    return text if len(text) <= width else text[:width] + "…"
+
+
 MAP_EVENTS = {"plan_ready", "wiring_ready", "wiring_checked", "verify_finished", "node_ready", "node_done",
               "node_failed", "agent_started", "run_finished"}
 
@@ -616,9 +646,14 @@ class ChatPage(QWidget):
         last = None
         rows = [("chat", c["title"], c["path"], c["mtime"], c["runs"]) for c in list_conversations(self.chats_dir)]
         linked = {Path(r).name for c in rows for r in c[4]}
-        if self.runs_dir.is_dir() and self.show_cli_runs.isChecked():
+        if self.runs_dir.is_dir():
+            show_all = self.show_cli_runs.isChecked()
             for rd in self.runs_dir.iterdir():
-                if (rd / "events.jsonl").is_file() and rd.name not in linked:
+                if not (rd / "events.jsonl").is_file() or rd.name in linked:
+                    continue
+                if is_gui_run(rd):                     # 对话页里写需求跑的上板运行：总是列出，标题用需求
+                    rows.append(("gui", run_title(rd), rd, (rd / "events.jsonl").stat().st_mtime, [str(rd)]))
+                elif show_all:                         # 评测、命令行的运行：勾上才列
                     rows.append(("run", rd.name, rd, (rd / "events.jsonl").stat().st_mtime, [str(rd)]))
         rows.sort(key=lambda r: r[3], reverse=True)
         for kind, title, path, mtime, runs in rows[:200]:
@@ -638,7 +673,9 @@ class ChatPage(QWidget):
                     except (OSError, json.JSONDecodeError):
                         pass
             mark = {"pass": "●", "fail": "●", "error": "●"}.get(verdict, "○")
-            it = QListWidgetItem(f"{title}" if kind == "chat" else f"运行 {title}")
+            it = QListWidgetItem(f"运行 {title}" if kind == "run" else title)
+            if kind == "gui":
+                kind = "run"                           # 打开时和其他运行一样回放
             it.setData(Qt.UserRole, (kind, str(path)))
             it.setToolTip(f"结论：{VERDICT_NAMES.get(verdict, '还没有运行')}")
             it.setData(Qt.DecorationRole, None)
@@ -1107,6 +1144,8 @@ class ChatPage(QWidget):
             self.select_module(self.graph.selected)
         if self.embedded and e.get("type") in MAP_EVENTS:
             self._map_timer.start()
+        if e.get("type") == "run_started" and self.replay is None and self.backend is not None:
+            self.refresh_sessions()                      # 正在跑的这次马上出现在左边列表里
         self.refresh_status(self._run_text())
 
     def _run_text(self) -> str:

@@ -178,6 +178,7 @@ class EmbeddedFlow:
         self._fails: dict[str, dict[str, int]] = {}      # 模块 → 编码 Agent → 连续没修好的次数
         self.on_builder: Callable | None = None
         self.rd = RunDir.create(runs_root, name)
+        (self.rd.path / "spec.md").write_text(spec, encoding="utf-8")      # 需求原文（对话列表用它当标题）
         self.bus = EventBus(self.rd.run_id, self.rd.events_path)
         for s in subscribers:
             self.bus.subscribe(s)
