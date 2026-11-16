@@ -70,6 +70,7 @@
     "2": "启动配置引脚，esp32c3-ds p.30",
     "8": "启动配置引脚（板载蓝色 LED），esp32c3-ds p.30",
     "9": "启动配置引脚（BOOT 键），esp32c3-ds p.30",
+    "11": "排针没有引出（负责人看板子丝印 2026-11-16：排针只有 GPIO0–10、20、21）；带内置 Flash 的 C3 默认是 VDD_SPI",
     "12": "接 SPI Flash，esp32c3-ds p.23",
     "13": "接 SPI Flash，esp32c3-ds p.23",
     "14": "接 SPI Flash，esp32c3-ds p.23",

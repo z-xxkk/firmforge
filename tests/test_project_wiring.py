@@ -82,7 +82,9 @@ class WiringCheckTest(unittest.TestCase):
         self.assertEqual(probs, [])
         self.assertIn("先拔掉原来的线：跳线连着 GPIO0", ok[0].line())
         self.assertIn("unplug", ok[0].to_dict())
-        ok, probs = parse_connections([{**adc, "gpio": 11}], C3, set())
+        _, probs = parse_connections([{**adc, "gpio": 11}], C3, set())                    # 排针没引出 GPIO11
+        self.assertTrue(any("GPIO11" in p for p in probs), probs)
+        ok, probs = parse_connections([{**adc, "gpio": 11}], profile(), set())            # 测试用的档案里 GPIO11 空着
         self.assertEqual(probs, [])
         self.assertEqual(ok[0].line(), "adc.vin：GPIO11 → 3V3（读已知电压）")
         self.assertTrue(parse_connections({"adc.vin": 11}, C3, set())[1])                  # 旧格式
@@ -90,7 +92,7 @@ class WiringCheckTest(unittest.TestCase):
                           ({"to": "某处"}, "不知道是什么"), ({"expect": {"kind": "adc_mv", "min": 5, "max": 1}}, "adc_mv"),
                           ({"expect": {"kind": "i2c_ack", "device": "nope"}}, "i2c_ack")):
             with self.subTest(want):
-                _, probs = parse_connections([{**adc, "gpio": 11, **bad}], C3, set())
+                _, probs = parse_connections([{**adc, "gpio": 11, **bad}], profile(), set())
                 self.assertTrue(any(want in p for p in probs), probs)
         same = [{"signal": "uart1.tx", "gpio": 0, "to": "uart1.rx", "why": "回环", "expect": {"kind": "loopback", "with": "uart1.rx"}},
                 {"signal": "uart1.rx", "gpio": 1, "to": "uart1.tx", "why": "回环", "expect": {"kind": "loopback", "with": "uart1.tx"}}]

@@ -126,7 +126,7 @@
     "scope": [
       "adc"
     ],
-    "text": "校准句柄用 adc_cali_create_scheme_curve_fitting()（或 line_fitting 版本）创建，配置里的 unit_id/atten/bitwidth 必须与通道配置一致",
+    "text": "校准句柄用 adc_cali_create_scheme_curve_fitting() 创建（ESP32-C3 只支持曲线拟合，没有 line_fitting 版本），配置里的 unit_id/atten/bitwidth 必须与通道配置一致",
     "cite": {
       "doc": "idf-adc-cali-scheme-h",
       "page": null,
@@ -142,7 +142,8 @@
     },
     "notes": [
       "规则判定器通过",
-      "人工确认"
+      "人工确认",
+      "负责人确认 2026-11-16（DECISIONS 第 135 条）：去掉\"或 line_fitting 版本\"，ESP-IDF v6.1 components/esp_adc/esp32c3/include/adc_cali_schemes.h 只定义 ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED；对话测试里测试 Agent 照这句写了 line_fitting，编译不过"
     ]
   },
   {
