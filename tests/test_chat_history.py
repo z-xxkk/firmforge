@@ -90,6 +90,28 @@ class ListTest(unittest.TestCase):
             self.assertTrue(any(t.startswith("运行 20261116-092943-eval") for t, _ in got))
             page.deleteLater()
 
+    def test_open_run_shows_your_message(self):
+        """打开历史运行：标题用需求开头，最上面是你当时发的需求（负责人 2026-11-16 发现看不到自己发的消息）。"""
+        from PySide6.QtWidgets import QLabel
+        from firmforge.gui.chat_page import ChatPage
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            rd = make_run(root, "20261116-140631-gui", spec="每 2 秒读一次芯片温度，掉电后打印上次保存的最高温度")
+            page = ChatPage(root)
+            for open_ in (page.open_run, page.start_replay):
+                with self.subTest(open_.__name__):
+                    open_(rd)
+                    if page.replay is not None:
+                        page.replay.pause()
+                    self.assertTrue(page.title.text().startswith("每 2 秒读一次芯片温度"))
+                    texts = [w.text() for w in page.findChildren(QLabel)]
+                    self.assertIn("每 2 秒读一次芯片温度，掉电后打印上次保存的最高温度", texts)
+            ev = make_run(root, "20261116-092943-eval-x-none-1")
+            page.replay = None
+            page.open_run(ev)
+            self.assertTrue(page.title.text().startswith("运行 20261116-092943-eval"))      # 评测运行照旧
+            page.deleteLater()
+
 
 class FlowSavesSpecTest(unittest.TestCase):
     def test_spec_written_to_run_dir(self):

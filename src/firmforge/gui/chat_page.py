@@ -107,7 +107,16 @@ def is_gui_run(rd: Path) -> bool:
 
 
 def run_title(rd: Path, width: int = 24) -> str:
-    """对话列表里的标题：需求原文的开头。旧的运行没存 spec.md，从设计 Agent 收到的任务单里取"需求文档"一节。"""
+    """对话列表里的标题：需求原文的开头；取不到需求就用运行编号。"""
+    text = " ".join(run_spec(rd).split())
+    if not text:
+        return f"运行 {rd.name}"
+    return text if len(text) <= width else text[:width] + "…"
+
+
+def run_spec(rd: Path) -> str:
+    """这次运行的需求原文（打开历史运行时当作你发的消息显示）。旧的运行没存 spec.md，从设计 Agent 收到的任务单里取
+    "需求文档"一节；都没有返回空字符串。"""
     text = ""
     spec = rd / "spec.md"
     try:
@@ -124,10 +133,7 @@ def run_title(rd: Path, width: int = 24) -> str:
                     break
     except (OSError, ValueError):
         text = ""
-    text = " ".join(text.split())
-    if not text:
-        return f"运行 {rd.name}"
-    return text if len(text) <= width else text[:width] + "…"
+    return text.strip()
 
 
 MAP_EVENTS = {"plan_ready", "wiring_ready", "wiring_checked", "verify_finished", "node_ready", "node_done",
@@ -1615,6 +1621,7 @@ class ChatPage(QWidget):
         if not append:
             self.clear()
             self.title.setText(f"运行 {run_dir.name}")
+            self._show_spec(run_dir)
         self.clear_graph()
         self.replay_bar.setVisible(False)
         self.run_dir = run_dir
@@ -1647,6 +1654,15 @@ class ChatPage(QWidget):
         self.replay_btn.setVisible(True)
         QTimer.singleShot(30, self.scroll, lambda: self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum()))  # 带接收对象：页面先被销毁时定时器自动取消
 
+    def _show_spec(self, run_dir: Path) -> None:
+        """对话页写需求跑的上板运行：标题用需求开头，最上面显示你当时发的需求（第 132 条）。"""
+        if not is_gui_run(run_dir):
+            return
+        spec = run_spec(run_dir)
+        if spec:
+            self.title.setText(run_title(run_dir))
+            self.add_user(spec)
+
     def start_replay(self, run_dir: Path, append: bool = False):
         if self.backend is not None:
             return
@@ -1654,6 +1670,7 @@ class ChatPage(QWidget):
         if not append:
             self.clear()
             self.title.setText(f"回放 {run_dir.name}")
+            self._show_spec(run_dir)
         self.clear_graph()
         self.run_dir = run_dir
         self.replay = ReplayPlayer(run_dir, speed=self.speed.currentData())
@@ -1667,9 +1684,11 @@ class ChatPage(QWidget):
 
     def _replay_reset(self):
         """拖进度条时从头重放：清掉对话里的运行消息，保留需求对话。"""
-        keep_replay = self.replay
+        keep_replay, keep_dir = self.replay, self.run_dir
         self.clear()
         self.replay = keep_replay
+        if self.conv is None and keep_dir is not None:
+            self._show_spec(keep_dir)
         if self.conv is not None:
             for t in self.conv.turns:
                 if t.role == "user":
