@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -47,6 +48,7 @@ class ModuleRun:
     passed_files: dict = field(default_factory=dict)   # 最近一次通过时的代码（审查改坏了退回）
     hardened: bool = False                         # 做过变异体补测试了（第 125 条，每个模块最多一次）
     hardened_backup: dict | None = None            # 补测试前通过的代码（补强后没修好就交付它）
+    hardened_tests_backup: dict | None = None      # 补测试前的测试（补的测试本身有错时退回它，第 131 条）
 
 
 class FirmwareInterpreter:
@@ -110,8 +112,11 @@ class FirmwareInterpreter:
                     res.error = "设计几次都没有通过检查"
                     return
                 f._use_wiring(design)
+            elif s.kind == "verify" and s.scope == "all":    # 集成：写主程序、上板跑（第 131 条）
+                if design is not None:
+                    self.integrate(s, design, rules, confirm)
             elif s.kind in ("human", "condition"):
-                pass                                   # 确认规则、确认设计由前一步处理（见 _confirm_follows）
+                pass                                   # 确认规则、确认设计、看集成结果由前一步处理（见 _confirm_follows）
             elif s.kind == "foreach":
                 if design is None:
                     res.error = "还没有设计，不能按模块执行"
@@ -130,6 +135,8 @@ class FirmwareInterpreter:
         verdicts = {mr.verdict for mr in res.modules.values()}
         if design is not None:
             res.verdict = "pass" if verdicts == {"pass"} else "incomplete" if verdicts <= {"pass", "skipped"} else "fail"
+            if res.verdict == "pass" and res.app is not None:     # 模块都过了，结论还要看主程序上板跑得对不对
+                res.verdict = {"pass": "pass", "skipped": "incomplete"}.get(res.app.verdict, "fail")
 
     def _confirm_follows(self, nxt: Step | None, by: dict) -> bool:
         """紧跟着的是等人确认（或开关打开时才走的条件分支里的等人确认），并且这次要停。"""
@@ -141,6 +148,139 @@ class FirmwareInterpreter:
             branch = nxt.then if self._cond(nxt.cond, None) else nxt.otherwise
             return any(by[r].kind == "human" and self._on(by[r]) for r in branch if r in by)
         return False
+
+    # ------------------------------------------------------------ 集成（第 131 条）
+
+    def integrate(self, s: Step, design: Design, rules: RuleSet, confirm: bool) -> None:
+        """所有模块通过后：编码 Agent 写 app_main.c 和期望的串口输出，平台编译、烧录、复位跑两轮核对；
+        没通过就带着报告让它改，最多 max 次。开了人工确认时跑完停下等人看。最后把完整工程交付到运行目录的 firmware/。"""
+        from .flow import ModuleResult
+        from .integrate import APP_FILE, EXPECT_FILE, app_module, integrator_messages, integrator_repair_message
+        f, res = self.flow, self.flow.result
+        m = app_module()
+        mr = ModuleResult(m.id, m.layer)
+        res.app = mr
+        if not res.modules or any(x.verdict != "pass" for x in res.modules.values()):
+            mr.verdict, mr.last_report = "skipped", "有模块没有通过，不做集成"
+            f.bus.emit("node_failed", m.id, verdict="skipped", note=mr.last_report)
+            return
+        if f.idf is None:                                  # 编译不了就不花钱写主程序；结论记 skipped，不算通过
+            mr.verdict, mr.last_report = "skipped", "ESP-IDF 不可用，主程序无法编译和上板运行，没有做集成"
+            f.bus.emit("node_failed", m.id, verdict="skipped", note=mr.last_report)
+            return
+        f.bus.emit("node_ready", m.id, title=m.title, layer=m.layer)
+        limit = max(1, min(5, self.wf.resolve_max(s, self.loop_cfg))) if s.max not in (None, "") else 3
+        module_files = dict(f.locked)
+        headers = {}
+        for dm in design.modules:
+            files = res.modules[dm.id].files
+            module_files.update(files)
+            if dm.header in files:
+                headers[dm.header] = files[dm.header]
+        agent = s.agent or "coder-strong"
+        allowed = {APP_FILE, EXPECT_FILE}
+        tools = f.rule_mode != "none"
+        conv, out = f._ask_files(agent, integrator_messages(f.spec, f.profile, rules, design, headers), m.id, allowed,
+                                 allowed, attempt=1, purpose="写主程序", tools=tools)
+        mr.files.update(out.files)
+        verdict = "fail"
+        for attempt in range(1, limit + 1):
+            verdict, mr.last_report = self._check_app(design, mr, module_files, rules, attempt)
+            if verdict != "fail" or attempt == limit:
+                break
+            conv, o = f._ask_files(agent, conv + [{"role": "user", "content": integrator_repair_message(attempt, limit, mr.last_report)}],
+                                   m.id, allowed, None, attempt=attempt + 1, purpose="改主程序", tools=tools)
+            mr.files.update(o.files)
+        ask = getattr(f, "confirm_module", None)
+        if confirm and ask is not None and verdict in ("pass", "fail"):
+            f.bus.emit("human_wait", m.id, step="confirm_app", reason="主程序上板跑完了，等你看结果（串口记录在运行目录里）",
+                       verdict=verdict)
+            comment = (ask(m, mr, verdict) or "").strip()
+            if comment:
+                keep = dict(mr.files)
+                conv, o = f._ask_files(agent, conv + [{"role": "user", "content": human_fix_message(comment)}], m.id, allowed,
+                                       None, attempt=mr.attempts + 1, purpose="按你的意见改", tools=tools)
+                mr.files.update(o.files)
+                was_pass = verdict == "pass"
+                verdict, mr.last_report = self._check_app(design, mr, module_files, rules, mr.attempts + 1)
+                if was_pass and verdict != "pass":
+                    mr.files.clear()
+                    mr.files.update(keep)
+                    verdict = "pass"
+                    f.bus.emit("human_reverted", m.id, attempt=mr.attempts,
+                               note="按你的意见改了以后没通过，退回改之前通过的版本")
+        mr.verdict = verdict
+        self._deliver(mr, module_files)
+        f.bus.emit("node_done" if verdict == "pass" else "node_failed", m.id, verdict=verdict, attempts=mr.attempts,
+                   note=mr.last_report[-300:])
+
+    def _check_app(self, design: Design, mr, module_files: dict, rules: RuleSet, attempt: int) -> tuple[str, str]:
+        """合规 → 编译整个工程 → 烧录、跑两轮、核对串口。返回 (结论, 报告)；结论 pass / fail / skipped。"""
+        from pathlib import Path
+
+        from .. import config
+        from ..grounding.compliance import check_code
+        from ..target.esp_idf import DEFAULT_REQUIRES, IdfProject
+        from .integrate import (APP_FILE, EXPECT_FILE, PHASES, app_module, check_app_output, parse_expectations,
+                                window_seconds)
+        f, m = self.flow, mr.id
+        mr.attempts = attempt
+
+        def done(verdict: str, layer: str, report: str) -> tuple[str, str]:
+            f._write_snapshot(app_module(), mr, attempt, report)
+            return verdict, report
+        expects, probs = parse_expectations(mr.files.get(EXPECT_FILE, ""))
+        scopes = {x for dm in design.modules for x in dm.scopes} - {"all"}
+        comp = check_code({APP_FILE: mr.files.get(APP_FILE, "")}, rules.select(scopes, "approved") if rules is not None else [])
+        ok = comp.ok and not probs
+        f.bus.emit("verify_finished", m, attempt=attempt, scope="compliance", ok=ok, failed_layer=None if ok else "compliance")
+        if not ok:
+            return done("fail", "compliance", "\n".join(([comp.summary()] if not comp.ok else [])
+                                                        + [f"{EXPECT_FILE}：{p}" for p in probs]))
+        if f.idf is None:
+            return done("skipped", "build", "ESP-IDF 不可用，主程序无法编译和上板运行")
+        reqs = DEFAULT_REQUIRES + tuple(f.extra_requires)
+        proj = IdfProject(Path(config.project_root()) / ".ff_data" / "idf_build" / f"{f.rd.run_id}-app", f.idf,
+                          target=str(f.profile.chip.value), requires=reqs)
+        proj.write(f.profile, {**module_files, APP_FILE: mr.files[APP_FILE]})
+        f.bus.emit("verify_started", m, attempt=attempt, scope="build")
+        b = proj.build()
+        f.bus.emit("verify_finished", m, attempt=attempt, scope="build", ok=b.ok, failed_layer=None if b.ok else "build")
+        if not b.ok:
+            errs = "\n".join(d.render() for d in b.errors) or b.log_tail[-1500:]
+            return done("fail", "build", "编译失败：\n" + errs)
+        if f.board is None:
+            return done("skipped", "board_test", "没有配置板子，主程序只做到编译和合规检查")
+        wrong = f._check_chip()
+        if wrong:
+            f.bus.emit("verify_finished", m, attempt=attempt, scope="board_test", ok=False, failed_layer="skipped")
+            return done("skipped", "board_test", wrong)
+        secs = window_seconds(expects)
+        f.bus.emit("verify_started", m, attempt=attempt, scope="board_test")
+        outs, why = f.board.run_app(proj, secs, PHASES, f.rd.attempt_dir(m, attempt))
+        if why:
+            f.bus.emit("verify_finished", m, attempt=attempt, scope="board_test", ok=False, failed_layer="skipped")
+            return done("skipped", "board_test", why)
+        chk = check_app_output(outs, expects, secs)
+        f.bus.emit("verify_finished", m, attempt=attempt, scope="board_test", ok=chk.ok,
+                   failed_layer=None if chk.ok else "board_test")
+        f.bus.emit("app_checked", m, attempt=attempt, ok=chk.ok, seconds=secs, problems=chk.problems[:10],
+                   matched=chk.matched[:12])
+        return done("pass" if chk.ok else "fail", "board_test", chk.report())
+
+    def _deliver(self, mr, module_files: dict) -> None:
+        """把完整工程（各模块 + 主程序 + hw_config.h，不带测试）写到运行目录的 firmware/，用 idf.py 就能编译烧录。"""
+        from ..target.esp_idf import DEFAULT_REQUIRES, IdfProject
+        from .integrate import APP_FILE
+        f = self.flow
+        if APP_FILE not in mr.files:
+            return
+        dest = f.rd.path / "firmware"
+        IdfProject(dest, f.idf, target=str(f.profile.chip.value),
+                   requires=DEFAULT_REQUIRES + tuple(f.extra_requires)).write(f.profile, {**module_files, APP_FILE: mr.files[APP_FILE]})
+        (dest / "验证报告.txt").write_text(f"主程序检查结论：{mr.verdict}（共 {mr.attempts} 次）\n\n{mr.last_report}\n",
+                                         encoding="utf-8")
+        f.bus.emit("firmware_ready", "app", path=str(dest), verdict=mr.verdict)
 
     # ------------------------------------------------------------ 模块流程
 
@@ -280,12 +420,16 @@ class FirmwareInterpreter:
             if run.last is not None and run.last[2].get("blame") == "code":
                 f._save_experience(m, *run.last)
                 run.last = None
-            if not run.hardened and run.t_conv and run.attempt < self._max_attempts(run):
+            # 补测试后重测算一次尝试，之后至少还要留一次修正的机会（第 131 条：以前在倒数第二次补测试，
+            # 补的测试编译不过时已经没有机会再改）
+            if not run.hardened and run.t_conv and run.attempt + 1 < self._max_attempts(run):
                 run.hardened = True
+                tests_before = dict(mr.tests)
                 run.t_conv, changed = f._harden_tests(self.design, m, mr, run.rules, run.attempt, run.t_conv,
                                                       run.tester_pin or "tester")
                 if changed:                                   # 用补强后的测试再测一次原来的代码（算一次尝试）
                     run.hardened_backup = dict(mr.files)
+                    run.hardened_tests_backup = tests_before
                     self._verify(run)
 
     def _repair_loop(self, run: ModuleRun) -> None:
@@ -364,13 +508,34 @@ class FirmwareInterpreter:
             f.bus.emit("human_reverted", m.id, attempt=run.attempt,
                        note="按你的意见改了以后没通过检查，退回改之前通过的版本")
 
+    @staticmethod
+    def _hardened_tests_at_fault(run: ModuleRun) -> bool:
+        """补强以后没通过，是不是补的测试的错：编译错误全在测试文件里，或最近一次诊断判为测试的错。"""
+        if run.layer == "build":
+            errs = [ln for ln in run.report.splitlines() if re.match(r"^\S+:\d+: (fatal )?error:", ln)]
+            return bool(errs) and all(ln.startswith(("main/test/", "main/test_host/", "test/", "test_host/"))
+                                      for ln in errs)
+        return bool(run.last and run.last[2].get("blame") == "test")
+
     def _finish_module(self, run: ModuleRun) -> None:
         f, m, mr = self.flow, run.m, run.mr
         if run.stopped == "hardware":
             mr.verdict = "hardware"
             return
         mr.verdict = run.verdict if run.verdict in ("pass", "skipped") else "fail"
-        if mr.verdict == "fail":
+        if mr.verdict == "fail" and run.hardened_backup is not None and self._hardened_tests_at_fault(run):
+            # 代码在补强前已经通过；补的测试本身有错（编译不过，或诊断判为测试的错）又没改好：
+            # 退回补强前的测试和代码，按补强前的检查结果算通过，并写明（第 131 条）
+            mr.files.clear()
+            mr.files.update(run.hardened_backup)
+            mr.tests.clear()
+            mr.tests.update(run.hardened_tests_backup or {})
+            mr.verdict = "pass"
+            why = "补的测试编译不过" if run.layer == "build" else "诊断判为补的测试有错"
+            mr.last_report += f"\n\n补强测试失败（{why}），已退回补强前的测试和代码；按补强前的检查结果算通过。"
+            f.bus.emit("hardened_reverted", m.id, kept="pass",
+                       note=f"补强测试失败（{why}），退回补强前的测试和代码，按补强前的结果算通过")
+        elif mr.verdict == "fail":
             f._restore_before_hardening(m, mr, run.hardened_backup)
         if mr.verdict == "pass" and run.passed_files and mr.files != run.passed_files:
             mr.files.clear()

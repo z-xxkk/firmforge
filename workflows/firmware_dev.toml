@@ -1,7 +1,7 @@
 # 上板流程工作流（DECISIONS 第 110 条）。执行代码是 embedded/flow.py，它按这个文件决定走哪些步骤、
 # 在哪停下等人、最多试几次；设计器里能改的项见 embedded/firmware_workflow.py 开头的说明。
 name = "firmware_dev"
-version = "1.0.0"
+version = "1.1.0"
 engine = "firmware"
 description = "上板流程：查资料提炼规则 → 设计分层 → 每个模块编码、写测试 → 合规、编译、上板测试 → 诊断修正"
 
@@ -34,6 +34,13 @@ kind = "foreach"
 over = "design.modules"
 subflow = "board_module"
 note = "按依赖顺序，每个模块各跑一遍"
+
+[[main]]
+id = "integrate"
+kind = "verify"
+scope = "all"
+max = 3
+note = "所有模块通过后写主程序，编译、烧到板子上复位跑两轮，看串口输出对不对（DECISIONS 第 131 条）"
 
 [[subflow.board_module.steps]]
 id = "write"

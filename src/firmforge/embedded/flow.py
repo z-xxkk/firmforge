@@ -84,6 +84,7 @@ class FlowResult:
     completion_tokens: int = 0
     cost: float = 0.0                   # 元，按配置里的模型价格估算
     error: str = ""
+    app: ModuleResult | None = None     # 集成：主程序（第 131 条；评测的固定路径没有这一步）
 
 
 class _Agents:
@@ -767,6 +768,7 @@ class EmbeddedFlow:
                                         "workflow": self.plan.source,
                                         "rules_used": res.rules_used,
                                         "modules": {k: v.verdict for k, v in res.modules.items()},
+                                        "app": res.app.verdict if res.app is not None else None,
                                         "tokens": res.prompt_tokens + res.completion_tokens,
                                         "cost": round(res.cost, 6),
                                         "seconds": round(time.time() - t0, 1)})

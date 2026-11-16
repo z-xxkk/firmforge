@@ -108,6 +108,7 @@ class _StubFlow:
         self.human_review = sc.human_review
         self.human, self._human_in, self.build_rules, self.max_attempts = None, object(), True, 1
         self.confirm_module = self._confirm_module
+        self.idf, self.board, self.extra_requires = "预演", None, ()      # 集成步骤只看 idf 有没有；真正的检查换成替身
         self._checks = 0
         self._current = ""                      # 正在执行的步骤 id（记账用）
 
@@ -182,6 +183,9 @@ class _StubFlow:
         self._note("接线自检（预演不上板，按测不了处理，维持硬件问题）")
         return diag
 
+    def _check_chip(self):
+        return ""
+
     def _confirm_module(self, m, mr, verdict):
         self._note("等你看结果" + (f"，你写了意见：{self.sc.comment}" if self.sc.comment else "，你点了通过"))
         return self.sc.comment
@@ -208,6 +212,13 @@ def preview(wf: Workflow, scenarios=SCENARIOS) -> list[Trace]:
                     tr.light(b)
             return r
         it._step = step
+
+        def check_app(design, mr, module_files, rules, attempt, _flow=flow):    # 集成：不编译、不上板，按通过记
+            mr.attempts = attempt
+            _flow._note(f"第 {attempt} 次主程序检查：通过（真跑时编译、烧录、复位跑两轮看串口）")
+            return "pass", ""
+        it._check_app = check_app
+        it._deliver = lambda mr, module_files, _flow=flow: _flow._note("把完整工程交付到运行目录的 firmware/")
         _main_ids = {s.id for s in wf.main}
 
         def emit(type_, node=None, _bus=flow.bus, **data):
@@ -223,7 +234,7 @@ def preview(wf: Workflow, scenarios=SCENARIOS) -> list[Trace]:
             for i, s in enumerate(main[1:], 1):
                 prev = main[i - 1].id
                 if (s.kind == "human" and prev in tr.lit and s.id not in tr.lit
-                        and any(sid == prev and "等你确认" in t for sid, t in tr.events)):
+                        and any(sid == prev and ("等你确认" in t or "等你看结果" in t) for sid, t in tr.events)):
                     tr.lit.insert(tr.lit.index(prev) + 1, s.id)
             mr = flow.result.modules.get("m")
             tr.verdict = mr.verdict if mr is not None else (flow.result.error or "没有执行到模块")

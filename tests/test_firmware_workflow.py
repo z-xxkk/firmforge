@@ -96,7 +96,11 @@ class WorkflowCheckTest(unittest.TestCase):
         cases = {
             "审查在检查前": lambda d: sub(d).insert(0, {"id": "rev", "kind": "agent", "role": "reviewer"}),
             "没有设计": lambda d: drop(d["main"], "design"),
-            "各跑不在最后": lambda d: d["main"].append({"id": "x", "kind": "human"}),
+            "各跑不在最后": lambda d: d["main"].insert(next(i for i, s in enumerate(d["main"]) if s["kind"] == "foreach") + 1,
+                                                    {"id": "x", "kind": "human"}),
+            "集成在各跑前": lambda d: d["main"].insert(2, {"id": "x", "kind": "verify", "scope": "all"}),
+            "两个集成": lambda d: d["main"].append({"id": "x", "kind": "verify", "scope": "all"}),
+            "集成次数太多": lambda d: next(s for s in d["main"] if s["id"] == "integrate").update(max=9),
             "检查在前": lambda d: sub(d).insert(0, sub(d).pop(3)),
             "循环在检查前": lambda d: sub(d).insert(0, sub(d).pop(4)),
             "等人在检查前": lambda d: sub(d).insert(0, {"id": "look", "kind": "human"}),

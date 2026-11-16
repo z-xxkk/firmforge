@@ -2,7 +2,7 @@
 # - 硬件层模块检查通过后，审查 Agent 再审一遍代码（只提意见；必须改的问题让编码 Agent 改一次，改坏了退回）；
 # - 开了"设计后等我确认"时，每个模块做完也停下等你看结果，写意见就交给编码 Agent 改。
 name = "firmware_review"
-version = "1.0.0"
+version = "1.1.0"
 engine = "firmware"
 description = "上板流程加审查：硬件层模块通过后再审一遍代码；开了人工确认时每个模块做完等你看"
 
@@ -35,6 +35,19 @@ kind = "foreach"
 over = "design.modules"
 subflow = "board_module"
 note = "按依赖顺序，每个模块各跑一遍"
+
+[[main]]
+id = "integrate"
+kind = "verify"
+scope = "all"
+max = 3
+note = "所有模块通过后写主程序，编译、烧到板子上复位跑两轮，看串口输出对不对（DECISIONS 第 131 条）"
+
+[[main]]
+id = "confirm_app"
+kind = "human"
+enabled_by = "human_review"
+note = "开了\"设计后等我确认\"时，主程序跑完也停下等你看结果"
 
 [[subflow.board_module.steps]]
 id = "write"

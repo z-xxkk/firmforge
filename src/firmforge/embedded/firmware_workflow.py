@@ -4,10 +4,13 @@
 
 主流程（按顺序执行）：
 - 查资料提炼规则（agent，role = researcher）：可选，最多一个，要在设计之前；没有就只用知识库里已有的规则
-- 等人确认（human）：只能紧跟在查资料后（确认新规则）或设计后（确认设计）；enabled_by = human_review 表示开了开关才停
+- 等人确认（human）：只能紧跟在查资料后（确认新规则）、设计后（确认设计）或集成检查后（看主程序跑的结果）；enabled_by = human_review 表示开了开关才停
 - 设计分层（agent，role = designer）：必须有且只有一个
 - 条件（condition，if = human_review）：开关打开时才走 then 里的步骤
-- 每个模块各跑（foreach，subflow 指向模块流程）：必须有且只有一个，放在最后
+- 每个模块各跑（foreach，subflow 指向模块流程）：必须有且只有一个，放在最后（后面只能接集成检查）
+- 集成检查（verify，scope = all）：可选，最多一个，紧跟在"每个模块各跑"后面；所有模块通过后写主程序、
+  编译、烧到板子上跑两轮看串口（DECISIONS 第 131 条）；max 是最多检查几次（1–5，默认 3）。
+  后面可以再接一个等人确认（看主程序跑的结果）
 
 模块流程（每个模块按顺序执行一遍）：
 - 编码（coder）、写测试（tester）：各至少一个；写测试可以排在编码前面（先写测试，只看设计给出的接口）
@@ -59,6 +62,8 @@ def _main_kind(s: Step) -> str:
         return "rules"
     if s.kind == "agent" and s.role == "designer":
         return "design"
+    if s.kind == "verify" and s.scope == "all":
+        return "integrate"
     return s.kind if s.kind in ("human", "foreach", "condition") else "?"
 
 
@@ -74,7 +79,7 @@ def firmware_problems(wf: Workflow, registry=None) -> list[str]:
     kinds = [_main_kind(s) for s in main]
     for s, k in zip(main, kinds):
         if k == "?":
-            problems.append(f"主流程的步骤 {s.id}：主流程只能放查资料提炼规则、等人确认、设计分层、条件、每个模块各跑")
+            problems.append(f"主流程的步骤 {s.id}：主流程只能放查资料提炼规则、等人确认、设计分层、条件、每个模块各跑、集成检查")
         _cond_problems(s, MAIN_CONDITIONS, "主流程", problems)
     for s in main:
         if s.kind == "condition":
@@ -86,15 +91,21 @@ def firmware_problems(wf: Workflow, registry=None) -> list[str]:
         problems.append("主流程要有且只有一个设计分层步骤（Agent：designer）")
     if kinds.count("foreach") != 1:
         problems.append("主流程要有且只有一个\"每个模块各跑\"步骤")
-    elif kinds[-1] != "foreach":
-        problems.append("\"每个模块各跑\"要放在主流程最后")
+    elif kinds[kinds.index("foreach") + 1:] not in ([], ["integrate"], ["integrate", "human"]):
+        problems.append("\"每个模块各跑\"要放在主流程最后，后面只能接集成检查（和看结果的等人确认）")
+    if kinds.count("integrate") > 1:
+        problems.append("主流程最多一个集成检查")
+    for s, k in zip(main, kinds):
+        if k == "integrate" and s.max not in (None, "") and not (isinstance(s.max, int) and 1 <= s.max <= 5
+                                                                 or isinstance(s.max, str) and s.max.startswith("loop.")):
+            problems.append(f"集成检查 {s.id} 的 max 要是 1–5 的整数")
     if kinds.count("rules") > 1:
         problems.append("主流程最多一个查资料提炼规则步骤")
     if "design" in kinds and "rules" in kinds and kinds.index("rules") > kinds.index("design"):
         problems.append("查资料提炼规则要放在设计分层之前（设计要用到规则）")
     for i, k in enumerate(kinds):
-        if k == "human" and (kinds[i - 1] if i else "") not in ("rules", "design"):
-            problems.append(f"主流程的步骤 {main[i].id}：等人确认只能紧跟在查资料提炼规则或设计分层后面")
+        if k == "human" and (kinds[i - 1] if i else "") not in ("rules", "design", "integrate"):
+            problems.append(f"主流程的步骤 {main[i].id}：等人确认只能紧跟在查资料提炼规则、设计分层或集成检查后面")
     fe = next((s for s in main if s.kind == "foreach"), None)
     if fe is not None:
         steps = wf.subflows.get(fe.subflow or "", ())

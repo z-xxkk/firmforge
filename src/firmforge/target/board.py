@@ -83,6 +83,48 @@ class BoardRunner:
             self._chip = info
         return info
 
+    def _usable(self) -> str:
+        if self.port is None or not (self.port.startswith("COM") or Path(self.port).exists()):
+            return f"找不到板子的串口（{self.port or '没有乐鑫 USB 设备'}），请插上板子或设置 FF_SERIAL_PORT"
+        return ""
+
+    def _flash(self, project: IdfProject) -> str:
+        """烧录；成功返回空字符串，否则返回跳过的原因。"""
+        try:
+            fl = self.idf.idf(["-p", self.port, "flash"], project.root, FLASH_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            return f"烧录超过 {FLASH_TIMEOUT_S} 秒"
+        if fl.returncode != 0:
+            tail = (fl.stdout + fl.stderr)[-600:]
+            hint = "；板子可能需要手动进入下载模式（按住 BOOT 再按一下 RST）" if "Write timeout" in tail or \
+                "Failed to connect" in tail else ""
+            return f"烧录失败{hint}：{tail.strip()[-300:]}"
+        return ""
+
+    def run_app(self, project: IdfProject, seconds: float, phases: tuple[str, ...], log_dir: Path | None = None
+                ) -> tuple[dict[str, str], str]:
+        """烧录主程序（DECISIONS 第 131 条），每一轮复位一次、读 seconds 秒串口。返回 ({轮次: 串口原文}, 跳过原因)。"""
+        why = self._usable() or self._flash(project)
+        if why:
+            return {}, why
+        outs: dict[str, str] = {}
+        for phase in phases:
+            try:
+                rd = subprocess.run([self.idf.python, "-c", READER, self.port, str(seconds), "\x01FF-NO-END\x01"],
+                                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                    timeout=seconds + 30, env=self.idf.env)
+                out = rd.stdout
+                if rd.returncode != 0 and not out.strip():
+                    why = rd.stderr.strip().splitlines()[-1:] or ["没有输出"]
+                    return outs, f"读串口出错（板子可能被拔掉或串口被占用）：{why[0][-300:]}"
+            except subprocess.TimeoutExpired as exc:
+                out = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            outs[phase] = out
+            if log_dir is not None:
+                Path(log_dir).mkdir(parents=True, exist_ok=True)
+                (Path(log_dir) / f"serial_{phase}.log").write_text(out, encoding="utf-8")
+        return outs, ""
+
     def run(self, project: IdfProject, log_path: Path | None = None) -> BoardTestResult:
         """project 必须已经编译成功。"""
         if self.port is None or not (self.port.startswith("COM") or Path(self.port).exists()):

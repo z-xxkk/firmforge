@@ -1278,7 +1278,20 @@ class ChatPage(QWidget):
                               f"{node} 平台把代码故意改坏 {d['total']} 处，测试发现了 {d.get('killed', 0)} 处"
                               + (f"；没发现的 {d['survived']} 处交给测试 Agent 补测试" if d.get("survived") else ""))
         elif t == "hardened_reverted":
-            self.add_line(Dot(T()["run"]), f"{node} 补强后的测试没通过，也没修好：交付补强前通过的那一版代码")
+            if d.get("kept") == "pass":                         # 补的测试本身有错，退回（第 131 条）
+                self.add_line(Dot(T()["pass"]), f"{node} {d.get('note', '补强测试失败，退回补强前的测试和代码')}")
+            else:
+                self.add_line(Dot(T()["run"]), f"{node} 补强后的测试没通过，也没修好：交付补强前通过的那一版代码")
+        elif t == "app_checked":                               # 主程序上板跑两轮的核对结果（第 131 条）
+            if d.get("ok"):
+                self.add_line(Dot(T()["pass"]), f"主程序第 {d.get('attempt')} 次：上板跑了两轮（每轮 {d.get('seconds', 0):.0f} 秒），"
+                              f"期望的 {len(d.get('matched') or [])} 项输出都看到了，没有崩溃或重启")
+            else:
+                self.add_line(Dot(T()["fail"]), f"主程序第 {d.get('attempt')} 次上板没通过："
+                              + "；".join((d.get("problems") or [])[:3]))
+        elif t == "firmware_ready":
+            self.add_line(Dot(T()["pass"] if d.get("verdict") == "pass" else T()["run"]),
+                          f"完整工程已交付：{d.get('path')}（用 idf.py build flash 就能烧录）")
         elif t == "hardware_check":                            # 诊断说硬件问题时平台的接线自检（第 124 条）
             items = d.get("items") or []
             if d.get("skipped"):

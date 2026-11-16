@@ -79,7 +79,8 @@ class MutateTest(unittest.TestCase):
 class HardenInFlowTest(unittest.TestCase):
     """模块通过后：存活的变异体交给测试 Agent，补完测试重测一次原代码（算一次尝试）。"""
 
-    def run_flow(self, variant_results, checks, workflow=False, max_attempts=4, mutants=3, tester_changes=True):
+    def run_flow(self, variant_results, checks, workflow=False, max_attempts=4, mutants=3, tester_changes=True,
+                 blame="code"):
         seen = []
 
         def team(messages):
@@ -95,7 +96,7 @@ class HardenInFlowTest(unittest.TestCase):
                 return f'<<<FILE test/test_imu.c\n#include "unity.h"\n{body}\n>>>FILE\n'
             if "诊断工程师" in system:
                 seen.append(("diag", last))
-                return '```json\n{"blame": "code", "rule": "", "evidence": "e", "instruction": "改"}\n```'
+                return '```json\n{"blame": "%s", "rule": "", "evidence": "e", "instruction": "改"}\n```' % blame
             raise AssertionError(system[:40])
         m = DesignModule("imu", "IMU", "hardware", ("imu.c", "include/imu.h"), provides=("int imu_read(void)",))
         import itertools
@@ -159,6 +160,32 @@ class HardenInFlowTest(unittest.TestCase):
                 self.assertEqual(mr.verdict, "fail")                     # 如实记没通过
                 self.assertTrue(any(e["type"] == "hardened_reverted" for e in ev))
                 self.assertIn("第 1 版", mr.files["imu.c"])              # 交付的是补强前通过的那一版
+
+    BUILD_TEST = ("fail", "build", "main/test/test_imu.c:5: error: unknown type name 'foo_t'")
+
+    def test_workflow_hardening_leaves_a_repair_round(self):
+        """工作流：补测试后重测算一次，之后至少还要留一次修正（第 131 条）。上限 4 次时第 3 次通过不再补。"""
+        mr, seen, ev = self.run_flow(["survived"] * 3, [self.FAIL, self.FAIL, self.PASS], True)
+        self.assertEqual(mr.attempts, 3)
+        self.assertFalse(any(e["type"] == "mutation_test" for e in ev))
+        mr, seen, ev = self.run_flow(["survived"] * 3, [self.FAIL, self.PASS, self.PASS], True)
+        self.assertTrue(any(e["type"] == "mutation_test" for e in ev))     # 第 2 次通过：补完重测是第 3 次，还剩 1 次
+
+    def test_broken_hardened_tests_revert_and_keep_pass(self):
+        """补的测试编译不过、又没改好：退回补强前的测试和代码，按补强前的结果算通过（第 131 条）。"""
+        mr, seen, ev = self.run_flow(["survived"] * 3, [self.PASS, self.BUILD_TEST], True, blame="test")
+        self.assertEqual(mr.verdict, "pass")
+        self.assertIn('TEST_CASE("t1"', mr.tests["test/test_imu.c"])          # 测试退回第 1 版
+        self.assertIn("第 1 版", mr.files["imu.c"])
+        rv = [e["data"] for e in ev if e["type"] == "hardened_reverted"]
+        self.assertEqual(rv[0]["kept"], "pass")
+        self.assertIn("补强测试失败", mr.last_report)
+
+    def test_hardened_tests_find_code_bug_stays_fail(self):
+        """补强后没通过、诊断说是代码的错：如实记没通过（不能借退回把真问题藏起来）。"""
+        mr, seen, ev = self.run_flow(["survived"] * 3, [self.PASS, self.FAIL], True, blame="code")
+        self.assertEqual(mr.verdict, "fail")
+        self.assertNotIn("pass", [e["data"].get("kept") for e in ev if e["type"] == "hardened_reverted"])
 
 
 if __name__ == "__main__":
