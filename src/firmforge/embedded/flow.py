@@ -337,8 +337,9 @@ class EmbeddedFlow:
         devices = [{"name": d.name, "part": d.part, "bus": d.bus, "address": d.address}
                    for d in self.profile.devices if d.name in used]
         wiring = {s: f.value for s, f in sorted(self.profile.pins.items())}
-        self.rd.write_json("wiring.json", {"source": source, "pins": wiring, "devices": devices})
-        self.bus.emit("wiring_ready", "design", source=source, pins=wiring, devices=devices)
+        conns = [c.to_dict() for c in getattr(design, "connections", [])]
+        self.rd.write_json("wiring.json", {"source": source, "pins": wiring, "devices": devices, "connections": conns})
+        self.bus.emit("wiring_ready", "design", source=source, pins=wiring, devices=devices, connections=conns)
         self._wiring_used, self._wiring_checked = used, False
 
     def _check_chip(self) -> str:

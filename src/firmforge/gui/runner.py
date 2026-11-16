@@ -353,7 +353,8 @@ class EmbeddedBackend(Backend):
 
             def confirm_design(design):
                 ans = self._wait("plan", {"modules": [m.to_dict() for m in design.modules], "embedded": True,
-                                          "wiring": dict(design.wiring)})
+                                          "wiring": dict(design.wiring),
+                                          "connections": [c.to_dict() for c in getattr(design, "connections", [])]})
                 return ans if isinstance(ans, str) else ""
 
             def confirm_module(m, mr, verdict):

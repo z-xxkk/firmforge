@@ -1390,8 +1390,15 @@ class ChatPage(QWidget):
                              + (f"，依赖 {'、'.join(x['depends_on'])}" if x.get("depends_on") else "")
                              for x in payload.get("modules", []))
             wiring = payload.get("wiring") or {}
-            wires = ("\n\n接线：" + "，".join(f"`{s}` → GPIO{g}" for s, g in sorted(wiring.items()))) if wiring else \
-                "\n\n接线：沿用硬件档案的默认接线"
+            conns = payload.get("connections") or []
+            if conns:                                    # 完整连线（第 134 条）：每根线两端、为什么
+                wires = "\n\n接线（每根线两端）：\n" + "\n".join(
+                    f"- `{c['signal']}`：GPIO{c['gpio']} → {c['to']}" + (f"（{c['why']}）" if c.get("why") else "")
+                    for c in conns)
+            elif wiring:
+                wires = "\n\n接线：" + "，".join(f"`{s}` → GPIO{g}" for s, g in sorted(wiring.items()))
+            else:
+                wires = "\n\n接线：这个项目不用接线"
             m = self.add_agent("designer", "designer", f"设计好了，请确认：\n\n{rows}{wires}\n\n确认后开始编写；"
                                "有意见（包括改接线）就写在下面输入框里发送，让设计 Agent 重做。")
             m.add_action("提修改意见", lambda: self._focus_input("写下对设计的修改意见，发送后让设计 Agent 重做"))

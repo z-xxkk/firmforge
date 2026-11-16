@@ -25,6 +25,13 @@ C3 = HardwareProfile.load(Path(helpers.ROOT) / "hardware" / "esp32c3_supermini" 
 WIRING = {"i2c0.sda": 6, "i2c0.scl": 7, "imu.int": 3}
 
 
+def conns(wiring: dict) -> list[dict]:
+    """完整连线格式（第 134 条）：每根线写另一端、为什么、自检应测到什么。"""
+    to = {"i2c0.sda": "imu.SDA", "i2c0.scl": "imu.SCL", "imu.int": "imu.INT"}
+    return [{"signal": s, "gpio": g, "to": to.get(s, "3V3"), "why": "测试",
+             "expect": {"kind": "i2c_ack", "device": "imu"}} for s, g in wiring.items()]
+
+
 class WiringCheckTest(unittest.TestCase):
     def test_problems(self):
         self.assertEqual(C3.wiring_problems(WIRING, {"imu"}), [])
@@ -51,17 +58,47 @@ class WiringCheckTest(unittest.TestCase):
         self.assertEqual((decl, call), ("", ""))
 
     def test_design_with_and_without_wiring(self):
-        d, probs = parse_design({**DESIGN, "wiring": WIRING}, profile())
+        d, probs = parse_design({**DESIGN, "wiring": conns(WIRING)}, profile())
         self.assertEqual(probs, [])
         self.assertEqual(d.wiring, WIRING)
-        self.assertEqual(d.to_dict()["wiring"], WIRING)
+        self.assertEqual(d.to_dict()["wiring"], conns(WIRING))
         self.assertEqual(d.devices_used(profile()), {"imu"})
-        d, probs = parse_design({**DESIGN, "wiring": {"imu.int": 3}}, profile())
+        d, probs = parse_design({**DESIGN, "wiring": conns({"imu.int": 3})}, profile())
         self.assertIsNone(d)
         self.assertTrue(any("i2c0.sda" in p for p in probs))
         d, probs = parse_design(DESIGN, profile())                   # 不写接线：沿用默认接线
         self.assertEqual((probs, d.wiring), ([], {}))
         self.assertNotIn("wiring", d.to_dict())
+
+    def test_complete_connections_required(self):
+        """第 134 条：每根线要写另一端、为什么、自检应测到什么；旧的 {信号: GPIO} 退回；
+        不能占用板上现有的线——对话测试里设计把 ADC 放在 GPIO1，而 GPIO1 和 GPIO0 之间有评测用的跳线。"""
+        from firmforge.embedded.wiring import board_wiring_lines, parse_connections
+        adc = {"signal": "adc.vin", "gpio": 1, "to": "3V3", "why": "读已知电压",
+               "expect": {"kind": "adc_mv", "min": 3000, "max": 3400}}
+        _, probs = parse_connections([adc], C3, set())
+        self.assertTrue(any("GPIO1 板上现在接着" in p and "跳线" in p for p in probs), probs)
+        ok, probs = parse_connections([{**adc, "unplug": True}], C3, set())               # 写明先拔掉原来的线：可以
+        self.assertEqual(probs, [])
+        self.assertIn("先拔掉原来的线：跳线连着 GPIO0", ok[0].line())
+        self.assertIn("unplug", ok[0].to_dict())
+        ok, probs = parse_connections([{**adc, "gpio": 11}], C3, set())
+        self.assertEqual(probs, [])
+        self.assertEqual(ok[0].line(), "adc.vin：GPIO11 → 3V3（读已知电压）")
+        self.assertTrue(parse_connections({"adc.vin": 11}, C3, set())[1])                  # 旧格式
+        for bad, want in (({"to": ""}, "要写 to"), ({"why": ""}, "要写 why"), ({"expect": {}}, "要写 expect"),
+                          ({"to": "某处"}, "不知道是什么"), ({"expect": {"kind": "adc_mv", "min": 5, "max": 1}}, "adc_mv"),
+                          ({"expect": {"kind": "i2c_ack", "device": "nope"}}, "i2c_ack")):
+            with self.subTest(want):
+                _, probs = parse_connections([{**adc, "gpio": 11, **bad}], C3, set())
+                self.assertTrue(any(want in p for p in probs), probs)
+        same = [{"signal": "uart1.tx", "gpio": 0, "to": "uart1.rx", "why": "回环", "expect": {"kind": "loopback", "with": "uart1.rx"}},
+                {"signal": "uart1.rx", "gpio": 1, "to": "uart1.tx", "why": "回环", "expect": {"kind": "loopback", "with": "uart1.tx"}}]
+        self.assertEqual(parse_connections(same, C3, set())[1], [])                           # 沿用同一根跳线可以
+        self.assertTrue(any("GPIO1：跳线连着 GPIO0" in x for x in board_wiring_lines(C3)))
+        msg = designer_messages("x", C3, None)[1]["content"]
+        self.assertIn("板上现在已经接着的线", msg)                                            # 设计看得到跳线
+        self.assertIn("GPIO0：跳线连着 GPIO1", msg)
 
     def test_designer_sees_previous_wiring(self):
         msgs = designer_messages("x", profile(), None, prior_wiring=WIRING)
@@ -73,7 +110,7 @@ class WiringCheckTest(unittest.TestCase):
 class WiredTeam(FakeTeam):
     def __call__(self, messages):
         if "软件架构师" in messages[0]["content"]:
-            return "```json\n" + json.dumps({**DESIGN, "wiring": WIRING}) + "\n```"
+            return "```json\n" + json.dumps({**DESIGN, "wiring": conns(WIRING)}) + "\n```"
         return super().__call__(messages)
 
 
@@ -111,7 +148,8 @@ class FlowWiringTest(unittest.TestCase):
     def test_device_ack_confirms_wiring(self):
         with tempfile.TemporaryDirectory() as d:
             f, _ = flow(d, WiredTeam(), C3)                 # 真实档案：外接器件带用例前复位
-            design, _ = parse_design({**DESIGN, "wiring": WIRING}, C3)
+            design, probs = parse_design({**DESIGN, "wiring": conns({"i2c0.sda": 4, "i2c0.scl": 5, "imu.int": 3})}, C3)
+            self.assertEqual(probs, [])
             f._use_wiring(design)
             f._check_wiring(parse_board_output(f"{BEGIN}\nmain/t.c:1:a:PASS\n"))             # 没有复位失败的记录：应答了
             f._check_wiring(parse_board_output(f"{BEGIN}\nFF_LOG: 用例前复位 imu 失败：器件没有应答\n"))  # 只确认一次
@@ -128,7 +166,7 @@ class FlowWiringTest(unittest.TestCase):
             self.assertEqual(len(ev), 1)
             x = ev[0]["data"]["devices"][0]
             self.assertEqual((x["ok"], x["why"]), (False, "器件没有应答"))
-            self.assertIn("GPIO6", x["pins"])
+            self.assertIn("GPIO4", x["pins"])
 
 
 try:
