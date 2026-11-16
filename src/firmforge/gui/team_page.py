@@ -18,7 +18,8 @@ from .. import config
 from ..agents.registry import ROLES, AgentDef, Registry, save_agent
 from .designer_page import bump
 from .graph import ROLE_NAMES                          # 全部角色的中文名（原来这里少了设计分层、查资料、核对规则）
-from .widgets import GripSplitter, Panel, Segmented, label
+from .panes import PaneSplitter, PaneToggle
+from .widgets import Panel, Segmented, label
 
 THINK = [("", "跟随档位"), ("off", "关"), ("low", "低"), ("high", "高"), ("max", "最高")]
 TOOLSET_NAMES = {"knowledge": "查知识库", "build": "试编译", "interface": "看接口", "sources": "查手册原文"}
@@ -53,7 +54,8 @@ class TeamPage(QWidget):
         self.project = project
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.split = GripSplitter(Qt.Horizontal)
+        # Agent 列表是主区，选中的 Agent 的设置是右侧面板（DECISIONS 第 133 条）
+        self.split = PaneSplitter("team")
         lay.addWidget(self.split)
         left = Panel(margins=(18, 14, 18, 14))
         head = QHBoxLayout()
@@ -62,6 +64,8 @@ class TeamPage(QWidget):
         add = QPushButton("注册新 Agent")
         add.clicked.connect(self.add_agent)
         head.addWidget(add)
+        self.inspector_btn = PaneToggle(self.split, "inspector", "右侧的 Agent 设置", "Ctrl+Alt+B")
+        head.addWidget(self.inspector_btn)
         left.lay.addLayout(head)
         left.lay.addWidget(label("改的就是 agents/*.toml。保存时版本号加一，旧版本留在 agents/history/。", "Muted"))
         self.table = QTableWidget(0, 7)
@@ -121,11 +125,14 @@ class TeamPage(QWidget):
         right.lay.addWidget(self.perf, 1)
         self.perf_note = label("", "Faint", wrap=True)
         right.lay.addWidget(self.perf_note)
-        self.split.addWidget(left)
-        self.split.addWidget(right)
-        self.split.set_defaults([760, 460])
+        self.split.add_pane(left, "main", minimum=360, default=760)
+        self.split.add_pane(right, "inspector", minimum=360, default=460)
+        self.split.finish()
         self.tool_checks: dict[str, QCheckBox] = {}
         self.reload()
+
+    def toggle_pane(self, role: str) -> None:
+        self.split.toggle(role)
 
     def reload(self):
         self.reg = Registry().load_dir(config.agents_dir())

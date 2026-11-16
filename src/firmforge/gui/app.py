@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QPushButton,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.project = project
         self.setWindowTitle("FirmForge")
-        self.setMinimumSize(1200, 760)
+        self.setMinimumSize(960, 640)                    # 面板按角色排，窄了自动收起侧栏（DECISIONS 第 133 条）
         self.setObjectName("Root")
         root = QWidget()
         root.setObjectName("Root")
@@ -164,6 +164,11 @@ class MainWindow(QMainWindow):
         self.chat.run_done.connect(self.hardware.reload)
         self.hardware.rules_changed.connect(lambda: self.chat.refresh_status(self.chat._run_text()))
         self.designer.try_run.connect(self._try_run)
+        # 面板开关的快捷键（DECISIONS 第 133 条，同 VS Code）：交给当前页面，页面没有这个面板就什么都不做
+        for keys, role in (("Ctrl+B", "sidebar"), ("Ctrl+Alt+B", "inspector"), ("Ctrl+J", "panel")):
+            sc = QShortcut(QKeySequence(keys), self)
+            sc.setContext(Qt.WindowShortcut)
+            sc.activated.connect(lambda r=role: getattr(self.stack.currentWidget(), "toggle_pane", lambda _r: None)(r))
         self.settings.theme_changed.connect(self.apply_theme)
         st = QSettings()
         if st.value("window/geometry"):

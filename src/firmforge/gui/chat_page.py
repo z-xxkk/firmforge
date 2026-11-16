@@ -26,6 +26,7 @@ from .graph import FlowCanvas, ModuleGraph
 from . import board_view as bv
 from .layout import EMB_LAYER_NAMES, LAYER_NAMES, LAYERS, UNIT_NAMES, RunView, layer_names
 from .runner import DockerBackend, EmbeddedBackend, LocalBackend, ReplayPlayer, _Worker
+from .panes import ElideLabel, OverflowTabs, PaneSplitter, PaneToggle
 from .widgets import Avatar, Dot, FlowLayout, GripSplitter, Panel, Segmented, T, Toggle, hbox, label
 
 ROLE_NAMES = {"analyst": "需求分析", "planner": "规划", "coder": "编码", "tester": "测试", "diagnoser": "诊断",
@@ -348,7 +349,9 @@ class ChatPage(QWidget):
     def _build(self):
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        self.split = GripSplitter(Qt.Horizontal)
+        # 三栏按角色排（DECISIONS 第 133 条）：会话列表是侧栏，对话是主区（窗口变宽时它变宽），工程图和详情是右侧面板；
+        # 面板区窄于 1000 时自动收起会话列表
+        self.split = PaneSplitter("chat", auto_collapse_below=1000)
         root.addWidget(self.split)
 
         # 左：会话列表
@@ -368,12 +371,11 @@ class ChatPage(QWidget):
         self.show_cli_runs.setChecked(QSettings().value("chat/show_cli_runs", False, type=bool))
         self.show_cli_runs.toggled.connect(lambda on: (QSettings().setValue("chat/show_cli_runs", on), self.refresh_sessions()))
         left.lay.addWidget(self.show_cli_runs)
-        left.setMinimumWidth(150)
 
         # 中：对话
         mid = Panel(margins=(18, 14, 18, 14))
         head = QHBoxLayout()
-        self.title = label("新对话", "H2")
+        self.title = ElideLabel("新对话", "H2")
         self.head_pills = label("", "Faint")
         self.stop_btn = QPushButton("停止")
         self.stop_btn.setObjectName("Ghost")
@@ -386,9 +388,10 @@ class ChatPage(QWidget):
         self.replay_btn.clicked.connect(lambda: self.run_dir is not None and
                                         self.start_replay(self.run_dir, append=self.conv is not None))
         self.replay_btn.setVisible(False)
-        head.addWidget(self.title)
+        self.sidebar_btn = PaneToggle(self.split, "sidebar", "会话列表", "Ctrl+B")
+        head.addWidget(self.sidebar_btn)
+        head.addWidget(self.title, 1)
         head.addWidget(self.head_pills)
-        head.addStretch(1)
         head.addWidget(self.replay_btn)
         self.review_box = Toggle(QSettings().value("chat/human_review", True, bool))
         self.review_box.setToolTip("开启后：规划完成、工作流里的等人确认步骤、升级到转人工时，都会在对话里问你")
@@ -397,6 +400,8 @@ class ChatPage(QWidget):
         head.addWidget(self.review_box)
         head.addSpacing(8)
         head.addWidget(self.stop_btn)
+        self.inspector_btn = PaneToggle(self.split, "inspector", "右侧的工程图和详情", "Ctrl+Alt+B")
+        head.addWidget(self.inspector_btn)
         mid.lay.addLayout(head)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -462,9 +467,6 @@ class ChatPage(QWidget):
         self.flow_combo.setCurrentIndex(max(0, self.flow_combo.findData(flow_pref)))
         self.flow_combo.currentIndexChanged.connect(self._flow_changed)
         mid.lay.addWidget(comp)
-        # 固定最小宽度会盖过布局算出的最小值，窄了下拉框就压到发送按钮上；取两者较大的。
-        # 2026-11-16：原来是 380，窗口不够宽时中间和右边之间几乎拖不动；下拉框会自动换行，280 够用
-        mid.setMinimumWidth(280)
 
         # 右：模块图 + 详情
         right = GripSplitter(Qt.Vertical)
@@ -472,8 +474,7 @@ class ChatPage(QWidget):
         gtop = QHBoxLayout()
         gtop.setContentsMargins(16, 12, 14, 0)
         self.graph_title = label("模块", "H3")
-        self.graph_sub = label("", "Faint")
-        self.graph_sub.setMinimumWidth(10)               # 摘要很长时不撑宽右边（窄了就截断）
+        self.graph_sub = ElideLabel("", "Faint")         # 摘要很长时不撑宽右边，窄了末尾显示省略号
         self.view_seg = Segmented([("modules", "模块图"), ("flow", "流程图")])
         self.view_seg.changed.connect(self._switch_view)
         # 上板流程：工程图、接线图、流程图共用这一块（DECISIONS 第 113 条）
@@ -485,8 +486,7 @@ class ChatPage(QWidget):
         self.expand_btn.clicked.connect(self.toggle_expand)
         self.expanded = False
         gtop.addWidget(self.graph_title)
-        gtop.addWidget(self.graph_sub)
-        gtop.addStretch(1)
+        gtop.addWidget(self.graph_sub, 1)
         gtop.addWidget(self.expand_btn)
         gtop.addWidget(self.view_seg)
         gtop.addWidget(self.view_seg_emb)
@@ -510,7 +510,7 @@ class ChatPage(QWidget):
         self._map_timer.timeout.connect(self._refresh_map)
         gpanel.lay.addWidget(self.graph_stack, 1)
         ipanel = Panel(margins=(16, 8, 16, 12))
-        self.tabs = QTabWidget()
+        self.tabs = OverflowTabs()                     # 放不下的标签收进"更多"（第 133 条）
         self.layer_box = QWidget()
         lb = QVBoxLayout(self.layer_box)
         lb.setContentsMargins(0, 8, 0, 0)
@@ -555,9 +555,8 @@ class ChatPage(QWidget):
         self.timeline.attempt_clicked.connect(lambda n: self.select_module(self.graph.selected, attempt=n))
         self.rules_view = QTextEdit()
         self.rules_view.setReadOnly(True)
-        # 标签名尽量短；面板窄时标签缩短显示（省略号），不用左右箭头（箭头会盖住标签的字）
+        # 标签名尽量短；面板窄时放不下的标签收进"更多"（不用左右箭头：箭头会盖住标签的字）
         self.tabs.tabBar().setUsesScrollButtons(False)
-        self.tabs.tabBar().setElideMode(Qt.ElideRight)
         for w, name, tip in ((self.timeline, "过程", "每次尝试的检查结果、诊断和交给谁改"), (self.layer_box, "检查", "检查结果"), (self.board_view, "上板", "上板测试的用例和串口输出"),
                              (code_box, "代码", "这一次交上来的代码；可以导出"), (self.rules_view, "规则", "这次用到的规则"),
                              (why_box, "调度", "为什么交给这个 Agent"), (self.brief_view, "发给 AI", "发给 AI 的内容")):
@@ -574,14 +573,14 @@ class ChatPage(QWidget):
         right.set_defaults([560, 280])
         self.right_split = right
 
-        self.split.addWidget(left)
-        self.split.addWidget(mid)
-        self.split.addWidget(right)
-        self.split.set_defaults([220, 540, 640])
+        # 对话栏最小 340：下拉框会自动换行，不压到发送按钮上；右侧面板最小 340：顶上的切换按钮放得下
+        self.split.add_pane(left, "sidebar", minimum=180, default=240)
+        self.split.add_pane(mid, "main", minimum=340, default=560)
+        self.split.add_pane(right, "inspector", minimum=340, default=600)
+        self.split.finish()
         st = QSettings()
-        for sp, key in ((self.split, "chat/split"), (self.right_split, "chat/right")):
-            if st.value(key):
-                sp.restoreState(st.value(key))
+        if st.value("chat/right"):
+            self.right_split.restoreState(st.value("chat/right"))
         self._flow_changed()
 
     @property
@@ -635,9 +634,14 @@ class ChatPage(QWidget):
         head = bv.board_status_text(bv.board_summary(self.project, self.hw)) if self.embedded else ""
         win.set_status(bv.GAP.join(x for x in (head, run_text.replace("　", bv.GAP)) if x))
 
+    def toggle_pane(self, role: str) -> None:
+        """Ctrl+B / Ctrl+Alt+B（主窗口转过来）。工程图展开着时先退出展开。"""
+        if self.expanded:
+            self.toggle_expand()
+        self.split.toggle(role)
+
     def save_layout(self):
         st = QSettings()
-        st.setValue("chat/split", self.split.saveState())
         st.setValue("chat/right", self.right_split.saveState())
         st.setValue("chat/human_review", self.review_box.isChecked())
 
@@ -1071,7 +1075,9 @@ class ChatPage(QWidget):
         if not self.expanded:
             self._sizes = (self.split.sizes(), self.right_split.sizes())
             total = sum(self._sizes[0])
-            self.split.setSizes([0, 260, max(400, total - 260)])
+            narrow = self.split.specs[1].minimum                 # 对话收到它的最小宽度，其余都给工程图
+            self.split.setSizes([0, narrow, max(400, total - narrow)])
+            self.split.toggled.emit("sidebar", False)
             rt = sum(self._sizes[1])
             self.right_split.setSizes([int(rt * 0.72), rt - int(rt * 0.72)])
             self.expanded = True
@@ -1080,6 +1086,7 @@ class ChatPage(QWidget):
             if sizes:
                 self.split.setSizes(sizes[0])
                 self.right_split.setSizes(sizes[1])
+                self.split.toggled.emit("sidebar", self.split.is_open("sidebar"))
             self.expanded = False
         self.expand_btn.setText("收起" if self.expanded else "展开")
         self._refresh_map()

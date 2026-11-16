@@ -56,7 +56,9 @@ class _GripHandle(QSplitterHandle):
 
     def mouseDoubleClickEvent(self, ev):
         sp = self.splitter()
-        if getattr(sp, "default_sizes", None):
+        if hasattr(sp, "reset"):                       # 面板布局（panes.PaneSplitter）：回到默认宽度并清掉开关选择
+            sp.reset()
+        elif getattr(sp, "default_sizes", None):
             sp.setSizes(sp.default_sizes)
 
 
@@ -219,6 +221,11 @@ class FlowLayout(QLayout):
 
     def addItem(self, item):
         self._items.append(item)
+
+    def insertWidget(self, index: int, w) -> None:                  # noqa: N802  和 QBoxLayout 同名
+        self.addWidget(w)                                           # 先按 Qt 的规矩认领（设父对象），再挪到指定位置
+        self._items.insert(index, self._items.pop())
+        self.invalidate()
 
     def count(self):
         return len(self._items)

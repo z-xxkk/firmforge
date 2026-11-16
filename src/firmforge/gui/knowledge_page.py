@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (QFrame, QLineEdit, QListWidget, QListWidgetItem, 
 
 from ..grounding.catalog import Catalog, Entry, Node, build_catalog, chip_title, peripheral_title, reject_rule
 from ..grounding.rules import KIND_NAMES, STATUS_NAMES
-from .widgets import Dot, GripSplitter, Panel, T, hbox, label
+from .panes import PaneSplitter, PaneToggle
+from .widgets import Dot, Panel, T, hbox, label
 
 TIER_NAMES = {"official_manual": "官方手册", "official_errata": "官方勘误", "official_code": "官方代码",
               "official_example": "官方例程", "official_mirror": "官方原版（非官方网站）", "community": "社区资料",
@@ -109,7 +110,8 @@ class KnowledgePage(QWidget):
     def _build(self):
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        self.split = GripSplitter(Qt.Horizontal)
+        # 目录是侧栏，条目列表是主区，详情是右侧面板（DECISIONS 第 133 条）；面板区窄于 1000 时自动收起目录
+        self.split = PaneSplitter("knowledge", auto_collapse_below=1000)
         root.addWidget(self.split)
 
         left = Panel(margins=(14, 16, 10, 12))
@@ -129,14 +131,15 @@ class KnowledgePage(QWidget):
         self.errors_label = label("", "Muted", wrap=True)
         self.errors_label.setVisible(False)
         left.lay.addWidget(self.errors_label)
-        left.setMinimumWidth(220)
 
         mid = Panel(margins=(16, 14, 16, 12))
         self.search = QLineEdit()
         self.search.setPlaceholderText("搜规则和资料：型号、寄存器、函数名、原文都行，例如 WHO_AM_I")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._on_search)
-        mid.lay.addWidget(self.search)
+        self.sidebar_btn = PaneToggle(self.split, "sidebar", "目录", "Ctrl+B")
+        self.inspector_btn = PaneToggle(self.split, "inspector", "右侧的详情", "Ctrl+Alt+B")
+        mid.lay.addLayout(hbox(self.sidebar_btn, self.search, self.inspector_btn))
         self.crumb = label("", "H3", wrap=True)
         self.sub = label("", "Faint", wrap=True)
         mid.lay.addWidget(self.crumb)
@@ -155,7 +158,6 @@ class KnowledgePage(QWidget):
         self.list.currentItemChanged.connect(lambda cur, _old: cur is not None and cur.data(Qt.UserRole)
                                              and self.show_entry(cur.data(Qt.UserRole)))
         mid.lay.addWidget(self.list, 1)
-        mid.setMinimumWidth(320)
 
         right = Panel(margins=(20, 18, 20, 16))
         scroll = QScrollArea()
@@ -181,17 +183,17 @@ class KnowledgePage(QWidget):
         self.reject_note.setVisible(False)
         right.lay.addWidget(self.reject_note)
 
-        self.split.addWidget(left)
-        self.split.addWidget(mid)
-        self.split.addWidget(right)
-        self.split.set_defaults([260, 460, 560])
-        st = QSettings()
-        if st.value("knowledge/split"):
-            self.split.restoreState(st.value("knowledge/split"))
+        self.split.add_pane(left, "sidebar", minimum=200, default=260)
+        self.split.add_pane(mid, "main", minimum=320, default=460)
+        self.split.add_pane(right, "inspector", minimum=320, default=560)
+        self.split.finish()
         self._detail_empty()
 
+    def toggle_pane(self, role: str) -> None:
+        self.split.toggle(role)
+
     def save_layout(self):
-        QSettings().setValue("knowledge/split", self.split.saveState())
+        pass                                             # 面板宽度和开关由 PaneSplitter 随时记住
 
     def restyle(self):
         c = T()

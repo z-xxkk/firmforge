@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QFormLayo
 from .. import config
 from ..config_edit import has_secret, remove_table, set_secret, update_file
 from .runner import DockerBackend, _Worker
-from .widgets import GripSplitter, Panel, Segmented, Toggle, hbox, label
+from .panes import PaneSplitter, PaneToggle
+from .widgets import Panel, Segmented, Toggle, hbox, label
 
 NAV = [("通用", "语言、主题、默认后端"), ("模型", "密钥、型号、思考强度、价格"), ("工具与 MCP", "Agent 能用的工具、外部服务"),
        ("记忆与知识库", "经验库、知识库文档"), ("人工与权限", "什么时候问你"), ("预算", "token 和费用上限"),
@@ -47,7 +48,8 @@ class SettingsPage(QWidget):
         self.env = project / ".env"
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        split = GripSplitter(Qt.Horizontal)
+        # 左边的分类是侧栏，右边是设置内容（DECISIONS 第 133 条）
+        split = self.split = PaneSplitter("settings")
         lay.addWidget(split)
         nav = Panel(margins=(12, 18, 12, 12))
         nav.lay.addWidget(label("设置", "H1"))
@@ -70,13 +72,17 @@ class SettingsPage(QWidget):
             sc.setWidget(page)
             self.stack.addWidget(sc)
         main.lay.addWidget(self.stack)
-        split.addWidget(nav)
-        split.addWidget(main)
-        split.set_defaults([240, 1000])
+        split.add_pane(nav, "sidebar", minimum=180, default=240)
+        split.add_pane(main, "main", minimum=480, default=1000)
+        split.finish()
         self.nav.setCurrentRow(0)
+
+    def toggle_pane(self, role: str) -> None:
+        self.split.toggle(role)
 
     def _head(self, pl, title: str, lead: str):
         top = QHBoxLayout()
+        top.addWidget(PaneToggle(self.split, "sidebar", "设置分类", "Ctrl+B"))     # 每个分类的标题左边都有（第 133 条）
         top.addWidget(label(title, "H1"))
         top.addStretch(1)
         b = QPushButton("打开 firmforge.toml")

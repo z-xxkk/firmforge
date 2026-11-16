@@ -29,6 +29,7 @@ from ..orchestrator.workflow import (CONDITIONS, Step, Workflow, dump_workflow, 
 from .check_panel import CheckPanel
 from .graph import COND_NAMES, KIND_NAMES, ROLE_NAMES, STEP_H, STEP_MIME, STEP_W, FlowCanvas
 from .runner import _Worker
+from .panes import DockPanes, PaneToggle
 from .widgets import FlowLayout, Panel, T, label
 
 PALETTE = [("干活", [("agent", "Agent 干活"), ("verify", "检查"), ("human", "等人确认")]),
@@ -178,6 +179,7 @@ class DesignerPage(QMainWindow):
             b.clicked.connect(fn)
             top.addWidget(b)
         center.lay.addWidget(bar)
+        self._top_bar = top
         self.canvas = FlowCanvas(editable=True)
         self.canvas.step_clicked.connect(self.select)
         self.canvas.step_moved.connect(self._moved)
@@ -243,6 +245,28 @@ class DesignerPage(QMainWindow):
             if dk.isFloating() or self.dockWidgetArea(dk) != self._home[dk.objectName()]:
                 dk.setFloating(False)
                 self.addDockWidget(self._home[dk.objectName()], dk)
+        # 面板开关（DECISIONS 第 133 条）：左边步骤箱 Ctrl+B，右边步骤树和属性 Ctrl+Alt+B，下面代码和检查 Ctrl+J；
+        # 窗口窄于 1000 时自动收起步骤箱（还能从画布上的元素拖动、双击加步骤）
+        self.panes = DockPanes(self, {"sidebar": [docks["palette"]], "inspector": [docks["tree"], docks["props"]],
+                                      "panel": [docks["code"], docks["check"]]}, "designer", auto_collapse_below=1000)
+        toggles = [PaneToggle(self.panes, "sidebar", "步骤箱", "Ctrl+B"),
+                   PaneToggle(self.panes, "inspector", "右侧的步骤树和属性", "Ctrl+Alt+B")]
+        self._top_bar.insertWidget(0, toggles[0])          # 两个开关并排放在最前面，换行时也不会被挤到第二行末尾
+        self._top_bar.insertWidget(1, toggles[1])
+        self.pane_toggles = toggles
+
+    def toggle_pane(self, role: str) -> None:
+        self.panes.toggle(role)
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        if self.isVisible() and hasattr(self, "panes"):
+            self.panes.adapt(self.width())
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        if hasattr(self, "panes"):
+            self.panes.adapt(self.width())
 
     def save_layout(self):
         QSettings().setValue("designer/state", self.saveState())
