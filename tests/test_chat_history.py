@@ -90,6 +90,26 @@ class ListTest(unittest.TestCase):
             self.assertTrue(any(t.startswith("运行 20261116-092943-eval") for t, _ in got))
             page.deleteLater()
 
+    def test_middle_and_right_can_be_dragged(self):
+        """中间对话和右边工程区之间的分隔条要有足够的拖动范围（负责人 2026-11-16 发现几乎拖不动）：
+        中间最小宽度原来写死 380；现在 1000 宽的窗口里能在 300–600 之间拖（右边受 7 个标签和顶上按钮限制）。"""
+        from firmforge.gui.chat_page import ChatPage
+        with tempfile.TemporaryDirectory() as d:
+            page = ChatPage(Path(d))
+            page.resize(1000, 800)
+            page.show()
+            QApplication.processEvents()
+            sp = page.split
+            sp.setSizes([0, 500, 500])
+            sizes = []
+            for t in (300, 700):
+                sp.moveSplitter(t, 2)
+                QApplication.processEvents()
+                sizes.append(sp.sizes()[1])
+            self.assertLessEqual(sizes[0], 310)
+            self.assertGreaterEqual(sizes[1], 580)
+            page.deleteLater()
+
     def test_open_run_shows_your_message(self):
         """打开历史运行：标题用需求开头，最上面是你当时发的需求（负责人 2026-11-16 发现看不到自己发的消息）。"""
         from PySide6.QtWidgets import QLabel

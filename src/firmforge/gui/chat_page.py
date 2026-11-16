@@ -462,8 +462,9 @@ class ChatPage(QWidget):
         self.flow_combo.setCurrentIndex(max(0, self.flow_combo.findData(flow_pref)))
         self.flow_combo.currentIndexChanged.connect(self._flow_changed)
         mid.lay.addWidget(comp)
-        # 固定最小宽度会盖过布局算出的最小值，窄了下拉框就压到发送按钮上；取两者较大的
-        mid.setMinimumWidth(380)
+        # 固定最小宽度会盖过布局算出的最小值，窄了下拉框就压到发送按钮上；取两者较大的。
+        # 2026-11-16：原来是 380，窗口不够宽时中间和右边之间几乎拖不动；下拉框会自动换行，280 够用
+        mid.setMinimumWidth(280)
 
         # 右：模块图 + 详情
         right = GripSplitter(Qt.Vertical)
@@ -472,6 +473,7 @@ class ChatPage(QWidget):
         gtop.setContentsMargins(16, 12, 14, 0)
         self.graph_title = label("模块", "H3")
         self.graph_sub = label("", "Faint")
+        self.graph_sub.setMinimumWidth(10)               # 摘要很长时不撑宽右边（窄了就截断）
         self.view_seg = Segmented([("modules", "模块图"), ("flow", "流程图")])
         self.view_seg.changed.connect(self._switch_view)
         # 上板流程：工程图、接线图、流程图共用这一块（DECISIONS 第 113 条）
