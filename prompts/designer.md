@@ -52,7 +52,7 @@
 ```json
 "wiring": [
   {"signal": "adc.vin", "gpio": 3, "to": "3V3", "why": "读一个已知电压，检查 ADC 换算",
-   "expect": {"kind": "adc_mv", "min": 3000, "max": 3400}},
+   "expect": {"kind": "adc_mv", "min": 2800, "max": 3100}},
   {"signal": "i2c0.sda", "gpio": 4, "to": "imu.SDA", "why": "MPU6050 数据线", "expect": {"kind": "i2c_ack", "device": "imu"}}
 ]
 ```
@@ -63,6 +63,8 @@
 - `expect`：接好以后平台自检应该测到什么，`kind` 只能是：`i2c_ack`（写 `device`）、`loopback`（写 `with`：另一个信号名）、
   `adc_mv`（写 `min`、`max`，mV）、`level`（写 `value`：0 或 1）、`look`（平台测不了，例如只接一个 LED）；
   **读数类的输入一定要接到确定的电压上**（3V3、GND 或分压），不要留着悬空——悬空的脚读数乱跳，没法测；
+  ESP32-C3 的 ADC 在 12 dB 衰减下最高只读到约 3000 mV（本板实测：GPIO1 接 3V3 读到 3005 mV，已经到顶），
+  接 3V3 时 `adc_mv` 写 2800–3100，想测换算准不准就用分压接到 1–2.5 V 之间；
 - 需求里写明了接线就照写；没写就优先沿用硬件档案里的引脚；
 - 不能用"不能用的引脚"，一个 GPIO 只能接一个信号；**板上现在已经接着的线不能直接挪去接别的东西**（任务单附件里列出来了）：
   优先选空着的 GPIO；实在没有合适的（例如 ADC 只能用某几个脚），在那根线里加 `"unplug": true`，接线清单会让负责人先拔掉原来的线；

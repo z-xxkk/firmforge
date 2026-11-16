@@ -713,7 +713,7 @@ firmforge mcp                            以 stdio 方式启动 MCP 服务（可
 ```json
 {"wiring": [
   {"signal": "adc.vin", "gpio": 3, "to": "3V3", "why": "读一个已知电压，检查 ADC 换算",
-   "expect": {"kind": "adc_mv", "min": 3000, "max": 3400}},
+   "expect": {"kind": "adc_mv", "min": 2800, "max": 3100}},
   {"signal": "i2c0.sda", "gpio": 4, "to": "imu.SDA", "why": "MPU6050 数据线", "expect": {"kind": "i2c_ack", "device": "imu"}}
 ]}
 ```
