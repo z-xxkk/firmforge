@@ -25,7 +25,15 @@ from .design import Design, DesignModule, design_json
 from .prompting import system_prompt
 
 BLAMES = ("code", "test", "rule", "hardware")
-BLAME_NAMES = {"code": "代码", "test": "测试", "rule": "规则", "hardware": "硬件或接线"}
+BLAME_NAMES = {"code": "代码", "test": "测试", "rule": "规则", "hardware": "硬件或接线", "design": "设计"}
+# 产品流程（工作流路径）里诊断还可以判"design"、可以列出要删的用例（第 134 条第 5 阶段）；评测的固定路径不变
+DESIGN_BLAME_HELP = """## 这次还可以这样判（产品流程）
+
+- `design`：设计给这个模块定的验收条件本身有问题——要求了这块板子自动测不出来的事（要人临时改线、按按键），
+  或者对还没实测确认的线写了读数要求。判为 design 时，instruction 写清哪条验收条件要怎么改，平台会交回设计 Agent
+  改这个模块的验收条件，然后按新条件重新写测试。代码和测试都照着错误的验收条件写，再怎么改也过不了时，选它。
+- 判 `test` 且要删掉某些用例时，在 JSON 里加 `"remove_cases": ["用例名", ...]`（用例名就是 TEST_CASE 的第一个参数）；
+  平台会核对测试 Agent 真的删了——上次有诊断说删、测试 Agent 只加了个标签，下一次照样失败。"""
 _FACTS = re.compile(r"```facts\s*\n(.*?)\n```", re.S)
 
 
@@ -198,9 +206,14 @@ def tester_repair_message(attempt: int, max_attempts: int, problems: str, src_fi
 # ---------------------------------------------------------------- 诊断
 
 def diagnoser_messages(profile: HardwareProfile, rules: RuleSet | None, module: DesignModule, code: dict[str, str],
-                       tests: dict[str, str], problems: str, where: str = "") -> list[dict]:
+                       tests: dict[str, str], problems: str, where: str = "", allow_design: bool = False) -> list[dict]:
     system = system_prompt("diagnoser_idf.md", profile, rules, _module_scopes(module))
-    b = Brief(intent=f"判断模块 {module.id} 没通过的原因出在代码、测试、规则还是硬件", location=where or f"诊断 › {module.id}")
+    if allow_design:
+        system = system.rstrip() + "\n\n" + DESIGN_BLAME_HELP + "\n"
+    b = Brief(intent=f"判断模块 {module.id} 没通过的原因出在代码、测试、规则还是硬件"
+                     + ("，或者设计定的验收条件本身有问题" if allow_design else ""), location=where or f"诊断 › {module.id}")
+    if allow_design and module.acceptance:
+        b.attach("设计给这个模块定的验收条件", "\n".join(f"- {a}" for a in module.acceptance))
     for p, c in sorted(code.items()):
         b.ref(f"file main/{p}", c, "c")
     for p, c in sorted(tests.items()):
@@ -216,12 +229,16 @@ def diagnosis_format_reminder(problem: str) -> str:
             f"blame 只能是 {'、'.join(BLAMES)}；instruction 必须写；字符串里不要出现未转义的双引号和换行。")
 
 
-def parse_diagnosis(data: dict, rules: RuleSet | None = None) -> dict:
+def parse_diagnosis(data: dict, rules: RuleSet | None = None, allow_design: bool = False) -> dict:
     blame = data.get("blame")
-    if blame not in BLAMES:
-        raise ValueError(f"blame 只能是 {', '.join(BLAMES)}")
+    allowed = BLAMES + (("design",) if allow_design else ())
+    if blame not in allowed:
+        raise ValueError(f"blame 只能是 {', '.join(allowed)}")
     out = {"blame": blame, "instruction": str(data.get("instruction", "")).strip(),
            "evidence": str(data.get("evidence", "")).strip(), "rule": str(data.get("rule", "")).strip()}
+    rc = data.get("remove_cases")
+    if allow_design and isinstance(rc, list):
+        out["remove_cases"] = [str(x).strip() for x in rc if str(x).strip()][:20]
     if not out["instruction"]:
         raise ValueError("缺少 instruction（修改指令）")
     if blame == "rule":

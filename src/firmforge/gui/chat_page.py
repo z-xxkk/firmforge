@@ -39,7 +39,7 @@ CONFIGS = ["full", "b2", "b3", "b4", "full-no-tools", "full-no-review", "full-no
 FLOWS = [("embedded", "上板"), ("classic", "纯逻辑")]
 RULE_MODES = [("verified", "规则库"), ("unverified", "未核对规则"), ("none", "不给规则"), ("single", "单 Agent")]
 DEFAULT_HW = "hardware/esp32c3_supermini"
-BLAME = {"code": "代码", "test": "测试", "rule": "规则", "hardware": "硬件或接线"}
+BLAME = {"code": "代码", "test": "测试", "rule": "规则", "hardware": "硬件或接线", "design": "设计（验收条件）"}
 
 
 def _run_verdict(run_dir: Path) -> str:
@@ -1325,6 +1325,15 @@ class ChatPage(QWidget):
             pins = d.get("pins") or {}
             src = "设计 Agent 按需求定的" if d.get("source") == "design" else "沿用硬件档案的默认接线"
             self.add_line(f"接线（{src}）：" + "，".join(f"{s}=GPIO{g}" for s, g in sorted(pins.items())))
+        elif t == "design_revised":                    # 诊断退回设计、设计改了验收条件（第 134 条第 5 阶段）
+            self.add_agent("designer", "designer", f"按诊断改了模块 **{node}** 的验收条件：\n\n"
+                           + "\n".join(f"- ~~{a}~~" for a in d.get("old", [])) + "\n"
+                           + "\n".join(f"- {a}" for a in d.get("new", [])) + "\n\n测试按新条件从头写。")
+        elif t == "handoff_checked":
+            if d.get("ok"):
+                self.add_line(Dot(T()["pass"]), f"{node} 诊断要删的用例已经删掉：{'、'.join(d.get('required', []))}", bg=True)
+            else:
+                self.add_line(Dot(T()["fail"]), f"{node} 测试 Agent 两次都没照诊断删掉用例：{'、'.join(d.get('left', []))}")
         elif t == "wiring_selfcheck":                 # 接线自检结果（第 134 条第 3 阶段）
             if d.get("skipped"):
                 self.add_line(f"接线自检没跑：{d['skipped']}；按你确认的接线往下走", bg=True)

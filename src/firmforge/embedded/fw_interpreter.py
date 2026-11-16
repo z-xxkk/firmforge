@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from ..agents.roles import parse_review
 from ..grounding.rules import RuleSet
-from ..orchestrator.dag import extract_json
+from ..orchestrator.dag import extract_json  # noqa: F401  （改验收条件时也用）
 from ..orchestrator.workflow import Step, Workflow
 from .design import Design, DesignModule
 from .firmware_workflow import firmware_problems
@@ -459,9 +459,81 @@ class FirmwareInterpreter:
                 run.t_conv, tout = f._ask_files(run.tester_pin or "tester", run.t_conv + [{"role": "user", "content": msg}],
                                                 m.id, {test_file(m)}, {test_file(m)}, attempt=run.attempt + 1, purpose="改测试")
                 mr.tests.update(tout.files)
+                self._enforce_removals(run, diag)
+            elif diag["blame"] == "design":                    # 验收条件本身有问题：交回设计 Agent（第 134 条第 5 阶段）
+                if not self._revise_acceptance(run, diag):
+                    msg = tester_repair_message(run.attempt, limit, run.report, mr.files, diag)
+                    run.t_conv, tout = f._ask_files(run.tester_pin or "tester",
+                                                    (run.t_conv or []) + [{"role": "user", "content": msg}], m.id,
+                                                    {test_file(m)}, {test_file(m)}, attempt=run.attempt + 1, purpose="改测试")
+                    mr.tests.update(tout.files)
             else:
                 self._revise_code(run, coder_repair_message(run.attempt, limit, run.report, diag))
             self._verify(run)
+
+    # ---- 交接核对、退回设计（第 134 条第 5 阶段）
+
+    def _enforce_removals(self, run: ModuleRun, diag: dict) -> None:
+        """诊断说要删的用例，核对测试 Agent 真的删了；没删就带着原指令再要一次，还没删就记下来（检查结果会说话）。"""
+        want = diag.get("remove_cases") or []
+        if not want:
+            return
+        f, m, mr = self.flow, run.m, run.mr
+
+        def left() -> list[str]:
+            names = set(re.findall(r'TEST_CASE\(\s*"((?:[^"\\]|\\.)*)"', mr.tests.get(test_file(m), "")))
+            return [w for w in want if w in names]
+        still = left()
+        if still:
+            msg = ("诊断要求删除下面这些用例，你的测试文件里还在（加标签、注释掉一半都不算删）：\n"
+                   + "\n".join(f"- {w}" for w in still) + "\n\n请删掉整个 TEST_CASE，输出修改后的完整测试文件。")
+            run.t_conv, tout = f._ask_files(run.tester_pin or "tester", run.t_conv + [{"role": "user", "content": msg}],
+                                            m.id, {test_file(m)}, {test_file(m)}, attempt=run.attempt + 1,
+                                            purpose="改测试（照诊断删用例）")
+            mr.tests.update(tout.files)
+            still = left()
+        f.bus.emit("handoff_checked", m.id, attempt=run.attempt, required=list(want), left=still, ok=not still)
+
+    def _revise_acceptance(self, run: ModuleRun, diag: dict) -> bool:
+        """设计 Agent 改这个模块的验收条件（只改验收条件，接口和接线不动），改好后测试按新条件从头写。"""
+        import json as _json
+        from dataclasses import replace as _replace
+        from .design import manual_acceptance
+        f, m, mr = self.flow, run.m, run.mr
+        ask = ("诊断认为模块 " + m.id + " 的验收条件本身有问题，测试和代码照着它写怎么改都过不了。\n\n"
+               f"诊断的依据：{diag.get('evidence', '')}\n诊断的建议：{diag.get('instruction', '')}\n\n"
+               "现在的模块：\n```json\n" + _json.dumps(m.to_dict(), ensure_ascii=False, indent=2) + "\n```\n\n"
+               "这块板子和这个项目的接线（状态由平台实测给出）：\n" + "\n".join(f.profile.summary_lines()) + "\n\n"
+               "只改这个模块的验收条件：每条都要能在这块板上自动测出来，读数只能落在已经实测确认的线上。"
+               '只输出一个 ```json 代码块：{"acceptance": ["……", "……"]}')
+        conv = [{"role": "system", "content": "你是嵌入式系统的设计工程师，负责把需求拆成可以自动验收的模块。"},
+                {"role": "user", "content": f"需求：\n{f.spec}\n\n{ask}"}]
+        for k in range(2):
+            resp = f.agents.call("designer", conv, m.id, attempt=run.attempt, purpose="改验收条件")
+            try:
+                acc = extract_json(resp.text).get("acceptance")
+                if not isinstance(acc, list) or not acc or not all(isinstance(a, str) and a.strip() for a in acc):
+                    raise ValueError("acceptance 要写成非空的字符串列表")
+                new_m = _replace(m, acceptance=tuple(a.strip() for a in acc))
+                probs = manual_acceptance([new_m])
+                if probs:
+                    raise ValueError("；".join(probs))
+            except (ValueError, AttributeError) as exc:
+                conv = conv + [{"role": "assistant", "content": resp.text or ""},
+                               {"role": "user", "content": f"没法用：{exc}。请重新输出。"}]
+                continue
+            run.m = new_m
+            if getattr(self, "design", None) is not None:
+                i = next(j for j, x in enumerate(self.design.modules) if x.id == m.id)
+                self.design.modules[i] = new_m
+                self.design.by_id[m.id] = new_m
+            f.bus.emit("design_revised", m.id, attempt=run.attempt, old=list(m.acceptance), new=list(new_m.acceptance),
+                       reason=diag.get("instruction", ""))
+            run.t_conv, tout = self._first_test(run, run.tester_pin, self._interface(run))   # 按新条件从头写测试
+            mr.tests.clear()
+            mr.tests.update(tout.files)
+            return True
+        return False
 
     # ---- 审查、等人
 

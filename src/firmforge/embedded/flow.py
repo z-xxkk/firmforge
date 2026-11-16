@@ -664,10 +664,11 @@ class EmbeddedFlow:
                 return diag
         if layer in ("compliance", "build"):                 # 驱动代码编译不过、合规违规：代码的错
             return {"blame": "code", "instruction": "", "evidence": layer, "rule": ""}
-        msgs = diagnoser_messages(self.profile, rules, m, mr.files, mr.tests, report)
+        product = self.workflow is not None               # 产品流程才能判 design、列要删的用例（第 134 条）
+        msgs = diagnoser_messages(self.profile, rules, m, mr.files, mr.tests, report, allow_design=product)
         resp = self.agents.call("diagnoser", msgs, m.id, attempt=attempt, purpose="诊断")
         try:
-            diag = parse_diagnosis(extract_json(resp.text), rules)
+            diag = parse_diagnosis(extract_json(resp.text), rules, allow_design=product)
         except ValueError as exc:
             diag = None
             # 有回复但格式不对（JSON 坏了、缺字段）：指出哪里不对再要一次（第 123 条：基线里 11 次不合格有 8 次是这种）。
@@ -678,7 +679,7 @@ class EmbeddedFlow:
                                 {"role": "user", "content": diagnosis_format_reminder(str(exc))}]
                 resp = self.agents.call("diagnoser", again, m.id, attempt=attempt, purpose="诊断（补交结论）")
                 try:
-                    diag = parse_diagnosis(extract_json(resp.text), rules)
+                    diag = parse_diagnosis(extract_json(resp.text), rules, allow_design=product)
                 except ValueError as exc2:
                     exc = exc2
             if diag is None:
