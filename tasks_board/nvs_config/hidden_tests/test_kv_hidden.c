@@ -85,8 +85,7 @@ TEST_CASE("字符串缓冲区放不下返回 ESP_ERR_INVALID_SIZE", "[kv]")
 TEST_CASE("非法参数：键名为空或超过 15 个字符、空指针", "[kv]")
 {
     TEST_ASSERT_EQUAL(ESP_OK, kv_init());
-    uint32_t v;
-    char s[8];
+    /* 2026-11-16 删去 kv_get_str("a", s, 0) 应返回 ESP_ERR_INVALID_ARG：需求没写 cap 为 0 算非法参数（DECISIONS 第 129 条） */
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, kv_set_u32("", 1));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, kv_set_u32(NULL, 1));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, kv_set_u32("a_very_long_key_x", 1));   /* 17 个字符 */
@@ -94,7 +93,6 @@ TEST_CASE("非法参数：键名为空或超过 15 个字符、空指针", "[kv]
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, kv_get_u32("a", NULL));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, kv_set_str("a", NULL));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, kv_get_str("a", NULL, 8));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, kv_get_str("a", s, 0));
     kv_deinit();
 }
 
