@@ -142,6 +142,7 @@ class EmbeddedFlow:
                  extra_requires: tuple[str, ...] = (), build_rules: bool = True, workflow=None, store=None,
                  human_review: bool = False, confirm_design: Callable[[Design], str | None] | None = None,
                  prior_wiring=None, rules_path: Path | None = None, project=None, confirm_wiring=None,
+                 confirm_failed=None,
                  confirm_module: Callable[[DesignModule, "ModuleResult", str], str | None] | None = None):
         """workflow：上板工作流（firmware_dev.toml，DECISIONS 第 110 条）决定走哪些步骤、在哪停下、最多试几次、
         编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder（coder=None 时由调度器挑）；
@@ -167,6 +168,7 @@ class EmbeddedFlow:
         # 同一个项目上一次的接线（第 108 条）：给了项目就用项目里存的完整连线（第 134 条），否则用传进来的
         self.project = project
         self.confirm_wiring = confirm_wiring             # 接线一步等人接好线的回调（第 134 条第 3 阶段）；None：不等，直接自检
+        self.confirm_failed = confirm_failed             # 模块没通过时问人：接着修 / 人工放行 / 放弃（第 139 条）
         self.prior_wiring = (list(project.wiring) if project is not None and project.wiring else prior_wiring) or None
         self.exp = None
         if store is not None:                            # 给了数据库就用经验库（评测的 full 配置也用，第 119 条）

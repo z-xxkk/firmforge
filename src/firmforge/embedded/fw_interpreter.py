@@ -49,6 +49,17 @@ class ModuleRun:
     hardened: bool = False                         # 做过变异体补测试了（第 125 条，每个模块最多一次）
     hardened_backup: dict | None = None            # 补测试前通过的代码（补强后没修好就交付它）
     hardened_tests_backup: dict | None = None      # 补测试前的测试（补的测试本身有错时退回它，第 131 条）
+    extra: int = 0                                 # 负责人选"接着修"加的次数（第 139 条）
+    hint: str = ""                                 # 负责人给的提示，交给诊断和改代码、改测试的 Agent
+    released: str = ""                             # 负责人人工放行时写的理由
+
+
+def _has_agent(flow, name: str) -> bool:
+    try:
+        flow.agents.registry.get(name)
+        return True
+    except Exception:                                     # noqa: BLE001  注册表里没有就不换
+        return False
 
 
 class FirmwareInterpreter:
@@ -127,7 +138,7 @@ class FirmwareInterpreter:
                     res.rules_used = [r.id for r in rules.select(None, "approved")]
                 steps = self.wf.subflows[s.subflow]
                 for m in design.order():
-                    if any(res.modules.get(d) is None or res.modules[d].verdict not in ("pass", "skipped")
+                    if any(res.modules.get(d) is None or res.modules[d].verdict not in ("pass", "skipped", "released")
                            for d in m.depends_on):
                         from .flow import ModuleResult
                         res.modules[m.id] = ModuleResult(m.id, m.layer, verdict="skipped", last_report="依赖的模块没有完成")
@@ -136,9 +147,11 @@ class FirmwareInterpreter:
                     self.run_module(steps, design, m, rules)
         verdicts = {mr.verdict for mr in res.modules.values()}
         if design is not None:
-            res.verdict = "pass" if verdicts == {"pass"} else "incomplete" if verdicts <= {"pass", "skipped"} else "fail"
-            if res.verdict == "pass" and res.app is not None:     # 模块都过了，结论还要看主程序上板跑得对不对
-                res.verdict = {"pass": "pass", "skipped": "incomplete"}.get(res.app.verdict, "fail")
+            res.verdict = ("pass" if verdicts == {"pass"} else "released" if verdicts <= {"pass", "released"}
+                           else "incomplete" if verdicts <= {"pass", "skipped", "released"} else "fail")
+            if res.verdict in ("pass", "released") and res.app is not None:   # 模块都过了，还要看主程序上板跑得对不对
+                app = {"pass": res.verdict, "skipped": "incomplete"}.get(res.app.verdict, "fail")
+                res.verdict = app
 
     def _confirm_follows(self, nxt: Step | None, by: dict) -> bool:
         """紧跟着的是等人确认（或开关打开时才走的条件分支里的等人确认），并且这次要停。"""
@@ -162,7 +175,7 @@ class FirmwareInterpreter:
         m = app_module()
         mr = ModuleResult(m.id, m.layer)
         res.app = mr
-        if not res.modules or any(x.verdict != "pass" for x in res.modules.values()):
+        if not res.modules or any(x.verdict not in ("pass", "released") for x in res.modules.values()):
             mr.verdict, mr.last_report = "skipped", "有模块没有通过，不做集成"
             f.bus.emit("node_failed", m.id, verdict="skipped", note=mr.last_report)
             return
@@ -288,7 +301,8 @@ class FirmwareInterpreter:
 
     def _max_attempts(self, run: ModuleRun) -> int:
         loop = next((s for s in self._mod_steps if s.kind == "loop"), None)
-        return max(1, min(10, self.wf.resolve_max(loop, self.loop_cfg))) if loop is not None else 1
+        base = max(1, min(10, self.wf.resolve_max(loop, self.loop_cfg))) if loop is not None else 1
+        return base + (run.extra if run is not None else 0)
 
     def run_module(self, steps: tuple[Step, ...], design: Design, m: DesignModule, rules: RuleSet):
         from .flow import ModuleResult
@@ -439,7 +453,11 @@ class FirmwareInterpreter:
         f, m, mr = self.flow, run.m, run.mr
         limit = self._max_attempts(run)
         while run.verdict == "fail" and run.attempt < limit and not run.stopped:
-            diag = f._diagnose(m, mr, run.rules, run.layer, run.report, run.attempt)
+            m = run.m                                          # 退回设计改过验收条件后 run.m 会换
+            report = run.report + (f"\n\n负责人的提示：{run.hint}" if run.hint else "")
+            diag = f._diagnose(m, mr, run.rules, run.layer, report, run.attempt)
+            if run.hint:
+                diag = {**diag, "instruction": (diag.get("instruction") or "") + f"\n负责人的提示：{run.hint}"}
             if diag["blame"] == "hardware":                    # 先实测接线，不靠模型判断（第 124 条）
                 diag = f._recheck_hardware(m, mr, run.rules, run.layer, run.report, run.attempt, diag)
             run.last = (run.layer, run.report, diag)
@@ -455,7 +473,7 @@ class FirmwareInterpreter:
                 run.t_conv, tout = self._first_test(run, run.tester_pin, self._interface(run))
                 mr.tests.update(tout.files)
             elif diag["blame"] == "test":
-                msg = tester_repair_message(run.attempt, limit, run.report, mr.files, diag)
+                msg = tester_repair_message(run.attempt, limit, report, mr.files, diag)
                 run.t_conv, tout = f._ask_files(run.tester_pin or "tester", run.t_conv + [{"role": "user", "content": msg}],
                                                 m.id, {test_file(m)}, {test_file(m)}, attempt=run.attempt + 1, purpose="改测试")
                 mr.tests.update(tout.files)
@@ -468,7 +486,7 @@ class FirmwareInterpreter:
                                                     {test_file(m)}, {test_file(m)}, attempt=run.attempt + 1, purpose="改测试")
                     mr.tests.update(tout.files)
             else:
-                self._revise_code(run, coder_repair_message(run.attempt, limit, run.report, diag))
+                self._revise_code(run, coder_repair_message(run.attempt, limit, report, diag))
             self._verify(run)
 
     # ---- 交接核对、退回设计（第 134 条第 5 阶段）
@@ -591,10 +609,61 @@ class FirmwareInterpreter:
                                       for ln in errs)
         return bool(run.last and run.last[2].get("blame") == "test")
 
+    def _ask_after_fail(self, run: ModuleRun) -> None:
+        """次数用完还没通过（第 139 条）：先讲清从第一次失败到现在发生了什么、放行有什么风险，再问负责人：
+        接着修（再给 3 次，换强档编码，可以带一句提示）、人工放行（要写理由）、或者放弃。"""
+        f = self.flow
+        ask = getattr(f, "confirm_failed", None)
+        if ask is None:
+            return
+        from ..runs import read_events
+        from .explain import explain_failure, release_risks
+        for _ in range(3):
+            if run.verdict != "fail" or run.stopped:
+                return
+            m, mr = run.m, run.mr
+            passed = run.hardened_backup or (run.passed_files or None)
+            payload = {"module": m.id, "attempts": run.attempt,
+                       "explain": explain_failure(read_events(f.rd.path), f.rd.path, m),
+                       "risks": release_risks(m, mr, getattr(self, "design", None), passed, run.report)}
+            f.bus.emit("human_wait", m.id, step="failed", reason="模块没通过，等你决定：接着修、人工放行或放弃",
+                       explain=payload["explain"], risks=payload["risks"])
+            ans = ask(m, payload) or {}
+            act = ans.get("action") if isinstance(ans, dict) else None
+            if act == "repair":
+                run.extra += 3
+                run.hint = str(ans.get("hint") or "").strip()
+                if _has_agent(f, "coder-strong"):
+                    run.coder_pin = "coder-strong"                 # 接着修换强档编码
+                f.bus.emit("repair_resumed", m.id, attempts=3, hint=run.hint, coder=run.coder_pin or "")
+                self._repair_loop(run)
+            elif act == "release":
+                run.released = str(ans.get("reason") or "").strip() or "（没写理由）"
+                f.bus.emit("module_released", m.id, reason=run.released, risks=payload["risks"],
+                           explain=payload["explain"])
+                return
+            else:
+                return
+
     def _finish_module(self, run: ModuleRun) -> None:
         f, m, mr = self.flow, run.m, run.mr
         if run.stopped == "hardware":
             mr.verdict = "hardware"
+            return
+        if run.verdict == "fail":
+            self._ask_after_fail(run)
+            m = run.m
+        if run.released:                                  # 人工放行：交付通过过的那一版（没有就最后一版），如实记"人工放行"
+            keep = run.hardened_backup or run.passed_files
+            if keep:
+                mr.files.clear()
+                mr.files.update(keep)
+            if run.hardened_tests_backup:
+                mr.tests.clear()
+                mr.tests.update(run.hardened_tests_backup)
+            mr.verdict = "released"
+            mr.last_report += f"\n\n负责人人工放行，理由：{run.released}"
+            f.bus.emit("node_failed", m.id, verdict="released", attempts=run.attempt, note=f"人工放行：{run.released}")
             return
         mr.verdict = run.verdict if run.verdict in ("pass", "skipped") else "fail"
         if mr.verdict == "fail" and run.hardened_backup is not None and self._hardened_tests_at_fault(run):

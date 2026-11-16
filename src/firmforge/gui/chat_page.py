@@ -32,7 +32,7 @@ from .widgets import Avatar, Dot, FlowLayout, GripSplitter, Panel, Segmented, T,
 ROLE_NAMES = {"analyst": "需求分析", "planner": "规划", "coder": "编码", "tester": "测试", "diagnoser": "诊断",
               "reviewer": "审查", "rules": "规则", "designer": "设计分层"}
 VERDICT_NAMES = {"pass": "通过", "fail": "没通过", "error": "出错", "incomplete": "不完整", "interrupted": "被中断",
-                 "rejected": "没有确认"}
+                 "rejected": "没有确认", "released": "人工放行"}
 THINK = [("", "按 Agent"), ("off", "关"), ("low", "低"), ("high", "高"), ("max", "最高")]
 TIERS = [("", "按 Agent"), ("fast", "快档"), ("strong", "强档")]
 CONFIGS = ["full", "b2", "b3", "b4", "full-no-tools", "full-no-review", "full-no-esc", "full-no-exp", "b1"]
@@ -1325,6 +1325,11 @@ class ChatPage(QWidget):
             pins = d.get("pins") or {}
             src = "设计 Agent 按需求定的" if d.get("source") == "design" else "沿用硬件档案的默认接线"
             self.add_line(f"接线（{src}）：" + "，".join(f"{s}=GPIO{g}" for s, g in sorted(pins.items())))
+        elif t == "module_released":                   # 人工放行（第 139 条）
+            self.add_line(Dot(T()["run"]), f"模块 {node} 人工放行（不算通过）：{d.get('reason', '')}")
+        elif t == "repair_resumed":
+            self.add_line(f"模块 {node} 接着修：再试 {d.get('attempts')} 次" + (f"，编码换成 {d['coder']}" if d.get("coder") else "")
+                          + (f"，你的提示：{d['hint']}" if d.get("hint") else ""), bg=True)
         elif t == "design_revised":                    # 诊断退回设计、设计改了验收条件（第 134 条第 5 阶段）
             self.add_agent("designer", "designer", f"按诊断改了模块 **{node}** 的验收条件：\n\n"
                            + "\n".join(f"- ~~{a}~~" for a in d.get("old", [])) + "\n"
@@ -1453,6 +1458,21 @@ class ChatPage(QWidget):
             m = self.add_agent("planner", "planner", "规划好了，请确认。确认后开始编写；有意见就写在下面输入框里发送，让规划 Agent 重做。")
             m.add_action("提修改意见", lambda: self._focus_input("写下对规划的修改意见，发送后让规划 Agent 重做"))
             m.add_action("确认，开始写", lambda: self._resolve("", m, "你已确认"), primary=True)
+        elif kind == "failed":                         # 模块没通过：先讲经过和风险，再让你选（第 139 条）
+            mod = payload.get("module", "")
+            body = (f"模块 **{mod}** 试了 {payload.get('attempts')} 次没通过。下面是从第一次失败到现在的经过：\n\n"
+                    + "\n".join(f"- {ln.strip()}" for ln in payload.get("explain", []))
+                    + "\n\n**如果人工放行，风险是：**\n\n"
+                    + "\n".join(f"    - {ln.strip().removeprefix('- ')}" if ln.startswith("　") else f"- {ln}"
+                                for ln in payload.get("risks", []))
+                    + "\n\n你可以：**接着修**（再试 3 次，换强档编码 Agent；想给 Agent 一句提示就先写在下面输入框里）；"
+                      "**人工放行**（先在输入框里写放行的理由）；或者**放弃**这个模块。")
+            m = self.add_agent("FirmForge", "reviewer", body)
+            m.add_action("放弃", lambda: self._resolve({"action": "give_up"}, m, "你放弃了这个模块"))
+            m.add_action("人工放行…", lambda: self._release(m, payload))
+            m.add_action("接着修", lambda: self._resolve({"action": "repair", "hint": self.input.toPlainText().strip()}, m,
+                                                       "你选了接着修" + ("，带了提示" if self.input.toPlainText().strip() else "")),
+                         primary=True)
         elif kind == "wiring":                         # 接线一步（第 134 条第 3 阶段）
             conns, states, fails = payload.get("connections", []), payload.get("states", {}), payload.get("failures", [])
             rows = []
@@ -1514,6 +1534,23 @@ class ChatPage(QWidget):
         self.input.setPlaceholderText(placeholder)
         self.input.setFocus()
 
+    def _release(self, msg, payload):
+        """人工放行：必须先写理由，再确认一次风险（负责人要求：知道为什么没通过、放行有什么风险才能放行）。"""
+        from PySide6.QtWidgets import QMessageBox
+        reason = self.input.toPlainText().strip()
+        if not reason:
+            self.add_line("放行前请先在下面输入框里写放行的理由（例如\"代码是对的，是验收条件要人接线\"），再点人工放行。", bg=True)
+            self.input.setFocus()
+            return
+        risks = "\n".join(payload.get("risks", []))
+        ok = QMessageBox.question(self, "确认人工放行",
+                                  f"放行模块 {payload.get('module')}？\n\n{risks}\n\n你的理由：{reason}",
+                                  QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ok != QMessageBox.Yes:
+            return
+        self.input.clear()
+        self._resolve({"action": "release", "reason": reason}, msg, f"你人工放行了这个模块：{reason}")
+
     def _resolve(self, value, msg, text):
         if self.backend is not None:
             self.backend.answer(value)
@@ -1524,9 +1561,10 @@ class ChatPage(QWidget):
         kind, payload, msg = self.pending
         if not text:
             return
-        if kind in ("rules", "approve", "wiring"):         # 这几种只能点按钮：打的字不能当成审核结果、"允许"或"接好了"
+        if kind in ("rules", "approve", "wiring", "failed"):   # 这几种只能点按钮：打的字不能当成审核结果、"允许"或"接好了"
             where = {"rules": "上面的规则卡片里逐条点通过或驳回", "approve": "上面点「允许」或「拒绝」",
-                     "wiring": "接好线后点上面的「已接好，开始自检」，或者点「停止」"}[kind]
+                     "wiring": "接好线后点上面的「已接好，开始自检」，或者点「停止」",
+                     "failed": "上面点「接着修」（这段话会作为提示带上）或「人工放行…」（这段话作为理由）"}[kind]
             self.add_line(f"这句话没有发出去：现在要先在{where}。", bg=True)
             return
         self.input.clear()

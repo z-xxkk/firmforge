@@ -371,6 +371,11 @@ class EmbeddedBackend(Backend):
                                             "failures": list(failures)})
                 return ans if isinstance(ans, str) else "cancel"
 
+            def confirm_failed(m, payload):
+                """模块没通过（第 139 条）：讲清经过和风险，等你选接着修、人工放行或放弃。"""
+                ans = self._wait("failed", dict(payload))
+                return ans if isinstance(ans, dict) else {"action": "give_up"}
+
             def human(pending, escalated):
                 b = holder.get("builder")
                 results = getattr(b, "results", {}) if b is not None else {}
@@ -387,7 +392,7 @@ class EmbeddedBackend(Backend):
                                       subscribers=sub, workflow=workflow or "firmware_dev", store=db,
                                       human_review=human_review, confirm_design=confirm_design,
                                       prior_wiring=prior_wiring, confirm_module=confirm_module, project=project_rec,
-                                      confirm_wiring=confirm_wiring)
+                                      confirm_wiring=confirm_wiring, confirm_failed=confirm_failed)
             flow.on_builder = lambda b: holder.__setitem__("builder", b)
 
             def job():

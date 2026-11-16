@@ -32,7 +32,8 @@ EVENT_TYPES = {
     "mutation_test", "hardened_reverted",   # 变异体补测试的结果；补强后没修好、交付补强前的版本（第 125 条）
     "app_checked", "firmware_ready",
     "wiring_selfcheck",                     # 接线一步的自检结果（第 134 条第 3 阶段）
-    "handoff_checked", "design_revised",    # 诊断要删的用例是否真删了；设计改了验收条件（第 134 条第 5 阶段）        # 集成：主程序上板跑两轮的核对结果；完整工程已交付（第 131 条）
+    "handoff_checked", "design_revised",
+    "repair_resumed", "module_released",    # 负责人选了接着修；人工放行（第 139 条）    # 诊断要删的用例是否真删了；设计改了验收条件（第 134 条第 5 阶段）        # 集成：主程序上板跑两轮的核对结果；完整工程已交付（第 131 条）
     # 经验库
     "experience_saved", "experience_used",
     # 工具（DECISIONS 第 63 条）
