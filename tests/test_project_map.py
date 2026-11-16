@@ -113,7 +113,7 @@ class ProjectMapDataTest(unittest.TestCase):
         self.assertEqual(sorted(p.id for p in self.pm.peripherals), ["i2c0", "uart1"])
         self.assertEqual([(d.name, d.checked) for d in self.pm.devices], [("imu", True), ("ppg", True)])
         self.assertEqual(self.pm.wiring_source, "design")
-        self.assertEqual(self.pm.unused_gpios, [3, 6, 7, 10, 11])               # C3 的 0–21 去掉保留和用掉的
+        self.assertEqual(self.pm.unused_gpios, [3, 6, 7, 10])                   # C3 的 0–21 去掉保留和用掉的（GPIO11 排针没引出，第 135 条）
         self.assertNotIn(8, self.pm.unused_gpios)
 
     def test_without_design_or_wiring(self):

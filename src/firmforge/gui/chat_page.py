@@ -321,6 +321,8 @@ class ChatPage(QWidget):
         self.project = project
         self.runs_dir = project / ".ff_runs"
         self.chats_dir = project / ".ff_chats"
+        self.projects_dir = project / ".ff_projects"     # 上板对话各自的项目目录（第 134 条）
+        self.project_rec = None
         self.view = RunView()
         self.seen_events: list[dict] = []          # 这次运行到现在为止的事件（直播、回放都记），修正过程按它画
         self.run_block: RunBlock | None = None     # 正在往里放过程消息的折叠块
@@ -657,6 +659,10 @@ class ChatPage(QWidget):
             return "今天" if d == today else ("昨天" if (today - d).days == 1 else "更早")
         last = None
         rows = [("chat", c["title"], c["path"], c["mtime"], c["runs"]) for c in list_conversations(self.chats_dir)]
+        from ..projects import list_projects
+        for pr in list_projects(self.projects_dir):        # 上板对话：一个项目一条（第 134 条）
+            if pr.runs:
+                rows.append(("project", pr.title or pr.id, pr.path, (pr.path / "project.json").stat().st_mtime, pr.runs))
         linked = {Path(r).name for c in rows for r in c[4]}
         if self.runs_dir.is_dir():
             show_all = self.show_cli_runs.isChecked()
@@ -701,7 +707,23 @@ class ChatPage(QWidget):
             return
         kind, path = data
         if kind == "run":
+            self.project_rec = None
             self.open_run(Path(path))
+            return
+        if kind == "project":                             # 打开项目：显示最近一次运行，之后发的消息接着在这个项目里跑
+            from ..projects import Project
+            try:
+                rec = Project.load(Path(path))
+            except (OSError, ValueError) as exc:
+                self.add_line(f"读不了这个项目：{exc}", bg=True)
+                return
+            self.project_rec = None
+            if rec.runs and Path(rec.runs[-1]).is_dir():
+                self.open_run(Path(rec.runs[-1]))
+            self.project_rec = rec
+            self.title.setText(rec.title or self.title.text())
+            if self.embedded:
+                self.input.setPlaceholderText("写补充或修改，在这个项目里再跑一次（沿用这个项目的接线）")
             return
         from ..chat import Conversation
         self.clear()
@@ -827,6 +849,7 @@ class ChatPage(QWidget):
             return
         self.clear()
         self.conv, self.task, self.run_dir = None, None, None
+        self.project_rec = None                          # 新对话是新项目：不沿用别的对话的接线（第 134 条）
         self.workflow = None                             # 不沿用上一次试运行的工作流草稿
         self.title.setText("新对话")
         self.head_pills.setText("")
@@ -858,8 +881,14 @@ class ChatPage(QWidget):
                 self.add_user(text)
                 self.title.setText(text[:24])
                 self.start_embedded(spec=text)
+            elif self.backend is None and self.project_rec is not None and self.project_rec.specs:
+                # 同一个项目里再跑一次（第 134 条）：原需求加上这次的补充，沿用这个项目的接线
+                self.add_user(text)
+                self.start_embedded(spec=self.project_rec.specs[0] + "\n\n补充或修改：" + text)
+            elif self.backend is None:
+                self.add_line("这是一次评测题或旧版本的运行，不能接着改；要改需求就点\"新对话\"重新写。", bg=True)
             else:
-                self.add_line("上板流程运行结束后还不能追问；要改需求就点\"新对话\"重新写。", bg=True)
+                self.add_line("这次运行还没结束，结束后可以接着写补充或修改。", bg=True)
             return
         self.add_user(text)
         try:
@@ -1009,8 +1038,9 @@ class ChatPage(QWidget):
                 self.backend.start(task_id=task_id, config_name=config_name, **kw)
             else:
                 wf = self.workflow if (self.workflow is not None and self.workflow.engine == "firmware") else None
+                rec = self._project_for(spec)              # 这个对话的项目：接线等按对话分开存（第 134 条）
                 self.backend.start(spec=spec, name="gui", rule_mode=mode, workflow=wf,
-                                   human_review=self.review_box.isChecked(), prior_wiring=self._last_wiring(), **kw)
+                                   human_review=self.review_box.isChecked(), project_rec=rec, **kw)
         except Exception as exc:
             from .runner import BOARD_USERS
             BOARD_USERS.discard(self.backend)
@@ -1018,17 +1048,13 @@ class ChatPage(QWidget):
             self.backend = None
             self.stop_btn.setVisible(False)
 
-    def _last_wiring(self) -> dict | None:
-        """同一个对话（项目）上一次运行定下的接线，交给设计 Agent 沿用（DECISIONS 第 108 条）。"""
-        for r in reversed(self.conv.runs if self.conv is not None else []):
-            p = Path(r) / "wiring.json"
-            try:
-                info = json.loads(p.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if info.get("source") == "design" and info.get("pins"):
-                return dict(info["pins"])
-        return None
+    def _project_for(self, spec: str):
+        """这个对话的项目（第 134 条）：第一次发需求时建，同一个对话里再发沿用（接线、跑过的运行都在里面）。"""
+        from ..projects import Project
+        if self.project_rec is None:
+            self.project_rec = Project.create(self.projects_dir, spec)
+        self.project_rec.add_spec(spec)
+        return self.project_rec
 
     # ------------------------------------------------------------ 工程图、接线图（DECISIONS 第 109、113 条）
 
@@ -1130,7 +1156,9 @@ class ChatPage(QWidget):
             self.add_agent("FirmForge", "reviewer", text)
         self.refresh_status(self._run_text())
         self.run_done.emit()
-        self.input.setPlaceholderText("点模块看每一次的检查结果、上板测试和代码；要换需求就点\"新对话\"" if self.embedded else
+        self.input.setPlaceholderText(("写补充或修改，在这个项目里再跑一次（沿用这个项目的接线）；点模块看每一次的检查结果"
+                                       if self.project_rec is not None else
+                                       "点模块看每一次的检查结果、上板测试和代码；要换需求就点\"新对话\"") if self.embedded else
                                       "可以追问结果，例如\"为什么 pdu 第一次没过\"；也可以提新的修改要求")
         self.refresh_sessions()
 

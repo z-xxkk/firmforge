@@ -141,7 +141,7 @@ class EmbeddedFlow:
                  coder: str | None = "coder-strong", design: Design | None = None, locked: dict[str, str] | None = None,
                  extra_requires: tuple[str, ...] = (), build_rules: bool = True, workflow=None, store=None,
                  human_review: bool = False, confirm_design: Callable[[Design], str | None] | None = None,
-                 prior_wiring: dict[str, int] | None = None, rules_path: Path | None = None,
+                 prior_wiring=None, rules_path: Path | None = None, project=None,
                  confirm_module: Callable[[DesignModule, "ModuleResult", str], str | None] | None = None):
         """workflow：上板工作流（firmware_dev.toml，DECISIONS 第 110 条）决定走哪些步骤、在哪停下、最多试几次、
         编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder（coder=None 时由调度器挑）；
@@ -164,7 +164,9 @@ class EmbeddedFlow:
         self.coder, self.fixed_design, self.locked = coder, design, dict(locked or {})
         self.extra_requires, self.build_rules = tuple(extra_requires), self.plan.build_rules
         self.store, self.human_review, self.confirm_design = store, human_review, confirm_design
-        self.prior_wiring = dict(prior_wiring or {})       # 同一个项目上一次的接线（DECISIONS 第 108 条）
+        # 同一个项目上一次的接线（第 108 条）：给了项目就用项目里存的完整连线（第 134 条），否则用传进来的
+        self.project = project
+        self.prior_wiring = (list(project.wiring) if project is not None and project.wiring else prior_wiring) or None
         self.exp = None
         if store is not None:                            # 给了数据库就用经验库（评测的 full 配置也用，第 119 条）
             from ..memory.experience import ExperienceBase
@@ -179,6 +181,8 @@ class EmbeddedFlow:
         self.on_builder: Callable | None = None
         self.rd = RunDir.create(runs_root, name)
         (self.rd.path / "spec.md").write_text(spec, encoding="utf-8")      # 需求原文（对话列表用它当标题）
+        if project is not None:                                             # 这次运行记进项目（第 134 条）
+            project.add_run(self.rd.path)
         self.bus = EventBus(self.rd.run_id, self.rd.events_path)
         for s in subscribers:
             self.bus.subscribe(s)
@@ -338,6 +342,8 @@ class EmbeddedFlow:
                    for d in self.profile.devices if d.name in used]
         wiring = {s: f.value for s, f in sorted(self.profile.pins.items())}
         conns = [c.to_dict() for c in getattr(design, "connections", [])]
+        if self.project is not None and conns:            # 设计定下的接线存进项目，状态是"计划"（第 134 条）
+            self.project.set_wiring(conns)
         self.rd.write_json("wiring.json", {"source": source, "pins": wiring, "devices": devices, "connections": conns})
         self.bus.emit("wiring_ready", "design", source=source, pins=wiring, devices=devices, connections=conns)
         self._wiring_used, self._wiring_checked = used, False

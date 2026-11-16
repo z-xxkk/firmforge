@@ -205,23 +205,5 @@ class WiringGuiTest(unittest.TestCase):
         blocks = page.findChildren(RunBlock)
         self.assertTrue(blocks and blocks[0].steps >= 1)                   # 接线定下：在过程里
 
-    def test_last_wiring_from_conversation(self):
-        from firmforge.gui.chat_page import ChatPage
-        page = ChatPage(Path(helpers.ROOT))
-        with tempfile.TemporaryDirectory() as d:
-            r1, r2 = Path(d) / "r1", Path(d) / "r2"
-            r1.mkdir()
-            r2.mkdir()
-            (r1 / "wiring.json").write_text(json.dumps({"source": "design", "pins": WIRING}), encoding="utf-8")
-            (r2 / "wiring.json").write_text(json.dumps({"source": "default", "pins": {"a.b": 1}}), encoding="utf-8")
-
-            class Conv:
-                runs = [str(r1), str(r2)]
-            page.conv = Conv()
-            self.assertEqual(page._last_wiring(), WIRING)                  # 默认接线不算"这个项目定下的"
-            page.conv = None
-            self.assertIsNone(page._last_wiring())
-
-
 if __name__ == "__main__":
     unittest.main()

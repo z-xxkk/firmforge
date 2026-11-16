@@ -303,7 +303,8 @@ class EmbeddedBackend(Backend):
 
     def start(self, *, project: Path, hw: str, runs_dir: Path, spec: str = "", name: str = "gui", rule_mode: str = "verified",
               task_id: str = "", config_name: str = "verified", tier: str | None = None, thinking: str | None = None,
-              port: str | None = None, workflow=None, human_review: bool = False, prior_wiring=None) -> None:
+              port: str | None = None, workflow=None, human_review: bool = False, prior_wiring=None,
+              project_rec=None) -> None:
         """workflow：写需求时用的上板工作流（名字、路径或 Workflow 对象，默认 firmware_dev，DECISIONS 第 110 条）；
         human_review：设计好后停下等确认（ask("plan")，回答空字符串表示确认，写了意见就让设计 Agent 重做）。"""
         from ..embedded.workspace import load_hw
@@ -379,7 +380,7 @@ class EmbeddedBackend(Backend):
                                       runs_root=runs_dir, name=name, human=human, tier=tier, think=thinking,
                                       subscribers=sub, workflow=workflow or "firmware_dev", store=db,
                                       human_review=human_review, confirm_design=confirm_design,
-                                      prior_wiring=prior_wiring, confirm_module=confirm_module)
+                                      prior_wiring=prior_wiring, confirm_module=confirm_module, project=project_rec)
             flow.on_builder = lambda b: holder.__setitem__("builder", b)
 
             def job():
