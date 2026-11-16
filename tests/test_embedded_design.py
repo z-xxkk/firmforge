@@ -115,6 +115,24 @@ class DesignTest(unittest.TestCase):
         from firmforge.embedded import workspace
         self.assertIn("extra_requires=PRODUCT_REQUIRES", inspect.getsource(workspace.make_firmware_flow))
 
+    def test_scopes_in_spec(self):
+        """规则那一步只查需求里提到的外设（第 130 条）；器件带上总线；认不出来是空集合，由流程退回整块板子。"""
+        from firmforge.grounding.profile import scopes_in_spec
+        p = profile()
+        spec = "每 2 秒读一次芯片温度和 ADC 引脚上的电压，把最高温度存进 NVS；掉电重启后打印上次保存的最高温度。"
+        self.assertEqual(scopes_in_spec(p, spec), {"temp_sensor", "adc", "nvs"})
+        self.assertEqual(scopes_in_spec(p, "用 MPU6050 读加速度"), {"mpu6050", "i2c"})
+        self.assertEqual(scopes_in_spec(p, "做一个好用的东西"), set())
+
+    def test_product_flow_rule_scopes(self):
+        """产品流程按需求定查资料的范围，并把规则库路径交给流程，确认后马上存（第 130 条）。"""
+        import inspect
+        from firmforge.embedded import flow, workspace
+        src = inspect.getsource(flow.EmbeddedFlow._rules_for_flow)
+        self.assertIn("scopes_in_spec(self.profile, self.spec) or self.profile.scopes()", src)
+        self.assertIn("persist=", src)
+        self.assertIn("rules_path=hw.rules_path", inspect.getsource(workspace.make_firmware_flow))
+
 
 if __name__ == "__main__":
     unittest.main()

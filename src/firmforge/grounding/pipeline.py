@@ -52,16 +52,19 @@ def covered_scopes(store: RuleSet, scopes: list[str]) -> set[str]:
         need = CHECKLIST.get(s, ())
         if need and all(k in have for k in need):
             out.add(s)
+        elif not need and any(s in r.scope for r in store.select({s}, "trusted")):    # 没有清单的片内外设（第 130 条）
+            out.add(s)
     return out
 
 
 class RuleBuilder:
     def __init__(self, complete: Complete, profile: HardwareProfile, library: SourceLibrary, verifier: RuleVerifier,
                  store: RuleSet, *, emit: Emit | None = None, human: Human | None = None, max_rounds: int = 4,
-                 max_tool_rounds: int = 12):
+                 max_tool_rounds: int = 12, persist: Callable[[], None] | None = None):
         self.complete, self.profile, self.library, self.verifier = complete, profile, library, verifier
         self.store, self.human, self.max_rounds, self.max_tool_rounds = store, human, max_rounds, max_tool_rounds
         self.emit = emit or (lambda *a, **k: None)
+        self.persist = persist        # 人确认完马上存规则库，不等整次运行结束（第 130 条：运行中途被关，确认就白做了）
         self.results: dict[str, RuleResult] = {}   # 每条规则最近一次的核对结果（界面上确认时显示每一步）
 
     def _dedupe(self, rules: list[Rule], checked: dict[str, Rule]) -> list[Rule]:
@@ -147,6 +150,8 @@ class RuleBuilder:
         decisions = self.human(pending, list(escalated.values()))
         approved, rejected_by_human = apply_human(pending, decisions)
         out.trusted = store_trusted(self.store, approved)
+        if self.persist is not None and out.trusted:
+            self.persist()
         decided = {r.id for r in approved} | {r.id for r in rejected_by_human}
         out.pending = [r for r in pending if r.id not in decided]
         for r in out.trusted:

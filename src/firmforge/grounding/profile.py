@@ -233,6 +233,35 @@ def _gpio_ranges(gpios: list[int]) -> str:
     return "、".join(out)
 
 
+# 需求文字里的说法 → 规则范围（DECISIONS 第 130 条）。只用来缩小"查资料"的范围，宁多勿少：
+# 认不出任何外设时，调用方退回按整块板子查。器件型号（mpu6050 等）直接按型号匹配，不用写在这里。
+SPEC_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "i2c": ("i2c", "iic"),
+    "uart": ("uart", "串口"),
+    "spi": ("spi",),
+    "gpio": ("gpio", "引脚电平", "按键", "按钮", "led", "灯", "中断", "边沿"),
+    "ledc": ("ledc", "pwm", "占空比", "呼吸灯"),
+    "adc": ("adc", "模数", "电压"),
+    "temp_sensor": ("temp_sensor", "tsens", "芯片温度", "片内温度", "温度传感器"),
+    "nvs": ("nvs", "非易失", "掉电", "断电", "掉电保存", "flash"),
+    "gptimer": ("gptimer", "定时器", "timer"),
+    "rmt": ("rmt", "脉冲宽度", "脉宽"),
+    "mpu6050": ("mpu6050", "mpu-6050", "陀螺", "加速度", "姿态", "imu"),
+    "max30102": ("max30102", "心率", "血氧", "ppg"),
+}
+
+
+def scopes_in_spec(profile: "HardwareProfile", spec: str) -> set[str]:
+    """需求里提到的外设和器件（只在设计时能用的范围里找）；器件带上它所在的总线。认不出来返回空集合。"""
+    text = spec.lower()
+    allowed = profile.design_scopes()
+    out = {s for s in allowed if s in text or any(k in text for k in SPEC_KEYWORDS.get(s, ()))}
+    for d in profile.devices:
+        if d.part.lower() in out:
+            out.add(_peripheral(d.bus))
+    return out
+
+
 # ESP32 的外设名；pwm 在 ESP32 上由 LEDC 外设产生；其余名字（器件的中断脚、led 等）都是普通 GPIO
 _PERIPHERALS = {"i2c", "uart", "spi", "ledc", "adc", "dac", "i2s", "twai", "rmt", "pcnt", "usb", "gpio"}
 _ALIASES = {"pwm": "ledc", "can": "twai"}

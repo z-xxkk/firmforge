@@ -34,7 +34,7 @@ from .. import config
 from ..agents.registry import AgentDef, Registry, default_registry
 from ..grounding.compliance import check_code
 from ..grounding.pipeline import Human, RuleBuilder
-from ..grounding.profile import HardwareProfile
+from ..grounding.profile import HardwareProfile, scopes_in_spec
 from ..grounding.research import SOURCE_TOOLS, parse_rules, research_messages
 from ..grounding.rules import RuleSet
 from ..grounding.sources import SourceLibrary
@@ -140,7 +140,7 @@ class EmbeddedFlow:
                  coder: str | None = "coder-strong", design: Design | None = None, locked: dict[str, str] | None = None,
                  extra_requires: tuple[str, ...] = (), build_rules: bool = True, workflow=None, store=None,
                  human_review: bool = False, confirm_design: Callable[[Design], str | None] | None = None,
-                 prior_wiring: dict[str, int] | None = None,
+                 prior_wiring: dict[str, int] | None = None, rules_path: Path | None = None,
                  confirm_module: Callable[[DesignModule, "ModuleResult", str], str | None] | None = None):
         """workflow：上板工作流（firmware_dev.toml，DECISIONS 第 110 条）决定走哪些步骤、在哪停下、最多试几次、
         编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder（coder=None 时由调度器挑）；
@@ -158,6 +158,7 @@ class EmbeddedFlow:
         self._human_in = human                           # 解释器按"查资料后面有没有等人确认"决定用不用
         self.human = human if self.plan.confirm_rules else None
         self.confirm_module = confirm_module
+        self.rules_path = rules_path                     # 给了就在人确认完规则后马上存（DECISIONS 第 130 条）
         self.max_attempts = self.plan.max_attempts
         self.coder, self.fixed_design, self.locked = coder, design, dict(locked or {})
         self.extra_requires, self.build_rules = tuple(extra_requires), self.plan.build_rules
@@ -191,8 +192,8 @@ class EmbeddedFlow:
             return self.rules
         if self.fixed_design is not None:              # 评测：只查本题涉及的外设和器件
             scopes = sorted({x for m in self.fixed_design.modules for x in m.scopes} - {"all"})
-        else:
-            scopes = sorted(self.profile.scopes())
+        else:                                          # 产品流程：只查需求里提到的外设，认不出来才按整块板子查（第 130 条）
+            scopes = sorted(scopes_in_spec(self.profile, self.spec) or self.profile.scopes())
         if self.rule_mode == "unverified":
             resp = self.agents.call("researcher", research_messages(self.profile, scopes, self.library),
                                     "rules", purpose="提炼规则（不核对）", tools=True)
@@ -200,7 +201,8 @@ class EmbeddedFlow:
             return RuleSet([replace(r, status="approved", notes=r.notes + ("规则模式 unverified：未核对",))
                             for r in rules])
         builder = RuleBuilder(self._research_with_tools, self.profile, self.library, self.verifier, self.rules,
-                              emit=self.bus.emit, human=self.human)
+                              emit=self.bus.emit, human=self.human,
+                              persist=(lambda: self.rules.save(self.rules_path)) if self.rules_path is not None else None)
         if self.on_builder is not None:          # 界面要拿到核对结果，确认规则时显示每一步
             self.on_builder(builder)
         builder.run(scopes)

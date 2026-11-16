@@ -37,13 +37,14 @@ class PipelineTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def builder(self, script, human=None, store=None):
+    def builder(self, script, human=None, store=None, persist=None):
         llm = FakeLLM(script)
         verifier = RuleVerifier(make_library(), make_profile(**{"i2c0.sda": 8, "i2c0.scl": 9}),
                                 idf=make_idf(Path(self.tmp.name) / f"idf{len(self.events)}"), svd=SvdDevice.parse(SVD),
                                 semantic=lambda r, p: (True, "一致"))
         b = RuleBuilder(lambda m, tools: llm.complete(m, model="fake", tools=tools), make_profile(), make_library(),
-                        verifier, store if store is not None else RuleSet(), emit=self.bus.emit, human=human)
+                        verifier, store if store is not None else RuleSet(), emit=self.bus.emit, human=human,
+                        persist=persist)
         return b, llm
 
     def types(self):
@@ -131,6 +132,26 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(out.trusted, [])
         self.assertEqual(len(out.pending), 5)
         self.assertIn("rules_need_human", self.types())
+
+    def test_persist_right_after_human(self):
+        """人确认完马上存规则库，不等整次运行结束（第 130 条）。"""
+        saved = []
+        store = RuleSet()
+        b, _ = self.builder([reply(GOOD)], human=lambda pending, esc: {r.id: ("approve", "") for r in pending},
+                            store=store, persist=lambda: saved.append(len([r for r in store if r.status == "trusted"])))
+        b.run(["i2c", "mpu6050"])
+        self.assertEqual(saved, [5])
+        saved.clear()
+        b, _ = self.builder([reply(GOOD)], human=lambda pending, esc: {}, persist=lambda: saved.append(1))
+        b.run(["i2c", "mpu6050"])
+        self.assertEqual(saved, [])                            # 一条都没确认，不用存
+
+    def test_covered_without_checklist(self):
+        """没有完整性清单的片内外设（nvs、temp_sensor 等）：规则库里有这个范围的可信规则就复用（第 130 条）。"""
+        r = list(good_rules())[0]
+        from dataclasses import replace
+        store = RuleSet([replace(r, id="R-NVS-001", scope=("nvs",)).advance("checked").advance("approved").advance("trusted")])
+        self.assertEqual(covered_scopes(store, ["nvs", "temp_sensor"]), {"nvs"})
 
     def test_reuse_covered_scopes(self):
         store = RuleSet([r.advance("checked").advance("approved").advance("trusted") for r in good_rules()])

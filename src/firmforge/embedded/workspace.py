@@ -114,7 +114,8 @@ def make_firmware_flow(hw: HwContext, spec: str, *, llm, settings: config.Settin
                         name=name, rule_mode=rule_mode, human=human, idf=idf, board=board, registry=reg,
                         subscribers=subscribers, secrets=secrets_of(settings), workflow=wf, store=store,
                         human_review=human_review, confirm_design=confirm_design, prior_wiring=prior_wiring,
-                        confirm_module=confirm_module, extra_requires=PRODUCT_REQUIRES)
+                        confirm_module=confirm_module, extra_requires=PRODUCT_REQUIRES,
+                        rules_path=hw.rules_path if rule_mode == "verified" else None)
 
 
 def make_rule_builder(hw: HwContext, *, llm, settings: config.Settings, runs_root: Path, human=None,
