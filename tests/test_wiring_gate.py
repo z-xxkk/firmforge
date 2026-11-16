@@ -133,6 +133,45 @@ class GateTest(unittest.TestCase):
         self.assertIn("5 mV", err)
 
 
+class Stage4Test(unittest.TestCase):
+    """第 4 阶段：每根线的状态进所有 Agent 的提示词；要人动手才能测的验收条件退回设计。"""
+
+    def test_states_reach_prompts(self):
+        gate = GateTest()
+        with tempfile.TemporaryDirectory() as d:
+            rec = Project.create(Path(d) / "p")
+            dsg = design([ADC])
+            f = EmbeddedFlow(llm=FakeLLM([]), settings=SETTINGS, profile=C3, spec="x", rules=RuleSet(), library=None,
+                             verifier=None, runs_root=Path(d) / "runs", rule_mode="none", project=rec,
+                             confirm_wiring=lambda *a: "ok")
+            f._use_wiring(dsg)
+            with mock.patch("firmforge.target.selfcheck.run_check", lambda *a, **k: gate.chk(True)):
+                self.assertTrue(f._wiring_gate(dsg))
+            text = "\n".join(f.profile.summary_lines())
+            self.assertIn("adc.vin=GPIO1，接到 3V3；实测（ADC GPIO1：3291 mV）", text)
+            self.assertNotIn("adc.vin=GPIO1，接到 3V3；实测（ADC GPIO1：3291 mV）——", text)   # 实测过的不加警告
+            f2 = EmbeddedFlow(llm=FakeLLM([]), settings=SETTINGS, profile=C3, spec="x", rules=RuleSet(), library=None,
+                              verifier=None, runs_root=Path(d) / "runs", rule_mode="none", confirm_wiring=lambda *a: "ok")
+            f2._use_wiring(dsg)
+            with mock.patch("firmforge.target.selfcheck.run_check", lambda *a, **k: WiringCheck(skipped="没有板子")):
+                f2._wiring_gate(dsg)
+            text = "\n".join(f2.profile.summary_lines())
+            self.assertIn("adc.vin=GPIO1，接到 3V3；已接", text)
+            self.assertIn("不要对这根线的数值写断言", text)                     # 没实测：提醒测试 Agent
+            from firmforge.embedded.prompting import system_prompt
+            self.assertIn("不要对这根线的数值写断言", system_prompt("coder_idf.md", f2.profile, RuleSet(), set()))
+
+    def test_manual_acceptance_rejected(self):
+        bad = {**DESIGN, "modules": [dict(DESIGN["modules"][0], acceptance=["将 FF_PIN_ADC_VIN 接 GND 时读数小于 100 mV"]),
+                                     *DESIGN["modules"][1:]], "wiring": [ADC, *I2C]}
+        d, probs = parse_design(bad, C3)
+        self.assertIsNone(d)
+        self.assertTrue(any("要人动手才能测" in p and "接 GND 时" in p for p in probs), probs)
+        ok = {**bad, "modules": [dict(DESIGN["modules"][0], acceptance=["接到 3V3 后读数在 2800–3100 mV"]),
+                                 *DESIGN["modules"][1:]]}
+        self.assertEqual(parse_design(ok, C3)[1], [])
+
+
 try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication, QLabel, QPushButton

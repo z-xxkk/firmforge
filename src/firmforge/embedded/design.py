@@ -153,6 +153,8 @@ def parse_design(data: dict, profile: HardwareProfile, max_modules: int = MAX_MO
                 problems.append(f"逻辑层 {m.id} 不能依赖硬件层 {d}（逻辑层要能在电脑上测试）")
     if not problems and _has_cycle(mods):
         problems.append("模块依赖成环")
+    if not problems:
+        problems += manual_acceptance(mods)
     raw = data.get("wiring") if isinstance(data, dict) else None
     conns = []
     if raw is not None and not problems:                    # 完整连线（第 134 条）；不写就沿用板上现有的接线
@@ -163,6 +165,24 @@ def parse_design(data: dict, profile: HardwareProfile, max_modules: int = MAX_MO
         return None, problems
     return Design(mods, str(data.get("app", "")).strip(), wiring={c.signal: c.gpio for c in conns},
                   connections=conns), []
+
+
+# 要人动手才能测的验收条件（第 134 条第 4 阶段）：对话测试里设计写了"将 FF_PIN_ADC_VIN 接 GND 时读数小于 100 mV"，
+# 自动测试做不到，测试 Agent 照写、诊断两次判"错在测试"，可错误条件一直留在设计里。这类条件在设计交上来时就退回。
+# "接 GND 时……"是要人临时改线的条件；"接到 3V3 后读数……"可能说的是接线里定好的线，不拦（接线里有 expect 管着）
+MANUAL_ACTION = re.compile(r"(接(到|上)?\s*(GND|地|3V3|3\.3\s*V|5V|电源)\s*时|短接|手动|人工|按下|按住|按键按|"
+                           r"拔掉|拔出|插上|插入|万用表|示波器|用手|遮住|靠近|加热|冷却|吹气)")
+
+
+def manual_acceptance(mods: list[DesignModule]) -> list[str]:
+    out = []
+    for m in mods:
+        for a in m.acceptance:
+            hit = MANUAL_ACTION.search(a)
+            if hit:
+                out.append(f"{m.id} 的验收条件\"{a}\"要人动手才能测（\"{hit.group(0)}\"），自动测试做不到：改成能在板上自动测的现象；"
+                           "要读确定的电压就在 wiring 里把这根线接好（例如接 3V3），并按它的 expect 写范围")
+    return out
 
 
 def _has_cycle(mods: list[DesignModule]) -> bool:

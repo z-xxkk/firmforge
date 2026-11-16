@@ -348,6 +348,23 @@ class EmbeddedFlow:
         self.rd.write_json("wiring.json", {"source": source, "pins": wiring, "devices": devices, "connections": conns})
         self.bus.emit("wiring_ready", "design", source=source, pins=wiring, devices=devices, connections=conns)
         self._wiring_used, self._wiring_checked = used, False
+        self._wire_states = {}
+
+    def _apply_wiring_states(self, design: Design) -> None:
+        """把每根线的状态写进档案，后面所有 Agent 的提示词里都看得到（第 134 条第 4 阶段）：
+        实测 → 来源 measured，带实测值；其他 → planned / mismatch，提示词里写明"不要对读数写断言"。"""
+        conns = list(getattr(design, "connections", []))
+        if not conns:
+            return
+        from dataclasses import replace as _replace
+        from ..grounding.profile import WIRE_PREFIX, Fact
+        pins = dict(self.profile.pins)
+        for c in conns:
+            st, detail = self._wire_states.get(c.signal, ("计划", ""))
+            origin = {"实测": "measured", "不符": "mismatch"}.get(st, "planned")
+            note = f"{WIRE_PREFIX}{c.to}；{st}" + (f"（{detail}）" if detail else "")
+            pins[c.signal] = Fact(c.gpio, origin, note)
+        self.profile = _replace(self.profile, pins=pins)
 
     def _wiring_gate(self, design: Design) -> bool:
         """设计之后、写代码之前（第 134 条第 3 阶段，ARCHITECTURE §15.4）：列出接线清单等人接好，平台按每根线的
@@ -359,6 +376,13 @@ class EmbeddedFlow:
         from ..target.selfcheck import items_for_connections, run_check
         items = items_for_connections(self.profile, conns)
         proj, failures = self.project, []
+        self._wire_states = {c.signal: ((proj.state(c.signal), "") if proj is not None else ("计划", "")) for c in conns}
+        try:
+            return self._wiring_gate_loop(conns, items, proj, failures, run_check)
+        finally:
+            self._apply_wiring_states(design)
+
+    def _wiring_gate_loop(self, conns, items, proj, failures, run_check) -> bool:
         for round_ in range(1, 4):
             states = {c.signal: (proj.state(c.signal) if proj is not None else "计划") for c in conns}
             need_user = bool(failures) or any(c.unplug or states[c.signal] != "实测" for c in conns)
@@ -369,9 +393,10 @@ class EmbeddedFlow:
                 if ans == "cancel":
                     self.result.error = "停在了接线这一步（你选择了停止）"
                     return False
-                if proj is not None:
-                    for c in conns:
-                        if proj.state(c.signal) != "实测" or failures:
+                for c in conns:
+                    if proj is None or proj.state(c.signal) != "实测" or failures:
+                        self._wire_states[c.signal] = ("已接", "负责人确认接好")
+                        if proj is not None:
                             proj.set_state(c.signal, "已接", "负责人确认接好")
             if not items:
                 self.bus.emit("wiring_selfcheck", "wiring", round=round_, ok=None, items=[],
@@ -385,8 +410,11 @@ class EmbeddedFlow:
                 return True
             for it in chk.items:
                 for sig in it.get("signals", []):
-                    if proj is not None and it["ok"] is not None:
-                        proj.set_state(sig, "实测" if it["ok"] else "不符", it.get("detail", ""))
+                    if it["ok"] is not None:
+                        st = "实测" if it["ok"] else "不符"
+                        self._wire_states[sig] = (st, it.get("detail", ""))
+                        if proj is not None:
+                            proj.set_state(sig, st, it.get("detail", ""))
             self.rd.write_json("wiring_check.json", {"round": round_, "items": chk.items})
             self.bus.emit("wiring_selfcheck", "wiring", round=round_, ok=chk.all_ok, items=chk.items)
             if chk.all_ok:

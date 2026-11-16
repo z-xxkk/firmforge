@@ -11,7 +11,9 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-ORIGINS = ("user", "document", "measured", "default")      # 用户说的 / 资料 / 实测 / 默认值
+# 用户说的 / 资料 / 实测 / 默认值 / 设计计划还没接好或没测过 / 实测和计划不符（后两种只出现在项目接线里，第 134 条）
+ORIGINS = ("user", "document", "measured", "default", "planned", "mismatch")
+WIRE_PREFIX = "接到 "          # 项目接线的说明以它开头：接到 3V3；状态……（第 134 条）
 _SIGNAL = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 
 
@@ -133,7 +135,13 @@ class HardwareProfile:
         lines = [f"芯片：{self.chip.value}（{self.chip_variant.value}）",
                  f"板子：{self.board.value}",
                  f"开发框架：{self.framework.value} {self.framework_version.value}"]
-        if self.pins:
+        if self.pins and any(f.note.startswith(WIRE_PREFIX) for f in self.pins.values()):
+            # 项目接线（第 134 条）：每根线另一端接什么、平台实测到哪一步；没实测的线不能对读数写断言
+            lines.append("这个项目的接线（状态由平台按实测给出）：")
+            for s, f in sorted(self.pins.items()):
+                warn = "" if f.origin == "measured" else "——还没实测确认，读数不确定，不要对这根线的数值写断言"
+                lines.append(f"  {s}=GPIO{f.value}，{f.note}{warn}")
+        elif self.pins:
             lines.append("引脚：" + "，".join(f"{s}=GPIO{f.value}" for s, f in sorted(self.pins.items())))
         if self.reserved_pins:
             by_reason: dict[str, list[int]] = {}

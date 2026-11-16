@@ -327,6 +327,27 @@
     ]
   },
   {
+    "id": "R-ADC-015",
+    "kind": "peripheral",
+    "scope": [
+      "adc"
+    ],
+    "text": "本板 ADC 在 12 dB 衰减下读 3V3 只到约 3005 mV（校准换算的上限）：接 3V3 的输入按 2800–3100 mV 判断；要检验换算准不准，用分压把电压放到 1–2.5 V 之间",
+    "cite": {
+      "doc": "board-measured",
+      "page": null,
+      "section": "M-005 ADC 读 3V3 的读数",
+      "quote": "GPIO1 接 3V3 时读到 3005 mV，已经到 12 dB 衰减下校准换算的上限，读不出 3.3 V。"
+    },
+    "tier": "user",
+    "status": "trusted",
+    "check": null,
+    "notes": [
+      "规则判定器通过",
+      "人工确认（负责人 2026-11-16，DECISIONS 第 136 条）"
+    ]
+  },
+  {
     "id": "R-ERR-001",
     "kind": "sequence",
     "scope": [
