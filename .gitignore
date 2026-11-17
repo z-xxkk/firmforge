@@ -11,3 +11,4 @@ dist/
 .ff_chats/
 .venv/
 .ff_sources/
+.ff_projects/
