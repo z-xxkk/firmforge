@@ -1412,8 +1412,14 @@ class ChatPage(QWidget):
             else:
                 bad = "、".join(i["name"].removeprefix("接线自检：") for i in items if i.get("ok") is False)
                 self.add_line(Dot(T()["fail"]), f"{node} 接线自检发现不通：{bad}，停下等你查线")
+        elif t == "human_wait" and node == "wiring":     # 接线一步（第 134 条）：列出这次要接的线
+            rows = "\n".join(f"- GPIO{c['gpio']} → {c['to']}　`{c['signal']}`" for c in d.get("connections", []))
+            fails = "；".join(f"{x.get('detail', '')}" for x in d.get("failures", []))
+            self.add_agent("FirmForge", "reviewer", ("自检没对上（" + fails + "），等你检查线：\n\n" if fails else
+                                                     "开始写代码之前等你按清单接线：\n\n") + rows)
         elif t == "human_wait" and node != "rules":
-            self.add_agent("FirmForge", "reviewer", f"模块 **{node}** 停下了：{d.get('reason', '')}\n\n{d.get('instruction', '')}")
+            what = "主程序" if node == "app" else f"模块 **{node}**"
+            self.add_agent("FirmForge", "reviewer", f"{what}停下了：{d.get('reason', '')}\n\n{d.get('instruction', '')}")
         elif t == "escalated" and d.get("level") == "rule":
             self.add_line(f"{node} 对规则 {d.get('rule')} 有异议，交给规则判定器重新核对")
         elif t == "run_finished":
