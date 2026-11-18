@@ -1,6 +1,7 @@
-# 模块开发工作流模板（ARCHITECTURE §2.7）。具体拆成哪些模块由规划 Agent 在运行时决定。
+# 工作流 module_dev 1.0.1。由 FirmForge 设计器保存；也可以手改，设计器打开时会照着画。
 name = "module_dev"
-version = "1.0.0"
+version = "1.0.1"
+based_on = "1.0.0"
 
 [[main]]
 id = "plan"
@@ -9,12 +10,12 @@ role = "planner"
 
 [[main]]
 id = "confirm_plan"
-kind = "human"                    # 只有开启 human_review 时才停下等待确认
+kind = "human"
 enabled_by = "human_review"
 
 [[main]]
 id = "modules"
-kind = "foreach"                  # 对规划出的每个模块实例化子流程，按依赖并行
+kind = "foreach"
 over = "plan.modules"
 subflow = "module_impl"
 
@@ -23,7 +24,6 @@ id = "integrate"
 kind = "verify"
 scope = "all"
 
-# 子流程：每个模块一份。编码与写测试并行；判定没过进入修正循环；通过后审查（只作提示）
 [[subflow.module_impl.steps]]
 id = "write"
 kind = "parallel"
@@ -48,7 +48,7 @@ scope = "module"
 id = "repair"
 kind = "loop"
 until = "verify_passed"
-body = "repair_round"             # 诊断 → 按责任交给编码或测试 Agent → 再判定；变差则回滚
+body = "repair_round"
 max = "loop.max_attempts_per_module"
 
 [[subflow.module_impl.steps]]
@@ -60,4 +60,4 @@ then = ["review"]
 [[subflow.module_impl.steps]]
 id = "review"
 kind = "agent"
-role = "reviewer"                 # 只作提示，最多触发 1 次额外修改，不能否决通过
+role = "reviewer"
