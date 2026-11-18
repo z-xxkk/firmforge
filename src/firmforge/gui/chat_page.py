@@ -1640,6 +1640,11 @@ class ChatPage(QWidget):
                 code += f"// ===== src/{f.name} =====\n{f.read_text(encoding='utf-8', errors='replace')}\n"
         self.layer_detail.setPlainText(detail or "（还没有报告）")
         self.code_view.setPlainText(code or "（还没有代码）")
+        self._fill_why(mid)
+        self.show_brief(("call", None, mid), switch=False)
+
+    def _fill_why(self, mid: str) -> None:
+        """"调度"标签：这个模块交给谁、每个候选的得分明细（两种流程都有调度器，第 110 条）。"""
         a = self.view.assignments.get(mid, {})
         scores = a.get("scores", {})
         self.why_reason.setText(scores.get("reason", "") + (f"\n成本依据：{scores['cost_basis']}" if scores.get("cost_basis") else ""))
@@ -1648,7 +1653,6 @@ class ChatPage(QWidget):
         for r, (name, s) in enumerate(cands.items()):
             for col, val in enumerate([name, s.get("p_hat"), s.get("cost_norm"), s.get("load"), s.get("explore"), s.get("score")]):
                 self.why.setItem(r, col, QTableWidgetItem(str(val if not isinstance(val, float) else round(val, 2))))
-        self.show_brief(("call", None, mid), switch=False)
 
     def _select_embedded(self, mid: str, mv):
         """新流程：检查报告、上板测试、代码、用到的规则都从运行目录里这一次尝试的文件读。"""
@@ -1662,6 +1666,7 @@ class ChatPage(QWidget):
         self.board_view.show_log(log_dir / "serial.log" if log_dir is not None else None,
                                  f"{mid} 第 {log_dir.name.split('_')[-1]} 次" if log_dir is not None else mid)
         self.rules_view.setPlainText(bv.rules_used_text(self.run_dir, self.project / self.hw / "rules.json"))
+        self._fill_why(mid)                              # 上板流程以前漏了这一步，"调度"标签一直是空的
         self.show_brief(("call", None, mid), switch=False)
 
     def export_code(self):

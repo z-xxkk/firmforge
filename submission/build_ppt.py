@@ -175,11 +175,11 @@ def agenda(prs):
     s = prs.slides.add_slide(prs.slide_layouts.get_by_name("标题和内容"))
     text(s, 1.6, 2.6, 1.6, 2.4, [("目", 54, True, WHITE, PP_ALIGN.CENTER, 0), ("录", 54, True, WHITE, PP_ALIGN.CENTER, 0)],
          name="目录二字")
-    items = [("1　选题背景", "让 AI 写控制硬件的代码，难在哪里"),
-             ("2　平台架构与协作流程", "六层架构 · AI 团队 · 谁做什么、交给谁"),
-             ("3　调度、返工与验证", "任务交给谁 · 错了怎么改 · 对错怎么判"),
-             ("4　核心创新：把对的信息传给对的人", "事实分等级 · 接线实测 · 交代的事要核对"),
-             ("5　运行效果与评测", "真实演示 · 与单个 AI 对比 · 性能")]
+    items = [("1　选题背景与平台概览", "让 AI 写控制硬件的代码，难在哪里"),
+             ("2　架构与协作流程", "六层架构 · 谁做什么、交给谁"),
+             ("3　软件亮点", "工程图 · 接线图与实测 · 知识库 · AI 团队与流程设计器"),
+             ("4　调度、返工与验证", "任务交给谁 · 错了怎么改 · 怎么防 AI 出错"),
+             ("5　核心创新与效果", "把对的信息传给对的人 · 真实演示 · 评测数据")]
     paras = []
     for a, b in items:
         paras.append((a, 20, True, WHITE, PP_ALIGN.LEFT, 0))
@@ -361,7 +361,10 @@ def slide_sched(prs):
     cd = CategoryChartData()
     cd.categories = ["一个接一个", "同时 2 个", "同时 4 个", "同时 8 个"]
     cd.add_series("4 个模块总用时（秒）", (20.7, 11.5, 7.4, 5.5))
-    gf = s.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(7.5), Inches(1.8), Inches(5.3), Inches(3.9), cd)
+    _, hs = shot(s, "15_调度明细.png", (1000, 700, 1592, 848), 7.5, 1.8, w=5.3)
+    text(s, 7.5, 1.8 + hs + 0.05, 5.3, 0.35, [("软件里每个模块的\"调度\"标签：为什么交给这个 AI，每个候选的得分", 11, False, MUTED)])
+    gf = s.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(7.5), Inches(1.8 + hs + 0.45), Inches(5.3),
+                            Inches(5.7 - (1.8 + hs + 0.45)), cd)
     ch = gf.chart
     ch.has_title = True
     ch.chart_title.text_frame.text = "并行调度：4 个模块总用时（秒，越低越好）"
@@ -405,26 +408,6 @@ def slide_loop(prs):
     notes(s, "没通过时，诊断员判断错在哪，平台交给对应的角色修，还会检查交代的事有没有做。怀疑硬件时先实测，不靠 AI 猜。")
 
 
-def slide_verify(prs):
-    s = content(prs, "结果验证：对错由客观检查判定，不让 AI 自己给自己打分")
-    layers = [("规范检查", "引脚只能用平台给的名字，必须遵守确认过的硬件规则"), ("编译", "代码能不能变成芯片能运行的程序"),
-              ("装板测试", "烧进开发板，逐个测试单独运行，读回结果"), ("接线实测", "每根线是否真的接好、读数是否正常"),
-              ("故意改坏", "测试能不能发现被故意改错的代码"), ("主程序运行", "装板跑两轮：第一次开机、断电重启后各看一次"),
-              ("隐藏考题", "只在评测时用，AI 完全看不到，像考官手里的试卷")]
-    for i, (h, d) in enumerate(layers):
-        y = 1.8 + i * 0.64
-        card(s, 0.6, y, 6.3, 0.56)
-        text(s, 0.75, y, 1.6, 0.56, [(h, 14, True, BLUE, PP_ALIGN.LEFT, 0)], anchor=MSO_ANCHOR.MIDDLE)
-        text(s, 2.35, y, 4.5, 0.56, [(d, 12, False, INK, PP_ALIGN.LEFT, 0)], anchor=MSO_ANCHOR.MIDDLE)
-    text(s, 7.3, 1.8, 5.5, 4.6, [
-        ("为什么不能让 AI 自己判", 18, True, BLUE, PP_ALIGN.LEFT, 8),
-        ("AI 写的测试可能和代码一起错（比如把标准放宽），自己判自己就会\"自我感觉良好\"。", 14, False, INK, PP_ALIGN.LEFT, 8),
-        ("所以：测试员看不到代码；评测时用隐藏考题当裁判——平台自己的结论和考官一致的比例从 56% 提升到 72%。", 14, False, INK, PP_ALIGN.LEFT, 8),
-        ("主程序要输出什么，第一次说了就锁定，不许事后改小（真跑中发现过 AI 删掉自己做不到的要求）。", 14, False, INK, PP_ALIGN.LEFT, 8),
-        ("没工具、没接板子时如实标\"跳过\"，绝不算通过。", 14, False, INK, PP_ALIGN.LEFT, 8)])
-    notes(s, "七道客观检查。关键是不让 AI 自己给自己打分：测试员看不到代码，评测时用 AI 看不到的隐藏考题当裁判。")
-
-
 def slide_innovation(prs):
     s = content(prs, "核心创新：多个 AI 协作，关键是把对的信息传给对的人", dark=True)
     text(s, 0.6, 1.75, 5.9, 4.7, [
@@ -446,20 +429,6 @@ def slide_innovation(prs):
     notes(s, "这是我们最重要的发现：多个 AI 协作，问题往往不是讨论不够，而是拿到的事实是错的。所以我们让每条事实带等级，由平台根据实测来升级。")
 
 
-def slide_wiring(prs):
-    s = content(prs, "接线实测：线没接对，就不往下写代码")
-    pic = picture(s, SHOTS / "05_接线清单与自检没对上.png", 0.6, 1.8)
-    crop_to(pic, 6.9, 4.3)
-    text(s, 7.8, 1.8, 5.0, 4.6, [
-        ("真实运行记录", 18, True, BLUE, PP_ALIGN.LEFT, 8),
-        ("设计师给出：把 0 号引脚接到 3.3 伏电源，用来测电压，接好后应读到约 3 伏；并提醒先拔掉原来的线", 14, False, INK, PP_ALIGN.LEFT, 10),
-        ("第 1 次实测：只有 0.45 伏 → 没接好，平台停下，告诉你实测值", 14, False, RED, PP_ALIGN.LEFT, 10),
-        ("重新接线后：3.0 伏 → 对上了，才开始写代码", 14, False, GREEN, PP_ALIGN.LEFT, 10),
-        ("没有这一步之前，AI 对着一根没接好的线白白试了 4 次", 14, False, INK, PP_ALIGN.LEFT, 10),
-        ("实测程序是平台自己写的，结果不经过 AI：能测传感器有没有回应、两个引脚通不通、电压多少、电平高低", 12, False, MUTED, PP_ALIGN.LEFT, 0)])
-    notes(s, "真跑时的截图：第一次线没接好，只测到 0.45 伏，平台拦下；重新接好后 3 伏，才开始写代码。")
-
-
 def slide_demo(prs):
     s = content(prs, "运行效果：一句话需求，22 分钟、0.86 元交付装板验证过的程序")
     pic = picture(s, SHOTS / "01_对话_一次完整运行.png", 0.6, 1.8)
@@ -477,13 +446,128 @@ def slide_demo(prs):
     notes(s, "一个真实需求从头到尾：快档模型 22 分钟、不到一块钱，4 个模块和主程序全部通过，并在板子上实际运行验证。")
 
 
-def slide_eval(prs):
+def shot(slide, name: str, region, x, y, *, w=None, h=None):
+    """截图的一块（像素区域 left, top, right, bottom），按宽或高放进页面，不变形。返回 (宽, 高)。"""
+    from PIL import Image
+    path = SHOTS / name
+    iw, ih = Image.open(path).size
+    l, t, r, b = region
+    aspect = (r - l) / (b - t)
+    if w is None:
+        w = h * aspect
+    if h is None:
+        h = w / aspect
+    pic = slide.shapes.add_picture(str(path), Inches(x), Inches(y), Inches(w), Inches(h))
+    pic.crop_left, pic.crop_top = l / iw, t / ih
+    pic.crop_right, pic.crop_bottom = 1 - r / iw, 1 - b / ih
+    pic.width, pic.height = Inches(w), Inches(h)
+    pic.line.color.rgb = RGBColor(0xC9, 0xCE, 0xD4)
+    pic.line.width = Pt(0.75)
+    return w, h
+
+
+def bullets(slide, x, y, w, h, items, *, head=None, size=13, gap=9):
+    paras = [(head, 18, True, BLUE, PP_ALIGN.LEFT, 8)] if head else []
+    for it in items:
+        if isinstance(it, tuple):
+            paras.append((it[0], size + 1, True, INK, PP_ALIGN.LEFT, 1))
+            paras.append((it[1], size - 1, False, MUTED, PP_ALIGN.LEFT, gap))
+        else:
+            paras.append((it, size, False, INK, PP_ALIGN.LEFT, gap))
+    return text(slide, x, y, w, h, paras)
+
+
+def slide_map(prs):
+    s = content(prs, "亮点：工程图——整个项目一眼看清")
+    shot(s, "14_工程图展开_带传感器.png", (0, 0, 1600, 960), 0.6, 1.75, w=7.9)
+    bullets(s, 8.8, 1.75, 4.0, 4.9, [
+        ("自动画出整个工程", "设计好以后，平台自动画出每个模块在哪一层、提供哪些接口、连到芯片的哪个外设、外面接了什么器件"),
+        ("状态实时变色", "每个模块正在写、在测、通过、没通过，图上随时看得到；测试通过了几个也写在上面"),
+        ("\"已实测确认\"", "器件旁边的这个标记，表示上板时平台确认它真的回应了，不是 AI 说接好了就算"),
+        ("点一下看细节", "点任何一个模块，下面直接看它每一次的尝试、诊断、上板输出和代码")], size=13)
+    notes(s, "这是工程图。设计好以后平台自动画出整个工程：模块、接口、芯片外设、外接器件。模块状态实时变色，器件旁标着已实测确认。点一个模块，下面就是它的修正过程。")
+
+
+def slide_wiring(prs):
+    s = content(prs, "亮点：接线图 + 接线实测——线接得对不对，平台自己测")
+    w1, _ = shot(s, "13_接线图_带传感器.png", (1000, 95, 1590, 590), 0.6, 1.75, h=4.0)
+    text(s, 0.6, 5.85, w1, 0.7, [("接线图：芯片每个引脚接到哪个器件的哪个脚，一目了然；绿字表示这根线已在板子上实测确认", 12, False, MUTED)])
+    x2 = 0.6 + w1 + 0.35
+    w2 = 12.75 - x2
+    _, h2 = shot(s, "05_接线清单与自检没对上.png", (335, 188, 985, 415), x2, 1.75, w=w2)
+    bullets(s, x2, 1.75 + h2 + 0.2, w2, 6.6 - (1.75 + h2 + 0.2), [
+        "写代码之前，平台先列出接线清单：每根线两头接哪里、为什么",
+        "你接好后，平台烧一个自己写的小程序去实测：第一次只测到 0.45 伏，就停下来告诉你哪根线不对",
+        "重新接好、测到 3 伏才开始写代码——没有这一步时，AI 曾对着一根没接好的线白试了 4 次"], size=13, gap=7)
+    notes(s, "左边是接线图，每个引脚接到哪个器件的哪个脚都画出来了。右边是接线清单：线没接好时，平台实测只有 0.45 伏，就停下来告诉你，接好了才写代码。")
+
+
+def slide_kb(prs):
+    s = content(prs, "亮点：知识库——每条硬件事实都有出处，说明书和实测对不上会标出来")
+    _, h = shot(s, "16_知识库_规则出处.png", (336, 55, 1592, 400), 0.6, 1.75, w=12.15)
+    y = 1.75 + h + 0.3
+    items = [("按目录管理", "芯片、开发框架、外接器件、开发板分门别类；规则、资料、实测记录都能搜"),
+             ("每条规则带原文", "引用说明书哪一页的哪句话；平台核对原文真的存在，人确认后才给 AI 用"),
+             ("说明书和实测对不上", "比如传感器编号说明书写 0x68、实测是 0x70：两种都列出，以实测为准")]
+    for i, (hd, d) in enumerate(items):
+        x = 0.6 + i * 4.1
+        card(s, x, y, 3.85, 6.7 - y)
+        text(s, x + 0.15, y + 0.08, 3.55, 6.7 - y - 0.16, [(hd, 15, True, BLUE, PP_ALIGN.LEFT, 3), (d, 12, False, INK, PP_ALIGN.LEFT, 0)])
+    notes(s, "知识库里每条硬件规则都带说明书原文出处，平台会核对原文确实存在，人确认后才交给 AI。说明书和实测对不上的地方会单独标出来，以实测为准。")
+
+
+def slide_failed(prs):
+    s = content(prs, "亮点：实在修不好时，先讲清楚，再交给你决定")
+    w1, _ = shot(s, "06_没通过的讲解与人工放行.png", (335, 60, 985, 690), 0.6, 1.72, h=4.95)
+    x2 = 0.6 + w1 + 0.4
+    bullets(s, x2, 1.75, 12.75 - x2, 4.9, [
+        ("从第一次失败到现在发生了什么", "平台按运行记录自动整理（不经过 AI，讲解本身不会出错）：每次卡在哪、诊断怎么说、交给谁改了"),
+        ("一句话点出关键", "比如\"代码 4 次都没改过，问题都出在测试或验收标准上\""),
+        ("放行有什么风险", "哪些要求没被证明、交付的是哪一版、会影响哪些后续模块"),
+        ("三个选择", "接着修（再试 3 次、换更强的 AI、可以带一句提示）／人工放行（必须写理由并再确认一次，结论如实记\"人工放行\"）／放弃")],
+        size=13, gap=8)
+    notes(s, "AI 实在修不好时，平台不是简单报错，而是先讲清楚经过和风险，再让你选接着修、人工放行或者放弃。放行必须写理由，结论如实记为人工放行，不算通过。")
+
+
+def slide_ai_verify(prs):
+    s = content(prs, "AI 用在哪里，又怎么防它出错")
+    rows = [("查资料", "在说明书里检索、提炼硬件规则", "核对原文 + 你确认"),
+            ("设计", "拆模块、定标准、定接线", "做不到的标准、占用已有的线 → 退回"),
+            ("写代码 / 测试", "快档 / 强档模型 + 调用工具", "互相看不到 + 故意改坏 + 隐藏考题"),
+            ("诊断", "判断错在哪", "怀疑硬件先实测；交代的事平台核对"),
+            ("集成", "写主程序和应有的输出", "要输出什么第一次说了就锁定"),
+            ("工具与记忆", "MCP 对接外部工具；错题本", "外部工具默认先问你；评测时只读")]
+    hdr = [("环节", 1.7), ("AI 做什么", 3.0), ("怎么防它出错", 3.6)]
+    x = 0.6
+    for h, w in hdr:
+        card(s, x, 1.8, w - 0.08, 0.45, fill=BLUE)
+        text(s, x, 1.8, w - 0.08, 0.45, [(h, 13, True, WHITE, PP_ALIGN.CENTER, 0)], anchor=MSO_ANCHOR.MIDDLE)
+        x += w
+    for i, r in enumerate(rows):
+        y = 2.33 + i * 0.62
+        x = 0.6
+        for (c, (_, w)) in zip(r, hdr):
+            card(s, x, y, w - 0.08, 0.54)
+            text(s, x + 0.08, y, w - 0.24, 0.54, [(c, 12, c == r[0], BLUE if c == r[0] else INK, PP_ALIGN.LEFT, 0)],
+                 anchor=MSO_ANCHOR.MIDDLE)
+            x += w
+    checks = ["规范检查：引脚、规则写得对不对", "编译：能不能变成芯片能运行的程序", "装板测试：烧进开发板逐个运行",
+              "接线实测：每根线真的接好了没有", "故意改坏：测试能不能发现错误", "主程序运行：开机、重启各跑一次",
+              "隐藏考题：只在评测用，AI 看不到"]
+    card(s, 9.2, 1.8, 3.6, 4.85, fill=TINT)
+    text(s, 9.35, 1.88, 3.35, 4.7, [("七道客观检查（不经过 AI）", 14, True, BLUE, PP_ALIGN.LEFT, 6)]
+         + [(c, 12, False, INK, PP_ALIGN.LEFT, 5) for c in checks]
+         + [("判断对错、讲解失败、确认硬件事实、决定放行，这几件事不交给 AI", 12, True, ORANGE, PP_ALIGN.LEFT, 0)])
+    notes(s, "AI 在每个环节做什么、可能出什么错、我们怎么防；右边是七道不经过 AI 的客观检查。判断对错这类事不交给 AI。")
+
+
+def slide_eval_perf(prs):
     s = content(prs, "量化评测：难题通过率 39% → 67%")
     cd = CategoryChartData()
     cd.categories = ["单个 AI", "多个 AI·不给资料", "完整系统"]
     cd.add_series("改进前", (33, 33, 39))
     cd.add_series("改进后", (33, 61, 67))
-    gf = s.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(0.6), Inches(1.8), Inches(6.6), Inches(4.2), cd)
+    gf = s.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(0.6), Inches(1.75), Inches(6.3), Inches(3.55), cd)
     ch = gf.chart
     ch.has_title = True
     ch.chart_title.text_frame.text = "6 道上板难题的通过率（%，每种方案 18 次）"
@@ -505,65 +589,19 @@ def slide_eval(prs):
     ch.value_axis.visible = False
     ch.value_axis.maximum_scale = 80
     ch.category_axis.tick_labels.font.size = Pt(12)
-    text(s, 0.6, 6.05, 6.6, 0.5, [("完整系统 = 多个 AI + 人确认过的硬件资料 + 智能调度 + 错题本；单个 AI 只测了一次作为对照", 11, False, MUTED)])
-    text(s, 7.6, 1.8, 5.2, 4.7, [
-        ("怎么测的", 16, True, BLUE, PP_ALIGN.LEFT, 4),
-        ("15 道上板题，每题有标准答案和 AI 看不到的考题；每种方案每题跑 3 次，看能不能通过考题", 13, False, INK, PP_ALIGN.LEFT, 10),
-        ("完整系统提升 28 个百分点，经统计检验不是运气（超过两倍误差范围）；\"多个 AI·不给资料\"的提升刚好过线，结论还不稳", 13, False, INK, PP_ALIGN.LEFT, 10),
-        ("把硬件问题误判成别的、提前放弃：9 次 → 0 次", 13, False, INK, PP_ALIGN.LEFT, 10),
-        ("4 道没见过的新题：完整系统全部通过；但这几题较简单，单个 AI 也能过，不能据此说多个 AI 更好", 13, False, INK, PP_ALIGN.LEFT, 10),
-        ("全部测量共花 22.58 元，所有运行记录都保留、可复查", 12, False, MUTED, PP_ALIGN.LEFT, 0)])
-    notes(s, "在难题上，完整系统从 39% 提升到 67%，经统计检验不是运气。我们也如实说明了结论不稳的地方。")
-
-
-def slide_perf(prs):
-    s = content(prs, "性能与工程质量")
-    stats = [("4.5 秒", "AI 回一次话的典型时间", "快档模型，3074 次的中位数"), ("8.2 秒", "一次检查（编译 + 装板测试）", "657 次的中位数，最长 30 秒"),
-             ("3.7 倍", "多个 AI 同时干活的提速", "4 个模块时，相对一个接一个"), ("99%", "翻说明书工具的成功率", "1172 次")]
-    for i, (big, lab, sub) in enumerate(stats):
-        x = 0.6 + i * 3.1
-        card(s, x, 1.85, 2.9, 2.0)
-        text(s, x, 1.95, 2.9, 0.85, [(big, 34, True, BLUE, PP_ALIGN.CENTER, 0)])
-        text(s, x + 0.1, 2.85, 2.7, 0.45, [(lab, 13, True, INK, PP_ALIGN.CENTER, 0)])
-        text(s, x + 0.1, 3.3, 2.7, 0.45, [(sub, 11, False, MUTED, PP_ALIGN.CENTER, 0)])
-    text(s, 0.6, 4.2, 12.1, 2.3, [
-        ("平台本身怎么保证不出错", 16, True, BLUE, PP_ALIGN.LEFT, 6),
-        ("625 个自动化测试用例（用假 AI，不联网、不花钱），包括随机乱点界面的长时间测试；还会故意改坏平台代码，检验这些测试管不管用", 14, False, INK, PP_ALIGN.LEFT, 6),
-        ("15 道上板题全部经过真板自检：标准答案能通过，故意写错的版本会被抓住", 14, False, INK, PP_ALIGN.LEFT, 6),
-        ("140 条设计决定全部记录在案；每次运行的过程、AI 的每次回复、每一版代码都留档，可以回放复查", 14, False, INK, PP_ALIGN.LEFT, 6)])
-    notes(s, "AI 回一次话典型 4.5 秒，一次检查 8 秒左右；平台本身有 625 个自动化测试保证可靠，所有过程都留档可复查。")
-
-
-def slide_ai(prs):
-    s = content(prs, "AI 用在哪里，又在哪里不能信它")
-    rows = [("查资料", "在说明书里检索、提炼硬件规则", "可能引错原文 → 核对原文 + 你确认"),
-            ("设计", "拆模块、定标准、定接线", "可能提出做不到的标准 → 平台检查退回"),
-            ("写代码 / 测试", "快档 / 强档模型 + 调用工具", "可能一起错 → 互相看不到 + 故意改坏 + 隐藏考题"),
-            ("诊断", "判断错在哪", "会误判硬件 → 先实测；交代的事平台核对"),
-            ("集成", "写主程序和应有的输出", "可能把要求改小 → 第一次说了就锁定"),
-            ("工具与记忆", "MCP 对接外部工具；错题本", "外部工具默认先问你；评测时错题本只读")]
-    hdr = [("环节", 1.75), ("AI 做什么", 3.2), ("可能出什么错 → 怎么防", 4.15)]
-    x = 0.6
-    for h, w in hdr:
-        card(s, x, 1.8, w - 0.08, 0.45, fill=BLUE)
-        text(s, x, 1.8, w - 0.08, 0.45, [(h, 13, True, WHITE, PP_ALIGN.CENTER, 0)], anchor=MSO_ANCHOR.MIDDLE)
-        x += w
-    for i, r in enumerate(rows):
-        y = 2.33 + i * 0.6
-        x = 0.6
-        for (c, (_, w)) in zip(r, hdr):
-            card(s, x, y, w - 0.08, 0.52)
-            text(s, x + 0.08, y, w - 0.24, 0.52, [(c, 12, c == r[0], BLUE if c == r[0] else INK, PP_ALIGN.LEFT, 0)],
-                 anchor=MSO_ANCHOR.MIDDLE)
-            x += w
-    text(s, 9.9, 1.8, 2.9, 4.6, [
-        ("不交给 AI 的事", 15, True, BLUE, PP_ALIGN.LEFT, 6),
-        ("判断对错", 13, False, INK, PP_ALIGN.LEFT, 4), ("讲解失败经过", 13, False, INK, PP_ALIGN.LEFT, 4),
-        ("最终确认硬件事实", 13, False, INK, PP_ALIGN.LEFT, 4), ("决定是否放行", 13, False, INK, PP_ALIGN.LEFT, 12),
-        ("目前的不足", 15, True, BLUE, PP_ALIGN.LEFT, 6),
-        ("只在一款开发板上完整验证", 12, False, INK, PP_ALIGN.LEFT, 3), ("测试悄悄放宽标准还发现不了", 12, False, INK, PP_ALIGN.LEFT, 3),
-        ("评测题数量还不多", 12, False, INK, PP_ALIGN.LEFT, 3)])
-    notes(s, "每个环节 AI 做什么、可能出什么错、我们怎么防。判断对错、讲解失败、确认硬件事实、是否放行，这几件事不交给 AI。")
+    bullets(s, 7.2, 1.75, 5.6, 3.6, [
+        "15 道上板题，每题有标准答案和 AI 看不到的考题；每种方案每题跑 3 次",
+        "完整系统提升 28 个百分点，经统计检验不是运气；\"不给资料\"的提升刚过线，结论还不稳",
+        "把硬件问题误判、提前放弃：9 次 → 0 次",
+        "4 道没见过的新题全部通过；但这几题较简单，单个 AI 也能过，不能据此说多个 AI 更好"], size=13, gap=7)
+    stats = [("4.5 秒", "AI 回一次话（中位数）"), ("8.2 秒", "一次编译 + 装板测试"), ("3.7 倍", "4 个 AI 同时干活提速"),
+             ("625 个", "平台自动化测试全过")]
+    for i, (big, lab) in enumerate(stats):
+        x = 0.6 + i * 3.08
+        card(s, x, 5.5, 2.9, 1.1)
+        text(s, x, 5.52, 2.9, 0.6, [(big, 24, True, BLUE, PP_ALIGN.CENTER, 0)], anchor=MSO_ANCHOR.MIDDLE)
+        text(s, x, 6.1, 2.9, 0.42, [(lab, 12, False, INK, PP_ALIGN.CENTER, 0)], anchor=MSO_ANCHOR.MIDDLE)
+    notes(s, "难题上完整系统从 39% 提升到 67%，经统计检验不是运气；下面是性能：AI 回一次话 4.5 秒，一次检查 8 秒左右，多个 AI 同时干活快 3.7 倍。")
 
 
 def closing(prs):
@@ -582,8 +620,9 @@ def main() -> None:
         ids.remove(sid)
     cover(prs)
     agenda(prs)
-    for build in (slide_background, slide_overview, slide_arch, slide_agents, slide_flow, slide_sched, slide_loop,
-                  slide_verify, slide_innovation, slide_wiring, slide_demo, slide_eval, slide_perf, slide_ai):
+    for build in (slide_background, slide_overview, slide_arch, slide_flow, slide_map, slide_wiring, slide_kb,
+                  slide_agents, slide_sched, slide_loop, slide_ai_verify, slide_innovation, slide_failed, slide_demo,
+                  slide_eval_perf):
         build(prs)
     closing(prs)
     prs.save(str(OUT))
