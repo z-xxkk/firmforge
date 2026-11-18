@@ -107,6 +107,15 @@ def is_gui_run(rd: Path) -> bool:
     return "gui" in parts[2:] and parts[-1] in ("gui",) + tuple(str(i) for i in range(2, 10))
 
 
+def _run_names() -> dict:
+    """单次运行改过的名字：{运行目录名: 名字}，存在设置里（不改运行记录本身）。"""
+    try:
+        d = json.loads(QSettings().value("chat/run_names", "{}", type=str) or "{}")
+        return d if isinstance(d, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
 def run_title(rd: Path, width: int = 24) -> str:
     """对话列表里的标题：需求原文的开头；取不到需求就用运行编号。"""
     text = " ".join(run_spec(rd).split())
@@ -366,6 +375,14 @@ class ChatPage(QWidget):
         self.sessions.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.sessions.setTextElideMode(Qt.ElideRight)
         self.sessions.itemClicked.connect(self._open_session)
+        # 右键菜单（打开、重命名、在文件夹中显示、复制路径、删除），可以按 Ctrl/Shift 多选后一起删；Delete 键也能删
+        self.sessions.setSelectionMode(QListWidget.ExtendedSelection)
+        self.sessions.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.sessions.customContextMenuRequested.connect(self._session_menu)
+        from PySide6.QtGui import QKeySequence, QShortcut
+        sc = QShortcut(QKeySequence.Delete, self.sessions)
+        sc.setContext(Qt.WidgetShortcut)
+        sc.activated.connect(lambda: self.delete_sessions(self._picked_sessions()))
         left.lay.addWidget(self.sessions, 1)
         # 评测、命令行跑出来的运行默认不列（一次评测就几十条，会把对话淹没）；要看再勾上
         self.show_cli_runs = QCheckBox("显示评测和命令行的运行")
@@ -691,6 +708,8 @@ class ChatPage(QWidget):
                     except (OSError, json.JSONDecodeError):
                         pass
             mark = {"pass": "●", "fail": "●", "error": "●"}.get(verdict, "○")
+            if kind in ("gui", "run"):
+                title = _run_names().get(Path(path).name, title)     # 运行改过名就用改的名字
             it = QListWidgetItem(f"运行 {title}" if kind == "run" else title)
             if kind == "gui":
                 kind = "run"                           # 打开时和其他运行一样回放
@@ -701,10 +720,164 @@ class ChatPage(QWidget):
                 it.setText(f"{it.text()}  {mark}")
             self.sessions.addItem(it)
 
+    # ------------------------------------------------------------ 会话右键菜单（负责人 2026-11-18：像常见 Agent 软件一样能删没用的对话）
+
+    def _picked_sessions(self) -> list:
+        return [it for it in self.sessions.selectedItems() if it.data(Qt.UserRole)]
+
+    def _session_menu(self, pos):
+        from PySide6.QtGui import QAction
+        from PySide6.QtWidgets import QMenu
+        item = self.sessions.itemAt(pos)
+        if item is None or not item.data(Qt.UserRole):
+            return
+        if not item.isSelected():                         # 右键没选中的那条：只对这一条操作
+            self.sessions.clearSelection()
+            item.setSelected(True)
+        items = self._picked_sessions()
+        menu = QMenu(self)
+        one = len(items) == 1
+        for text, fn in (("打开", lambda: self._open_session(item)),
+                         ("重命名…", lambda: self.rename_session(item)),
+                         ("在文件夹中显示", lambda: self._reveal_session(item)),
+                         ("复制路径", lambda: self._copy_session_path(item))):
+            act = QAction(text, menu)
+            act.setEnabled(one)
+            act.triggered.connect(fn)
+            menu.addAction(act)
+        menu.addSeparator()
+        dele = QAction("删除…" if one else f"删除选中的 {len(items)} 条…", menu)
+        dele.triggered.connect(lambda: self.delete_sessions(items))
+        menu.addAction(dele)
+        menu.exec(self.sessions.viewport().mapToGlobal(pos))
+
+    def _session_paths(self, item) -> list[Path]:
+        """这条会话在磁盘上的全部东西：对话文件或项目目录，加上它的运行目录（只认 .ff_runs 下面的）。"""
+        kind, path = item.data(Qt.UserRole)
+        p = Path(path)
+        runs: list[str] = []
+        if kind == "chat":
+            try:
+                runs = json.loads(p.read_text(encoding="utf-8")).get("runs", [])
+            except (OSError, json.JSONDecodeError):
+                pass
+        elif kind == "project":
+            try:
+                runs = json.loads((p / "project.json").read_text(encoding="utf-8")).get("runs", [])
+            except (OSError, json.JSONDecodeError):
+                pass
+        out = [p]
+        base = self.runs_dir.resolve()
+        for r in runs:
+            rp = Path(r)
+            if not rp.is_absolute():
+                rp = self.project / rp
+            if rp.is_dir() and rp.resolve().parent == base and rp not in out:
+                out.append(rp)
+        return out
+
+    def _is_current(self, paths: list[Path]) -> bool:
+        cur = {Path(x).resolve() for x in (self.run_dir, self.conv and getattr(self.conv, "path", None),
+                                           self.project_rec and self.project_rec.path) if x}
+        return any(p.resolve() in cur for p in paths)
+
+    def _confirm_delete(self, names: list[str], n_runs: int) -> bool:
+        from PySide6.QtWidgets import QMessageBox
+        shown = "\n".join(f"· {x}" for x in names[:8]) + (f"\n……共 {len(names)} 条" if len(names) > 8 else "")
+        msg = (f"要删除下面的对话吗？\n\n{shown}\n\n连同它们的 {n_runs} 次运行记录（过程、代码、上板输出）一起移到系统回收站，"
+               "需要时可以从回收站还原。AI 的历史成绩和经验库不受影响。")
+        return QMessageBox.question(self, "删除对话", msg, QMessageBox.Yes | QMessageBox.No,
+                                    QMessageBox.No) == QMessageBox.Yes
+
+    @staticmethod
+    def _move_to_trash(path: Path) -> bool:
+        from PySide6.QtCore import QFile
+        return bool(QFile.moveToTrash(str(path)))
+
+    def delete_sessions(self, items) -> int:
+        """把选中的对话移到系统回收站（不直接抹掉）。正在跑的那条不能删。返回删掉了几条。"""
+        from PySide6.QtWidgets import QMessageBox
+        items = [it for it in items if it is not None and it.data(Qt.UserRole)]
+        if not items:
+            return 0
+        plan = [(it, self._session_paths(it)) for it in items]
+        if self.backend is not None and any(self._is_current(ps) for _, ps in plan):
+            QMessageBox.information(self, "正在运行", "这条对话还在运行，先停止或等它跑完再删。")
+            return 0
+        names = [it.text() for it, _ in plan]
+        if not self._confirm_delete(names, sum(len(ps) - (0 if it.data(Qt.UserRole)[0] == "run" else 1)
+                                               for it, ps in plan)):
+            return 0
+        if self._is_current([p for _, ps in plan for p in ps]):
+            self.new_chat()                                  # 删的是正在看的那条：先换成新对话
+        done, failed = 0, []
+        names_map = _run_names()
+        for it, ps in plan:
+            ok = True
+            for p in ps:
+                if p.exists() and not self._move_to_trash(p):
+                    ok = False
+                    failed.append(str(p))
+                names_map.pop(p.name, None)
+            done += ok
+        QSettings().setValue("chat/run_names", json.dumps(names_map, ensure_ascii=False))
+        self.refresh_sessions()
+        if failed:
+            QMessageBox.warning(self, "有的没删掉", "这些没能移到回收站（可能没有权限，或系统不支持回收站），原样留着：\n"
+                                + "\n".join(failed[:10]))
+        return done
+
+    def rename_session(self, item, new_title: str | None = None):
+        from PySide6.QtWidgets import QInputDialog
+        kind, path = item.data(Qt.UserRole)
+        old = item.text().split("  ●")[0].removeprefix("运行 ")
+        if new_title is None:
+            new_title, ok = QInputDialog.getText(self, "重命名", "新名字：", text=old)
+            if not ok:
+                return
+        new_title = new_title.strip()[:60]
+        if not new_title or new_title == old:
+            return
+        p = Path(path)
+        try:
+            if kind in ("chat", "project"):              # 对话、项目：名字写回它自己的文件
+                f = p if kind == "chat" else p / "project.json"
+                d = json.loads(f.read_text(encoding="utf-8"))
+                d["title"] = new_title
+                f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+                if kind == "project" and self.project_rec is not None and self.project_rec.path == p:
+                    self.project_rec.title = new_title
+                if kind == "chat" and self.conv is not None and getattr(self.conv, "path", None) == p:
+                    self.conv.title = new_title
+            else:                                         # 单次运行：不改运行记录本身，名字记在设置里
+                m = _run_names()
+                m[p.name] = new_title
+                QSettings().setValue("chat/run_names", json.dumps(m, ensure_ascii=False))
+        except (OSError, json.JSONDecodeError) as exc:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "改名失败", f"没能改名：{exc}")
+            return
+        if self._is_current([p]):
+            self.title.setText(new_title)
+        self.refresh_sessions()
+
+    def _reveal_session(self, item):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        p = Path(item.data(Qt.UserRole)[1])
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(p if p.is_dir() else p.parent)))
+
+    def _copy_session_path(self, item):
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(str(Path(item.data(Qt.UserRole)[1]).resolve()))
+
     def _open_session(self, item):
         data = item.data(Qt.UserRole)
         if not data:
             return
+        from PySide6.QtWidgets import QApplication
+        if QApplication.keyboardModifiers() & (Qt.ControlModifier | Qt.ShiftModifier):
+            return                                        # 按着 Ctrl/Shift 点是在多选，不打开
         kind, path = data
         if kind == "run":
             self.project_rec = None

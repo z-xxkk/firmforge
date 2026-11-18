@@ -122,3 +122,88 @@ class FlowSavesSpecTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAS_QT, "没装 PySide6")
+class DeleteRenameTest(unittest.TestCase):
+    """右键菜单里的删除和重命名（负责人 2026-11-18：要能把没用的对话删掉）。删除是移到回收站，测试里换成移到临时目录。"""
+
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtCore import QCoreApplication, QSettings
+        cls.app = QApplication.instance() or QApplication([])
+        QCoreApplication.setOrganizationName("FirmForgeHistoryTest")
+        QSettings().clear()
+        from firmforge.gui.theme import current
+        from firmforge.gui.widgets import set_theme
+        set_theme(current(False))
+
+    def _page(self, root, trash):
+        import shutil
+        from firmforge.gui.chat_page import ChatPage
+        page = ChatPage(root)
+        page._confirm_delete = lambda names, n: True
+        page._move_to_trash = lambda p: bool(shutil.move(str(p), str(trash / p.name)))
+        page.refresh_sessions()
+        return page
+
+    def _items(self, page):
+        from PySide6.QtCore import Qt
+        return [page.sessions.item(i) for i in range(page.sessions.count()) if page.sessions.item(i).data(Qt.UserRole)]
+
+    def test_delete_run_chat_and_project(self):
+        from firmforge.projects import Project
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as tr:
+            root, trash = Path(d), Path(tr)
+            r1 = make_run(root, "20261116-140631-gui", spec="甲")
+            r2 = make_run(root, "20261116-150000-gui", spec="乙")      # 属于对话
+            r3 = make_run(root, "20261116-160000-gui", spec="丙")      # 属于项目
+            other = root / "别的文件夹"                                 # 对话里记了 .ff_runs 外面的路径：不能跟着删
+            other.mkdir()
+            chats = root / ".ff_chats"
+            chats.mkdir()
+            (chats / "c1.json").write_text(json.dumps({"id": "c1", "title": "对话一", "runs": [str(r2), str(other)]},
+                                                      ensure_ascii=False), encoding="utf-8")
+            pr = Project.create(root / ".ff_projects", "项目一")
+            pr.runs.append(str(r3))
+            pr.save()
+            page = self._page(root, trash)
+            by = {it.text().split("  ")[0]: it for it in self._items(page)}
+            self.assertEqual(set(by), {"甲", "对话一", "项目一"})
+            page.open_run(r1)                                          # 正在看的那条被删：换成新对话
+            self.assertEqual(page.delete_sessions([by["甲"], by["对话一"], by["项目一"]]), 3)
+            self.assertEqual(page.title.text(), "新对话")
+            for p in (r1, r2, r3, chats / "c1.json", pr.path):
+                self.assertFalse(p.exists(), p)
+            self.assertTrue(other.is_dir())
+            self.assertEqual(self._items(page), [])
+            page.deleteLater()
+
+    def test_cancel_keeps_everything(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as tr:
+            root = Path(d)
+            r1 = make_run(root, "20261116-140631-gui", spec="甲")
+            page = self._page(root, Path(tr))
+            page._confirm_delete = lambda names, n: False
+            self.assertEqual(page.delete_sessions(self._items(page)), 0)
+            self.assertTrue(r1.is_dir())
+            page.deleteLater()
+
+    def test_rename(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as tr:
+            root = Path(d)
+            make_run(root, "20261116-140631-gui", spec="甲")
+            chats = root / ".ff_chats"
+            chats.mkdir()
+            (chats / "c1.json").write_text(json.dumps({"id": "c1", "title": "对话一", "runs": []}, ensure_ascii=False),
+                                           encoding="utf-8")
+            page = self._page(root, Path(tr))
+            by = {it.text().split("  ")[0]: it for it in self._items(page)}
+            page.rename_session(by["甲"], "温度记录")
+            by = {it.text().split("  ")[0]: it for it in self._items(page)}
+            page.rename_session(by["对话一"], "随便聊聊")
+            names = {it.text().split("  ")[0] for it in self._items(page)}
+            self.assertEqual(names, {"温度记录", "随便聊聊"})
+            self.assertEqual(json.loads((chats / "c1.json").read_text(encoding="utf-8"))["title"], "随便聊聊")
+            self.assertEqual((root / ".ff_runs" / "20261116-140631-gui" / "spec.md").read_text(encoding="utf-8"), "甲")
+            page.deleteLater()
