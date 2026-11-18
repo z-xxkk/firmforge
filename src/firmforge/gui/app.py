@@ -337,7 +337,32 @@ def code_stamp() -> float:
         return 0.0
 
 
+def pick_im_module(env: dict, plugin_dirs: list[Path]) -> str | None:
+    """输入法接入（2026-11-18：负责人用 fcitx5，输入框打不了中文）。pip 装的 PySide6 自带的 Qt 只有 IBus 的输入法插件，
+    没有 fcitx 的；fcitx5 同时提供 IBus 兼容接口，所以 QT_IM_MODULE 是 fcitx、而 Qt 找不到 fcitx 插件时改走 ibus。
+    返回要设的 QT_IM_MODULE，不用改返回 None。"""
+    want = (env.get("QT_IM_MODULE") or "").strip().lower()
+    if want not in ("fcitx", "fcitx5"):
+        return None
+    names = [f.name for d in plugin_dirs for f in (d / "platforminputcontexts").glob("*") if d.is_dir()]
+    if any("fcitx" in n for n in names):
+        return None
+    return "ibus" if any("ibus" in n for n in names) else None
+
+
+def _fix_input_method() -> None:
+    import os
+    from PySide6.QtCore import QLibraryInfo
+    dirs = [Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))]
+    dirs += [Path(x) for x in os.environ.get("QT_PLUGIN_PATH", "").split(os.pathsep) if x]
+    im = pick_im_module(dict(os.environ), dirs)
+    if im:
+        os.environ["QT_IM_MODULE"] = im
+
+
 def main(argv: list[str] | None = None) -> int:
+    if QApplication.instance() is None:
+        _fix_input_method()                            # 要在建 QApplication 之前设好
     app = QApplication.instance() or QApplication(sys.argv if argv is None else argv)
     app.setOrganizationName("FirmForge")
     app.setApplicationName("FirmForge")
