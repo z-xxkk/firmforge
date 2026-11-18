@@ -181,7 +181,7 @@ def _result(run_dir: Path, m: MapModule) -> None:
         m.failed_cases = [c.name for c in r.failed]
         return
     head = report.strip().splitlines()[0] if report.strip() else ""
-    if head.startswith(("ESP-IDF 不可用", "没有配置板子")):
+    if head.startswith(("ESP-IDF 不可用", "没有配置板子", "找不到板子")):
         m.status, m.result = "skipped", "没上板（没有板子或 ESP-IDF）"
         return
     if head.startswith("电脑测试跳过"):

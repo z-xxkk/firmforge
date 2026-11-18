@@ -301,8 +301,8 @@ class FirmwareInterpreter:
         if not b.ok:
             errs = "\n".join(d.render() for d in b.errors) or b.log_tail[-1500:]
             return done("fail", "build", "编译失败：\n" + errs)
-        if f.board is None:
-            return done("skipped", "board_test", "没有配置板子，主程序只做到编译和合规检查")
+        if not f._ensure_board():
+            return done("skipped", "board_test", f._no_board_note("主程序"))
         wrong = f._check_chip()
         if wrong:
             f.bus.emit("verify_finished", m, attempt=attempt, scope="board_test", ok=False, failed_layer="skipped")

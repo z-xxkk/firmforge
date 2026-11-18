@@ -1194,6 +1194,10 @@ class ChatPage(QWidget):
         if not task_id and mode == "single":
             self.add_line("单 Agent 只用于评测题对比。写需求时请选规则库、未核对规则或不给规则。", bg=True)
             return
+        require_board = self._ask_board()             # 开始前先看板子插好没有，没插好先问你（2026-11-18）
+        if require_board is None:
+            self.add_line("没有开始：等板子插好再发一次。", bg=True)
+            return
         self.clear_graph()
         self.judge = None
         self.backend = EmbeddedBackend(self)
@@ -1213,13 +1217,49 @@ class ChatPage(QWidget):
                 wf = self.workflow if (self.workflow is not None and self.workflow.engine == "firmware") else None
                 rec = self._project_for(spec)              # 这个对话的项目：接线等按对话分开存（第 134 条）
                 self.backend.start(spec=spec, name="gui", rule_mode=mode, workflow=wf,
-                                   human_review=self.review_box.isChecked(), project_rec=rec, **kw)
+                                   human_review=self.review_box.isChecked(), project_rec=rec,
+                                   require_board=require_board, **kw)
         except Exception as exc:
             from .runner import BOARD_USERS
             BOARD_USERS.discard(self.backend)
             self.add_line(f"没能开始运行：{exc}", bg=True)
             self.backend = None
             self.stop_btn.setVisible(False)
+
+    def _ask_board(self) -> bool | None:
+        """开始上板运行前看板子在不在。在：True（要求上板）；你选"只编译、不上板"：False；取消：None。
+        没装 ESP-IDF 时不问（反正上不了板，运行里会说明）。"""
+        from ..target.board import find_port
+        from ..target.esp_idf import idf_path
+        if find_port() is not None:
+            return True
+        if not (idf_path() / "tools" / "idf_tools.py").is_file():
+            return False
+        while True:
+            choice = self._no_board_dialog()
+            if choice == "retry":
+                if find_port() is not None:
+                    return True
+                continue
+            return False if choice == "compile" else None
+
+    def _no_board_dialog(self) -> str:
+        """没找到板子时问你：重新查找（retry）/ 只编译、不上板（compile）/ 取消（cancel）。"""
+        from PySide6.QtWidgets import QMessageBox
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("没找到板子")
+        box.setText("电脑上没找到开发板的串口。")
+        box.setInformativeText("上板测试要用板子：用 USB 插好后点\"重新查找\"。\n\n"
+                               "只想先看代码能不能编译，可以选\"只编译、不上板\"：硬件模块最后记为\"跳过\"，不算通过，"
+                               "也不会集成成完整程序。")
+        retry = box.addButton("重新查找", QMessageBox.AcceptRole)
+        compile_only = box.addButton("只编译、不上板", QMessageBox.DestructiveRole)
+        box.addButton("取消", QMessageBox.RejectRole)
+        box.setDefaultButton(retry)
+        box.exec()
+        c = box.clickedButton()
+        return "retry" if c is retry else "compile" if c is compile_only else "cancel"
 
     def _project_for(self, spec: str):
         """这个对话的项目（第 134 条）：第一次发需求时建，同一个对话里再发沿用（接线、跑过的运行都在里面）。"""
@@ -1519,7 +1559,9 @@ class ChatPage(QWidget):
             else:
                 self.add_line(Dot(T()["fail"]), f"{node} 测试 Agent 两次都没照诊断删掉用例：{'、'.join(d.get('left', []))}")
         elif t == "wiring_selfcheck":                 # 接线自检结果（第 134 条第 3 阶段）
-            if d.get("skipped"):
+            if d.get("no_board"):
+                self.add_line(Dot(T()["fail"]), "接线自检没法开始：电脑上没找到开发板的串口")
+            elif d.get("skipped"):
                 self.add_line(f"接线自检没跑：{d['skipped']}；按你确认的接线往下走", bg=True)
             else:
                 for it in d.get("items", []):
@@ -1588,8 +1630,11 @@ class ChatPage(QWidget):
         elif t == "human_wait" and node == "wiring":     # 接线一步（第 134 条）：列出这次要接的线
             rows = "\n".join(f"- GPIO{c['gpio']} → {c['to']}　`{c['signal']}`" for c in d.get("connections", []))
             fails = "；".join(f"{x.get('detail', '')}" for x in d.get("failures", []))
-            self.add_agent("FirmForge", "reviewer", ("自检没对上（" + fails + "），等你检查线：\n\n" if fails else
-                                                     "开始写代码之前等你按清单接线：\n\n") + rows)
+            if any(x.get("name") == "没找到板子" for x in d.get("failures", [])):
+                fails_head = "没找到板子，等你用 USB 插好板子：\n\n"
+            else:
+                fails_head = "自检没对上（" + fails + "），等你检查线：\n\n" if fails else "开始写代码之前等你按清单接线：\n\n"
+            self.add_agent("FirmForge", "reviewer", fails_head + rows)
         elif t == "human_wait" and node != "rules":
             what = "主程序" if node == "app" else f"模块 **{node}**"
             self.add_agent("FirmForge", "reviewer", f"{what}停下了：{d.get('reason', '')}\n\n{d.get('instruction', '')}")
@@ -1666,7 +1711,10 @@ class ChatPage(QWidget):
                 rows.append(f"- **GPIO{c['gpio']}** → {c['to']}　`{c['signal']}`　{c.get('why', '')}"
                             + (f"\n  先拔掉原来的线：{c['unplug']}" if c.get("unplug") else "")
                             + (f"\n  上次已实测：{st}" if st == "实测" else ""))
-            head = ("自检没对上，请检查下面这几根线，改好后再点按钮重新自检：\n\n"
+            no_board = any(f.get("name") == "没找到板子" for f in fails)
+            head = ("**没找到板子**：电脑上没有开发板的串口。请用 USB 插好板子（接线时拔过 USB 的话记得插回去），"
+                    "再点按钮，平台会重新查找并自检。\n\n完整的接线清单：\n\n") if no_board else \
+                   ("自检没对上，请检查下面这几根线，改好后再点按钮重新自检：\n\n"
                     + "\n".join(f"- {f['name'].removeprefix('接线自检：')}：{f.get('detail') or '没有测到结果'}" for f in fails)
                     + "\n\n完整的接线清单：\n\n") if fails else \
                 "开始写代码之前，请按这张清单接好线（每根线两端都写在这里）。接好后点按钮，平台会烧一个自检程序实测每根线：\n\n"

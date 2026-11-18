@@ -304,9 +304,11 @@ class EmbeddedBackend(Backend):
     def start(self, *, project: Path, hw: str, runs_dir: Path, spec: str = "", name: str = "gui", rule_mode: str = "verified",
               task_id: str = "", config_name: str = "verified", tier: str | None = None, thinking: str | None = None,
               port: str | None = None, workflow=None, human_review: bool = False, prior_wiring=None,
-              project_rec=None) -> None:
+              project_rec=None, require_board: bool = False) -> None:
         """workflow：写需求时用的上板工作流（名字、路径或 Workflow 对象，默认 firmware_dev，DECISIONS 第 110 条）；
-        human_review：设计好后停下等确认（ask("plan")，回答空字符串表示确认，写了意见就让设计 Agent 重做）。"""
+        human_review：设计好后停下等确认（ask("plan")，回答空字符串表示确认，写了意见就让设计 Agent 重做）。
+        require_board：要求上板（写需求跑时默认要求，你选了"只编译、不上板"才不要求）：开始时没找到板子，
+        接线和上板前会再找；接线时还找不到就停在接线卡片上等你插好。"""
         from ..embedded.workspace import load_hw
         from ..llm import OpenAICompatClient
         from ..target.board import BoardRunner
@@ -330,7 +332,8 @@ class EmbeddedBackend(Backend):
         board = BoardRunner(idf, port) if idf is not None else None
         if board is not None and board.port is None:
             board = None
-            self.log.emit("没找到板子：硬件层只做到编译和合规检查")
+            self.log.emit("现在没找到板子：接线、上板前会再找一次" if require_board and not task_id else
+                          "没找到板子：硬件层只做到编译和合规检查")
         sub = (self._guard(self.event.emit),)
 
         if task_id:
@@ -392,7 +395,8 @@ class EmbeddedBackend(Backend):
                                       subscribers=sub, workflow=workflow or "firmware_dev", store=db,
                                       human_review=human_review, confirm_design=confirm_design,
                                       prior_wiring=prior_wiring, confirm_module=confirm_module, project=project_rec,
-                                      confirm_wiring=confirm_wiring, confirm_failed=confirm_failed)
+                                      confirm_wiring=confirm_wiring, confirm_failed=confirm_failed,
+                                      require_board=require_board)
             flow.on_builder = lambda b: holder.__setitem__("builder", b)
 
             def job():

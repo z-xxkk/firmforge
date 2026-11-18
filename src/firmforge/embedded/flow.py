@@ -142,7 +142,7 @@ class EmbeddedFlow:
                  extra_requires: tuple[str, ...] = (), build_rules: bool = True, workflow=None, store=None,
                  human_review: bool = False, confirm_design: Callable[[Design], str | None] | None = None,
                  prior_wiring=None, rules_path: Path | None = None, project=None, confirm_wiring=None,
-                 confirm_failed=None,
+                 confirm_failed=None, require_board: bool = False,
                  confirm_module: Callable[[DesignModule, "ModuleResult", str], str | None] | None = None):
         """workflow：上板工作流（firmware_dev.toml，DECISIONS 第 110 条）决定走哪些步骤、在哪停下、最多试几次、
         编码交给谁（不指定就由调度器挑）。不给（评测）就照原来的固定做法：编码固定用 coder（coder=None 时由调度器挑）；
@@ -156,6 +156,9 @@ class EmbeddedFlow:
                      FirmwarePlan(build_rules=build_rules, confirm_rules=True, coder=coder, tester="tester",
                                   max_attempts=max_attempts))
         self.rule_mode, self.idf, self.board = rule_mode, idf, board
+        # 要求上板（软件里写需求跑、没选"只编译"）：开始时没找到板子不算数，接线和上板前再找一次（2026-11-18：
+        # 负责人接线时拔插了 USB，开始时那一次没找到，整次运行就都按没板子跳过了）
+        self.require_board = require_board
         self.workflow = workflow
         self._human_in = human                           # 解释器按"查资料后面有没有等人确认"决定用不用
         self.human = human if self.plan.confirm_rules else None
@@ -313,8 +316,8 @@ class EmbeddedFlow:
         if not b.ok:
             errs = "\n".join(d.render() for d in b.errors) or b.log_tail[-1500:]
             return "fail", "build", "编译失败：\n" + errs
-        if self.board is None:
-            return "skipped", "board_test", "没有配置板子，硬件层只做到编译和合规检查"
+        if not self._ensure_board():
+            return "skipped", "board_test", self._no_board_note("硬件层")
         wrong = self._check_chip()
         if wrong:
             self.bus.emit("verify_finished", m.id, attempt=attempt, scope="board_test", ok=False, failed_layer="skipped")
@@ -385,7 +388,8 @@ class EmbeddedFlow:
             self._apply_wiring_states(design)
 
     def _wiring_gate_loop(self, conns, items, proj, failures, run_check) -> bool:
-        for round_ in range(1, 4):
+        round_, no_board = 1, 0
+        while round_ <= 3:
             states = {c.signal: (proj.state(c.signal) if proj is not None else "计划") for c in conns}
             need_user = bool(failures) or any(c.unplug or states[c.signal] != "实测" for c in conns)
             if need_user and self.confirm_wiring is not None:
@@ -404,6 +408,15 @@ class EmbeddedFlow:
                 self.bus.emit("wiring_selfcheck", "wiring", round=round_, ok=None, items=[],
                               skipped="这些线平台测不了（都是只能看的），按你确认的为准")
                 return True
+            if self.require_board and self.idf is not None and not self._ensure_board():
+                no_board += 1                             # 找不到板子：不算一次自检，停在这里等人插好
+                failures = [{"name": "没找到板子", "signals": [],
+                             "detail": "电脑上没有开发板的串口，用 USB 插好板子后再点按钮"}]
+                self.bus.emit("wiring_selfcheck", "wiring", round=round_, ok=False, items=[], no_board=True)
+                if self.confirm_wiring is None or no_board >= 10:
+                    self.result.error = "停在了接线这一步：一直没找到板子"
+                    return False
+                continue
             chk = run_check(self.profile, items, self.idf, self.board,
                             Path(config.project_root()) / ".ff_data" / "idf_build" / f"{self.rd.run_id}-wiring",
                             self.rd.path / "wiring" / f"selfcheck_{round_}.log")
@@ -426,8 +439,39 @@ class EmbeddedFlow:
             if self.confirm_wiring is None:
                 self.result.error = "接线自检没通过：" + "；".join(f"{f['name']}（{f['detail']}）" for f in failures)
                 return False
+            round_ += 1
         self.result.error = "接线自检 3 次都没通过，停在接线这一步"
         return False
+
+    def _board_ok(self) -> bool:
+        if self.board is None:
+            return False
+        if not hasattr(self.board, "port"):               # 测试里的假板子
+            return True
+        port = self.board.port
+        return bool(port) and (port.startswith("COM") or Path(port).exists())
+
+    def _ensure_board(self) -> bool:
+        """有没有能用的板子。要求上板时，现在没有就重新找一次串口（板子可能是运行开始后才插上的）。"""
+        if self._board_ok():
+            return True
+        if not self.require_board or self.idf is None:
+            return self.board is not None                 # 不要求上板：照原样，没有板子就跳过上板
+        from ..target.board import BoardRunner, find_port
+        port = find_port()
+        if port is None:
+            return False
+        if self.board is None:
+            self.board = BoardRunner(self.idf, port)
+        else:
+            self.board.port, self.board._chip = port, None
+        self._chip_checked = None                         # 换了板子：重新识别芯片
+        return True
+
+    def _no_board_note(self, what: str) -> str:
+        if self.require_board and self.idf is not None:
+            return f"找不到板子的串口（USB 没插好？），{what}只做到编译和合规检查"
+        return f"没有配置板子，{what}只做到编译和合规检查"
 
     def _check_chip(self) -> str:
         """第一次上板前识别板子上的芯片（DECISIONS 第 114 条）；和硬件档案对不上返回说明，不烧录。"""

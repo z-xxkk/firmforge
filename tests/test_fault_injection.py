@@ -304,6 +304,7 @@ class GuiFaultTest(unittest.TestCase):
             raise LLMError(NETWORK_DOWN)
         self.llm_mod.OpenAICompatClient.from_settings = staticmethod(lambda s: FakeLLM(reply))
         page = ChatPage(self.sandbox)
+        page._ask_board = lambda: False                  # 和板子无关：不弹"没找到板子"，按只编译跑（第 141 条）
         page.start_embedded(task_id="ledc_pwm", config_name="none")
         info = wait_for(page.backend)
         self.assertIn("模型调用失败", info["error"])

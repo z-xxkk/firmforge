@@ -214,3 +214,92 @@ class CardTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LateBoardTest(unittest.TestCase):
+    """开始时没找到板子（2026-11-18：负责人接线时拔插了 USB，开始那一刻没认到，整次运行就都按没板子跳过了）：
+    要求上板时，接线自检前、上板测试前都再找一次；接线时还找不到就停在接线卡片上等人插好，不算一次自检。"""
+
+    def test_wiring_waits_for_board_then_checks(self):
+        asked, boards = [], []
+
+        def confirm_wiring(conns, states, failures):
+            asked.append(list(failures))
+            return "ok"
+        with tempfile.TemporaryDirectory() as d:
+            port = Path(d) / "ttyACM0"
+            port.write_text("", encoding="utf-8")
+            found = iter([None, str(port)])
+            dsg = design([ADC])
+            f = EmbeddedFlow(llm=FakeLLM([]), settings=SETTINGS, profile=C3, spec="x", rules=RuleSet(), library=None,
+                             verifier=None, runs_root=Path(d) / "runs", rule_mode="none", idf=object(), board=None,
+                             confirm_wiring=confirm_wiring, require_board=True)
+            f._use_wiring(dsg)
+            with mock.patch("firmforge.target.board.find_port", lambda p=None, *a, **k: p or next(found)), \
+                    mock.patch("firmforge.target.selfcheck.run_check",
+                               lambda prof, items, idf, board, *a, **k: boards.append(board) or GateTest.chk(True)):
+                ok = f._wiring_gate(dsg)
+            ev = [e for e in read_events(f.rd.path) if e["type"] == "wiring_selfcheck"]
+        self.assertTrue(ok)
+        self.assertEqual(len(asked), 2)                                      # 第一次接好后没找到板子，又停下来等
+        self.assertEqual(asked[0], [])
+        self.assertEqual(asked[1][0]["name"], "没找到板子")
+        self.assertEqual(len(boards), 1)                                     # 找到板子以后才真正自检
+        self.assertEqual(boards[0].port, str(port))
+        self.assertTrue(ev[0]["data"].get("no_board"))
+        self.assertTrue(ev[1]["data"]["ok"])
+
+    def test_module_test_looks_again(self):
+        with tempfile.TemporaryDirectory() as d:
+            port = Path(d) / "ttyACM0"
+            port.write_text("", encoding="utf-8")
+            f = EmbeddedFlow(llm=FakeLLM([]), settings=SETTINGS, profile=C3, spec="x", rules=RuleSet(), library=None,
+                             verifier=None, runs_root=Path(d) / "runs", rule_mode="none", idf=object(), board=None,
+                             require_board=True)
+            with mock.patch("firmforge.target.board.find_port", lambda *a, **k: None):
+                self.assertFalse(f._ensure_board())
+            self.assertIn("找不到板子", f._no_board_note("硬件层"))
+            with mock.patch("firmforge.target.board.find_port", lambda p=None, *a, **k: p or str(port)):
+                self.assertTrue(f._ensure_board())
+            self.assertEqual(f.board.port, str(port))
+            old = EmbeddedFlow(llm=FakeLLM([]), settings=SETTINGS, profile=C3, spec="x", rules=RuleSet(), library=None,
+                               verifier=None, runs_root=Path(d) / "runs2", rule_mode="none", idf=object(), board=None)
+            with mock.patch("firmforge.target.board.find_port", lambda p=None, *a, **k: p or str(port)):
+                self.assertFalse(old._ensure_board())                       # 不要求上板（命令行、评测）：照旧不找
+            self.assertIn("没有配置板子", old._no_board_note("硬件层"))
+
+
+class AskBoardTest(unittest.TestCase):
+    """开始上板运行前：板子在就直接跑；不在就问你重新查找 / 只编译、不上板 / 取消。"""
+
+    def test_choices(self):
+        try:
+            os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+            from PySide6.QtWidgets import QApplication
+        except ImportError:
+            self.skipTest("没装 PySide6")
+        QApplication.instance() or QApplication([])
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.setOrganizationName("FirmForgeWiringTest")
+        from firmforge.gui.theme import current
+        from firmforge.gui.widgets import set_theme
+        set_theme(current(False))
+        from firmforge.gui.chat_page import ChatPage
+        with tempfile.TemporaryDirectory() as d:
+            idf = Path(d) / "idf"
+            (idf / "tools").mkdir(parents=True)
+            (idf / "tools" / "idf_tools.py").write_text("", encoding="utf-8")
+            page = ChatPage(Path(d))
+            for found, answers, want in (([None, None, "/dev/ttyACM0"], ["retry", "retry"], True),
+                                         ([None], ["compile"], False), ([None], ["cancel"], None),
+                                         (["/dev/ttyACM0"], [], True)):
+                with self.subTest(answers=answers):
+                    f, a = iter(found), iter(answers)
+                    page._no_board_dialog = lambda: next(a)
+                    with mock.patch("firmforge.target.board.find_port", lambda *x, **k: next(f)), \
+                            mock.patch("firmforge.target.esp_idf.idf_path", lambda *x, **k: idf):
+                        self.assertEqual(page._ask_board(), want)
+            with mock.patch("firmforge.target.board.find_port", lambda *x, **k: None), \
+                    mock.patch("firmforge.target.esp_idf.idf_path", lambda *x, **k: Path(d) / "没有"):
+                self.assertFalse(page._ask_board())                         # 没装 ESP-IDF：不问，反正上不了板
+            page.deleteLater()

@@ -116,6 +116,12 @@ class _StubFlow:
         self.trace.events.append((self._current, text))
         self.trace.light(self._current)
 
+    def _ensure_board(self) -> bool:                 # 预演不碰真板子（第 141 条的重新找板子在这里不做）
+        return self.board is not None
+
+    def _no_board_note(self, what: str) -> str:
+        return f"没有配置板子，{what}只做到编译和合规检查"
+
     # ---- 主流程
     def _rules_for_flow(self):
         self._note("查资料提炼规则" + ("，新规则等你确认" if self.human is not None else ""))
