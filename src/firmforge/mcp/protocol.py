@@ -91,5 +91,5 @@ def content_to_text(content: list | None) -> str:
             res = c.get("resource") or {}
             parts.append(str(res.get("text", "")) or f"[嵌入资源] {res.get('uri', '')}")
         else:
-            parts.append(f"[{kind} 类型的内容，FirmForge 不支持显示]")
+            parts.append(f"[{kind} 类型的内容，固件工坊不支持显示]")
     return "\n".join(parts)

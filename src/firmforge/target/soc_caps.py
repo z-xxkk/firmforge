@@ -101,7 +101,7 @@ def load_caps(target: str, idf_root: Path | None = None) -> ChipCaps | None:
 
 def sdkconfig_defaults(caps: ChipCaps, flash_mb: int | None = None) -> str:
     """不在内置配置里的芯片：按读出的能力生成 sdkconfig.defaults（控制台走芯片自带 USB 串口或 UART0）。"""
-    lines = [f"# FirmForge 按 ESP-IDF 的 soc_caps.h 生成：{caps.target}"]
+    lines = [f"# 固件工坊按 ESP-IDF 的 soc_caps.h 生成：{caps.target}"]
     if flash_mb in (2, 4, 8, 16, 32):
         lines.append(f"CONFIG_ESPTOOLPY_FLASHSIZE_{flash_mb}MB=y")
     lines.append("CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y" if caps.usb_serial_jtag else "CONFIG_ESP_CONSOLE_UART_DEFAULT=y")

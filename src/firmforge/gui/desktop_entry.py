@@ -1,4 +1,4 @@
-"""在 Linux 桌面的应用列表里加上 FirmForge（`firmforge gui --install-shortcut`）。
+"""在 Linux 桌面的应用列表里加上固件工坊（`firmforge gui --install-shortcut`）。
 
 按 freedesktop 的桌面项规范写 ~/.local/share/applications/firmforge.desktop，图标放在
 ~/.local/share/icons/hicolor/256x256/apps/firmforge.png。图标就是界面左上角的 "FF" 标志，用 Qt 画出来，不依赖图片文件。
@@ -58,13 +58,14 @@ def desktop_text(exe: Path, project: Path, icon: Path) -> str:
     return "\n".join([
         "[Desktop Entry]",
         "Type=Application",
-        "Name=FirmForge",
+        "Name=固件工坊",
         "GenericName=嵌入式固件 Agent 平台",
         "Comment=面向嵌入式固件开发的多 Agent 编排与验证平台",
         f"Exec={exe}",
         f"Path={project}",
         f"Icon={icon}",
         "Terminal=false",
+        "Keywords=FirmForge;firmforge;固件;嵌入式;",
         "Categories=Development;",
         "StartupNotify=true",
         "StartupWMClass=FirmForge",                       # Qt 窗口的 WM_CLASS 是 ("firmforge-gui", "FirmForge")，按类名对上

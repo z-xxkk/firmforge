@@ -89,7 +89,7 @@ def _doctor_board() -> None:
 
 def cmd_doctor(args) -> int:
     tc = Toolchain.from_env()
-    print(f"FirmForge {__version__}，Python {sys.version.split()[0]}")
+    print(f"固件工坊 FirmForge {__version__}，Python {sys.version.split()[0]}")
     missing = 0
     for name, (var, _default, desc) in config.TOOL_SPECS.items():
         path = tc.resolve(name)
@@ -645,13 +645,13 @@ def cmd_gui(args) -> int:
         from .gui import desktop_entry
         if args.remove_shortcut:
             gone = desktop_entry.uninstall()
-            print("已去掉：" + "、".join(str(p) for p in gone) if gone else "应用列表里本来就没有 FirmForge")
+            print("已去掉：" + "、".join(str(p) for p in gone) if gone else "应用列表里本来就没有固件工坊")
             return EXIT_PASS
         try:
             dp, icon = desktop_entry.install(config.project_root())
         except FileNotFoundError as exc:
             raise UsageError(str(exc)) from exc
-        print(f"已加到应用列表：{dp}\n图标：{icon}\n在“显示应用”里搜 FirmForge 就能打开；也可以右键把它固定到程序坞。")
+        print(f"已加到应用列表：{dp}\n图标：{icon}\n在“显示应用”里搜固件工坊就能打开；也可以右键把它固定到程序坞。")
         return EXIT_PASS
     return gui_main()
 
@@ -923,8 +923,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_eval)
 
     s = sub.add_parser("gui", help="启动桌面软件（需要先 pip install -e .[gui]）")
-    s.add_argument("--install-shortcut", action="store_true", help="在 Linux 桌面的应用列表里加上 FirmForge（不启动软件）")
-    s.add_argument("--remove-shortcut", action="store_true", help="从应用列表里去掉 FirmForge")
+    s.add_argument("--install-shortcut", action="store_true", help="在 Linux 桌面的应用列表里加上固件工坊（不启动软件）")
+    s.add_argument("--remove-shortcut", action="store_true", help="从应用列表里去掉固件工坊")
     s.set_defaults(func=cmd_gui)
 
     s = sub.add_parser("bench", help="性能测试：假模型测串行与并行调度的吞吐，真工具链测判定吞吐（不花钱）")
@@ -941,7 +941,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", help="把表格写到这个文件")
     s.set_defaults(func=cmd_stats)
 
-    s = sub.add_parser("mcp", help="以 stdio 方式启动 MCP 服务，让 Claude Code 等调用 FirmForge 的判定器")
+    s = sub.add_parser("mcp", help="以 stdio 方式启动 MCP 服务，让 Claude Code 等调用固件工坊的判定器")
     s.add_argument("--selftest", action="store_true", help="启动自己作为外部服务并调用一次，检查是否可用")
     s.set_defaults(func=cmd_mcp)
 

@@ -977,13 +977,13 @@ class ChatPage(QWidget):
     def _on_source_added(self, res, err: str):
         f, doc, added = res
         if doc is None:
-            self.add_agent("FirmForge", "researcher", f"**{f.name}** 没登记上：{err}")
+            self.add_agent("固件工坊", "researcher", f"**{f.name}** 没登记上：{err}")
             return
         pages = f"{len(doc.pages)} 页，" if doc.kind == "pdf" else ""
         if not added:
-            self.add_agent("FirmForge", "researcher", f"**{doc.title}** 已经登记过了（编号 {doc.id}，校验值相同），不重复登记。")
+            self.add_agent("固件工坊", "researcher", f"**{doc.title}** 已经登记过了（编号 {doc.id}，校验值相同），不重复登记。")
             return
-        self.add_agent("FirmForge", "researcher",
+        self.add_agent("固件工坊", "researcher",
                        f"登记好了：**{doc.title}**（编号 {doc.id}，{pages}校验值 {doc.sha256[:12]}…）。\n\n"
                        f"记在 {self.hw}/sources.toml，等级是\"用户提供\"（不算官方资料）。查资料 Agent 提炼规则时能检索它，"
                        f"从它提炼的规则照样要核对原文、等你确认。")
@@ -1366,7 +1366,7 @@ class ChatPage(QWidget):
             if j.get("note"):
                 text += f"\n\n{j['note']}"
             text += "\n\n隐藏测试只给评测判定用，任何 Agent 都看不到。"
-            self.add_agent("FirmForge", "reviewer", text)
+            self.add_agent("固件工坊", "reviewer", text)
         self.refresh_status(self._run_text())
         self.run_done.emit()
         self.input.setPlaceholderText(("写补充或修改，在这个项目里再跑一次（沿用这个项目的接线）；点模块看每一次的检查结果"
@@ -1634,10 +1634,10 @@ class ChatPage(QWidget):
                 fails_head = "没找到板子，等你用 USB 插好板子：\n\n"
             else:
                 fails_head = "自检没对上（" + fails + "），等你检查线：\n\n" if fails else "开始写代码之前等你按清单接线：\n\n"
-            self.add_agent("FirmForge", "reviewer", fails_head + rows)
+            self.add_agent("固件工坊", "reviewer", fails_head + rows)
         elif t == "human_wait" and node != "rules":
             what = "主程序" if node == "app" else f"模块 **{node}**"
-            self.add_agent("FirmForge", "reviewer", f"{what}停下了：{d.get('reason', '')}\n\n{d.get('instruction', '')}")
+            self.add_agent("固件工坊", "reviewer", f"{what}停下了：{d.get('reason', '')}\n\n{d.get('instruction', '')}")
         elif t == "escalated" and d.get("level") == "rule":
             self.add_line(f"{node} 对规则 {d.get('rule')} 有异议，交给规则判定器重新核对")
         elif t == "run_finished":
@@ -1656,7 +1656,7 @@ class ChatPage(QWidget):
                  + (f"，{len(bad)} 个没完成（{'、'.join(bad)}）" if bad else "") + "。"]
         if d.get("error"):
             lines.append(str(d["error"]))
-        m = self.add_agent("FirmForge", "reviewer", "\n\n".join(lines))
+        m = self.add_agent("固件工坊", "reviewer", "\n\n".join(lines))
         if mods:
             first = bad[0] if bad else mods[0].id
             m.add_action("看修正过程", lambda: (self.select_module(first), self.tabs.setCurrentWidget(self.timeline)))
@@ -1697,7 +1697,7 @@ class ChatPage(QWidget):
                                 for ln in payload.get("risks", []))
                     + "\n\n你可以：**接着修**（再试 3 次，换强档编码 Agent；想给 Agent 一句提示就先写在下面输入框里）；"
                       "**人工放行**（先在输入框里写放行的理由）；或者**放弃**这个模块。")
-            m = self.add_agent("FirmForge", "reviewer", body)
+            m = self.add_agent("固件工坊", "reviewer", body)
             m.add_action("放弃", lambda: self._resolve({"action": "give_up"}, m, "你放弃了这个模块"))
             m.add_action("人工放行…", lambda: self._release(m, payload))
             m.add_action("接着修", lambda: self._resolve({"action": "repair", "hint": self.input.toPlainText().strip()}, m,
@@ -1718,27 +1718,27 @@ class ChatPage(QWidget):
                     + "\n".join(f"- {f['name'].removeprefix('接线自检：')}：{f.get('detail') or '没有测到结果'}" for f in fails)
                     + "\n\n完整的接线清单：\n\n") if fails else \
                 "开始写代码之前，请按这张清单接好线（每根线两端都写在这里）。接好后点按钮，平台会烧一个自检程序实测每根线：\n\n"
-            m = self.add_agent("FirmForge", "reviewer", head + "\n".join(rows))
+            m = self.add_agent("固件工坊", "reviewer", head + "\n".join(rows))
             m.add_action("停止", lambda: self._resolve("cancel", m, "你停在了接线这一步"))
             m.add_action("已接好，开始自检", lambda: self._resolve("ok", m, "你已接好线，正在自检"), primary=True)
         elif kind == "checkpoint":
             where = f"模块 {payload.get('node')} 的" if payload.get("node") and payload.get("node") != payload.get("step") else ""
-            m = self.add_agent("FirmForge", "reviewer", f"{where}步骤 **{payload.get('step')}** 等你确认：{payload.get('note') or ''}"
+            m = self.add_agent("固件工坊", "reviewer", f"{where}步骤 **{payload.get('step')}** 等你确认：{payload.get('note') or ''}"
                                + (f"\n\n当前交付：{'、'.join(payload.get('files', []))}" if payload.get("files") else ""))
             m.add_action("写意见", lambda: self._focus_input("写下意见，发送后交给编码 Agent 修改"))
             m.add_action("通过", lambda: self._resolve("", m, "你已通过"), primary=True)
         elif kind == "hint":
             pts = "\n".join(f"- {p}" for p in payload.get("points", []))
-            m = self.add_agent("FirmForge", "reviewer", f"模块 **{payload.get('module')}** 升级到转人工，失败要点：\n\n{pts}\n\n"
+            m = self.add_agent("固件工坊", "reviewer", f"模块 **{payload.get('module')}** 升级到转人工，失败要点：\n\n{pts}\n\n"
                                "在下面写一句给编码 Agent 的提示后发送；放弃就点按钮。")
             m.add_action("放弃这个模块", lambda: self._resolve("", m, "你放弃了这个模块"))
         elif kind == "rules":
             n, x = len(payload.get("pending", [])), len(payload.get("escalated", []))
-            m = self.add_agent("FirmForge", "reviewer", f"规则判定器核对完了：**{n}** 条等你确认" + (f"，{x} 条多次被退回" if x else "")
+            m = self.add_agent("固件工坊", "reviewer", f"规则判定器核对完了：**{n}** 条等你确认" + (f"，{x} 条多次被退回" if x else "")
                                + "。就在下面逐条看：规则、引用原文、手册原页并排；全部表态后提交，流程才继续。")
             self._rule_review(payload, m)
         elif kind == "approve":
-            m = self.add_agent("FirmForge", "reviewer", f"{payload.get('agent')} 想调用外部工具 `{payload.get('tool')}`，参数：\n\n"
+            m = self.add_agent("固件工坊", "reviewer", f"{payload.get('agent')} 想调用外部工具 `{payload.get('tool')}`，参数：\n\n"
                                f"```\n{json.dumps(payload.get('args'), ensure_ascii=False)[:400]}\n```")
             m.add_action("拒绝", lambda: self._resolve(False, m, "你拒绝了"))
             m.add_action("允许", lambda: self._resolve(True, m, "你允许了"), primary=True)
@@ -1998,7 +1998,7 @@ class ChatPage(QWidget):
         if judge.is_file():
             from PySide6.QtWidgets import QMessageBox
             text = judge.read_text(encoding="utf-8", errors="replace").strip()
-            m = self.add_agent("FirmForge", "reviewer", judge_summary(text, _run_verdict(run_dir)))
+            m = self.add_agent("固件工坊", "reviewer", judge_summary(text, _run_verdict(run_dir)))
             m.add_action("看判定报告", lambda: QMessageBox.information(self, "隐藏测试判定", text[:4000]))
         mods = list(self.view.modules.values())
         pick = next((m for m in mods if m.status == "failed"), mods[0] if mods else None)

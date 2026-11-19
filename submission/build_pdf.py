@@ -100,7 +100,7 @@ def convert(md: str) -> str:
 
 def main() -> None:
     body = convert(SRC.read_text(encoding="utf-8"))
-    HTML.write_text(f'<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>FirmForge 方案书</title>'
+    HTML.write_text(f'<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>固件工坊方案书</title>'
                     f"<style>{CSS}</style></head><body>{body}</body></html>", encoding="utf-8")
     chrome = shutil.which("google-chrome") or shutil.which("chromium")
     subprocess.run([chrome, "--headless=new", "--disable-gpu", "--no-pdf-header-footer",

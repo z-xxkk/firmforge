@@ -168,7 +168,7 @@ def bench_verify(task: Task, *, n: int = 8, limits=(1, 2, 4), toolchain: Toolcha
 
 
 def to_markdown(sched: list[SchedRow], ver: list[VerifyRow], latency_s: float) -> str:
-    lines = ["# FirmForge 性能测试", "",
+    lines = ["# 固件工坊性能测试", "",
              f"假模型每次调用固定延迟 {latency_s:g} 秒；模块之间互不依赖；审查、升级、经验库、工具都关闭，只比调度。", "",
              "## 调度吞吐", "",
              "| 调度 | 模块数 | LLM 并发上限 | 总用时 (s) | 模块 / 分钟 | 同时调用模型的 Agent 最多 | 并发名额利用率 | 结论 |",

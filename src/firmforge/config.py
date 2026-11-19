@@ -71,7 +71,7 @@ def tool_version(path: str, flag: str = "--version") -> str:
 
 
 def project_root() -> Path:
-    """FirmForge 安装目录（含 third_party/）。可用 FF_HOME 覆盖。"""
+    """固件工坊安装目录（含 third_party/）。可用 FF_HOME 覆盖。"""
     env = os.environ.get("FF_HOME")
     if env:
         return Path(env).resolve()

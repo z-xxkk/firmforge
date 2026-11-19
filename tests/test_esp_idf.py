@@ -16,7 +16,7 @@ class HwConfigTest(unittest.TestCase):
         self.assertIn("#define FF_PIN_I2C0_SDA 4", h)
         self.assertIn("#define FF_PIN_UART1_TX 10", h)
         self.assertIn("#define FF_IMU_ADDR 0x68  /* MPU6050 */", h)
-        self.assertTrue(h.startswith("/* FirmForge"))
+        self.assertTrue(h.startswith("/* 固件工坊"))
 
     def test_device_params(self):
         # 器件参数（DECISIONS 第 89 条）：实测的 WHO_AM_I 和温度系数写成宏，也进 system prompt，存取不丢来源

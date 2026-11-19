@@ -160,15 +160,15 @@ def notes(slide, t):
 
 def cover(prs):
     s = prs.slides.add_slide(prs.slide_layouts.get_by_name("标题幻灯片"))
-    text(s, 0.97, 1.75, 11.4, 1.3, [("FirmForge：面向嵌入式固件开发的", 34, True, WHITE, PP_ALIGN.CENTER, 0),
-                                     ("多 Agent 编排与验证平台", 34, True, WHITE, PP_ALIGN.CENTER, 0)], name="题目")
+    text(s, 0.97, 1.6, 11.4, 1.5, [("固件工坊 FirmForge", 44, True, WHITE, PP_ALIGN.CENTER, 4),
+                                     ("面向嵌入式固件开发的多 Agent 编排与验证平台", 26, True, WHITE, PP_ALIGN.CENTER, 0)], name="题目")
     text(s, 1.17, 3.4, 11.0, 2.3, [
         ("赛题一　Agent 编排创新应用", 18, False, CYAN, PP_ALIGN.CENTER, 10),
         ("团队名称：kami之队", 20, True, WHITE, PP_ALIGN.CENTER),
         ("演讲人：詹学坤", 20, True, WHITE, PP_ALIGN.CENTER),
         ("指导教师：马贵侯", 20, True, WHITE, PP_ALIGN.CENTER),
         ("学校：集美大学诚毅学院", 20, True, WHITE, PP_ALIGN.CENTER)], name="团队信息")
-    notes(s, "大家好，我们是集美大学诚毅学院 kami之队，作品是 FirmForge——面向嵌入式固件开发的多 Agent 编排与验证平台。")
+    notes(s, "大家好，我们是集美大学诚毅学院 kami之队，作品是固件工坊，英文名 FirmForge——面向嵌入式固件开发的多 Agent 编排与验证平台。")
 
 
 def agenda(prs):
@@ -235,7 +235,7 @@ def slide_background(prs):
 
 
 def slide_overview(prs):
-    s = content(prs, "FirmForge：一句话需求 → 在真实开发板上验证过的程序", dark=True)
+    s = content(prs, "固件工坊：一句话需求 → 在真实开发板上验证过的程序", dark=True)
     stats = [("67%", "难题通过率", "改进前 39%，单个 AI 只有 33%"), ("12/12", "没见过的新题全部通过", "4 道平台从没做过的新题"),
              ("0.86 元", "一个真实需求的花费", "从一句话到装板验证，22 分钟"), ("625", "自动化测试用例全部通过", "保证平台本身不出错")]
     for i, (big, lab, sub) in enumerate(stats):

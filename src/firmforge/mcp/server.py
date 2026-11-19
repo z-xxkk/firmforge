@@ -1,4 +1,4 @@
-"""MCP 服务端：`firmforge mcp`，让 Claude Code、Cursor 等别的 AI 软件调用 FirmForge 的判定器（DECISIONS 第 63 条）。
+"""MCP 服务端：`firmforge mcp`，让 Claude Code、Cursor 等别的 AI 软件调用固件工坊的判定器（DECISIONS 第 63 条）。
 
 - stdio，一行一条消息；日志只写标准错误；标准输入关闭就退出；
 - 双版本：带 _meta 协议版本的请求按 2026-07-28 无状态处理（必须实现 server/discover）；
@@ -19,13 +19,13 @@ from .. import __version__, config
 from . import protocol as P
 
 MAX_UPLOAD_BYTES = 512 * 1024
-INSTRUCTIONS = ("FirmForge 是面向 STM32F103（Cortex-M3）的嵌入式 C 代码质量闸门。"
+INSTRUCTIONS = ("固件工坊（FirmForge）是面向 STM32F103（Cortex-M3）的嵌入式 C 代码质量闸门。"
                 "先用 list_tasks 看有哪些模块任务，再用 verify_c_module 提交 src/ 和 tests/ 下的文件，"
                 "得到主机编译、交叉编译、资源预算、静态检查、单元测试五层的检查报告。kb_search 可以查嵌入式知识库。")
 
 TOOLS = [
     {"name": "list_tasks", "title": "列出评测任务",
-     "description": "列出 FirmForge 内置的嵌入式模块任务（id、名称、难度），verify_c_module 要用其中的 id。",
+     "description": "列出固件工坊内置的嵌入式模块任务（id、名称、难度），verify_c_module 要用其中的 id。",
      "inputSchema": {"type": "object", "additionalProperties": False}},
     {"name": "verify_c_module", "title": "检查 C 模块",
      "description": "按某个任务的公共头文件和资源预算，对提交的 C 源文件和 Unity 测试做五层检查"

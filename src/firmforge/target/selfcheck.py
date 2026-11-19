@@ -83,7 +83,7 @@ def select_items(profile: HardwareProfile, devices_used: set[str] | None = None,
     return out
 
 
-_HEAD = """/* FirmForge 平台生成：接线自检（DECISIONS 第 124 条）。不是 Agent 写的代码。 */
+_HEAD = """/* 固件工坊平台生成：接线自检（DECISIONS 第 124 条）。不是 Agent 写的代码。 */
 #include <string.h>
 #include "unity.h"
 #include "driver/gpio.h"

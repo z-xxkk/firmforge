@@ -168,7 +168,7 @@ def default_registry() -> Registry:
 
 def dump_agent(d: AgentDef) -> str:
     from ..config_edit import toml_value
-    lines = [f"# Agent {d.name} {d.version}。由 FirmForge 桌面软件保存，也可以手改。",
+    lines = [f"# Agent {d.name} {d.version}。由固件工坊桌面软件保存，也可以手改。",
              f"name = {toml_value(d.name)}", f"role = {toml_value(d.role)}", f"version = {toml_value(d.version)}",
              f"model_tier = {toml_value(d.model_tier)}", f"temperature = {toml_value(d.temperature)}",
              f"prompt = {toml_value(d.prompt)}", f"task_types = {toml_value(list(d.task_types))}",

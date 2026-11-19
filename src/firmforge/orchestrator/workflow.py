@@ -192,7 +192,7 @@ def step_toml(step: Step, table: str = "main") -> str:
 
 
 def dump_workflow(wf: Workflow) -> str:
-    head = [f"# 工作流 {wf.name} {wf.version}。由 FirmForge 设计器保存；也可以手改，设计器打开时会照着画。",
+    head = [f"# 工作流 {wf.name} {wf.version}。由固件工坊设计器保存；也可以手改，设计器打开时会照着画。",
             f"name = {_toml_value(wf.name)}", f"version = {_toml_value(wf.version)}"]
     if wf.description:
         head.append(f"description = {_toml_value(wf.description)}")

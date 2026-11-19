@@ -1,4 +1,4 @@
-"""MCP 客户端：把外部 MCP 服务的工具接进 FirmForge 的工具箱（DECISIONS 第 63 条）。
+"""MCP 客户端：把外部 MCP 服务的工具接进固件工坊的工具箱（DECISIONS 第 63 条）。
 
 - 只支持本机子进程（stdio）；
 - 双版本：先发 server/discover 试探（5 秒），回得上来就用 2026-07-28；回了新版才有的错误码说明是新版但版本不合；
@@ -6,7 +6,7 @@
 - 配置格式和 Claude Code 的 mcpServers 一样（command、args、env、timeout），支持 ${变量} 和 ${变量:-默认值}；
 - 启动外部服务时清掉名字像密钥的环境变量（借鉴 DeepSeek Harness、Claude Code），env 里明确写的才传；
 - 启动超时 10 秒；断线重连 1 秒起翻倍、最多 5 次（借鉴 Claude Code）；重连失败就撤掉它的工具；
-- 外部工具在 FirmForge 里叫 mcp__<服务名>__<工具名>，发给服务的永远是原始名字（借鉴 DeepSeek Harness）。
+- 外部工具在固件工坊里叫 mcp__<服务名>__<工具名>，发给服务的永远是原始名字（借鉴 DeepSeek Harness）。
 """
 
 from __future__ import annotations
@@ -186,7 +186,7 @@ class McpClient:
             info = self._send("server/discover", self._params(None), PROBE_TIMEOUT_S)
             supported = info.get("supportedVersions") or [P.MODERN]
             if P.MODERN not in supported:
-                raise ToolError(f"MCP 服务 {self.cfg.name} 只支持 {', '.join(supported)}，FirmForge 支持 {P.MODERN}")
+                raise ToolError(f"MCP 服务 {self.cfg.name} 只支持 {', '.join(supported)}，固件工坊支持 {P.MODERN}")
             self.instructions = str(info.get("instructions") or "")
             return
         except P.McpError as exc:

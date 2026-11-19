@@ -1,4 +1,4 @@
-"""FirmForge 桌面软件主窗口（DECISIONS 第 62 条，界面草图第 4 版）。
+"""固件工坊桌面软件主窗口（DECISIONS 第 62 条，界面草图第 4 版）。
 
 左边竖栏 6 个工作区：对话、硬件、评测、工作流、团队、设置（硬件、评测见 DECISIONS 第 100 条）。
 所有面板之间都能拖动调整大小，关闭时记住布局。
@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
     def __init__(self, project: Path):
         super().__init__()
         self.project = project
-        self.setWindowTitle("FirmForge")
+        self.setWindowTitle("固件工坊 FirmForge")
         self.setMinimumSize(960, 640)                    # 面板按角色排，窄了自动收起侧栏（DECISIONS 第 133 条）
         self.setObjectName("Root")
         root = QWidget()

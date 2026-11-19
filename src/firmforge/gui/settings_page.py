@@ -265,8 +265,8 @@ class SettingsPage(QWidget):
         lay.addLayout(hbox(add, rm, test, "stretch"))
         pl.addWidget(w)
         self._fill_mcp()
-        w, lay = section("让别的 AI 软件调用 FirmForge", "把下面这段加进 Claude Code、Cursor 等软件的 MCP 配置，"
-                         "它们就能用 FirmForge 的判定器检查 C 代码（不会跑隐藏测试）。")
+        w, lay = section("让别的 AI 软件调用固件工坊", "把下面这段加进 Claude Code、Cursor 等软件的 MCP 配置，"
+                         "它们就能用固件工坊的判定器检查 C 代码（不会跑隐藏测试）。")
         snippet = json.dumps({"mcpServers": {"firmforge": {"command": "firmforge", "args": ["mcp"]}}}, indent=2)
         box = QPlainTextEdit(snippet)
         box.setObjectName("Code")

@@ -25,7 +25,7 @@ from ..grounding.svd import SvdDevice
 BEGIN, END = "FF_TESTS_BEGIN", "FF_TESTS_END"
 TEST_REQUIRES = ("unity", "esp_timer")
 
-FF_TEST_H = """/* FirmForge 平台提供：上板测试辅助函数。 */
+FF_TEST_H = """/* 固件工坊平台提供：上板测试辅助函数。 */
 #pragma once
 #include <stdint.h>
 
@@ -37,7 +37,7 @@ int64_t ff_time_us(void);
 void ff_log(const char *fmt, ...);
 """
 
-FF_TEST_C = """/* FirmForge 平台提供：上板测试辅助函数。 */
+FF_TEST_C = """/* 固件工坊平台提供：上板测试辅助函数。 */
 #include <stdarg.h>
 #include <stdio.h>
 #include "esp_timer.h"
@@ -58,7 +58,7 @@ void ff_log(const char *fmt, ...)
 }
 """
 
-_TEST_MAIN = """/* FirmForge 平台提供：每个 Unity 用例单独开机运行（DECISIONS 第 91 条），全部跑完打印汇总和结束标记后停住。
+_TEST_MAIN = """/* 固件工坊平台提供：每个 Unity 用例单独开机运行（DECISIONS 第 91 条），全部跑完打印汇总和结束标记后停住。
    跑到第几个、累计失败数记在软重启后不清零的内存里；上电或硬复位时从头开始。
    芯片软重启不会复位外接器件，硬件档案写了复位方法的器件在每个用例前软复位（DECISIONS 第 96 条）。 */
 #include <stdio.h>
@@ -166,7 +166,7 @@ def main_source(profile: HardwareProfile | None = None) -> str:
 
 def regs_header(rules: RuleSet | None, svd: SvdDevice | None, scopes: set[str] | None = None) -> str:
     """规则里出现的寄存器 → FF_REG_外设_寄存器 地址宏。SVD 里没有的写成注释，说明无法读。"""
-    lines = ["/* FirmForge 按规则和 SVD 生成：规则里提到的寄存器地址。 */", "#pragma once", ""]
+    lines = ["/* 固件工坊按规则和 SVD 生成：规则里提到的寄存器地址。 */", "#pragma once", ""]
     seen = set()
     for r in (rules.select(scopes, "approved") if rules is not None else []):
         c = r.check or {}

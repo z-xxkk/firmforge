@@ -30,11 +30,11 @@ PRODUCT_REQUIRES = ("esp_driver_tsens", "esp_adc", "nvs_flash", "esp_driver_spi"
                     "esp_driver_rmt", "esp_driver_pcnt")
 # 每种芯片的默认配置：S3 的控制台走芯片自带的 USB 串口；经典 ESP32 走 UART0（接板上的 USB 转串口芯片）
 SDKCONFIG_DEFAULTS = {
-    "esp32s3": "# FirmForge 生成：ESP32-S3（4 MB Flash，控制台走芯片自带的 USB 串口）\n"
+    "esp32s3": "# 固件工坊生成：ESP32-S3（4 MB Flash，控制台走芯片自带的 USB 串口）\n"
                "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\nCONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y\nCONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y\n",
-    "esp32c3": "# FirmForge 生成：ESP32-C3（4 MB Flash，控制台走芯片自带的 USB 串口）\n"
+    "esp32c3": "# 固件工坊生成：ESP32-C3（4 MB Flash，控制台走芯片自带的 USB 串口）\n"
                "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\nCONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y\nCONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y\n",
-    "esp32": "# FirmForge 生成：经典 ESP32（4 MB Flash，控制台走 UART0）\n"
+    "esp32": "# 固件工坊生成：经典 ESP32（4 MB Flash，控制台走 UART0）\n"
              "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\nCONFIG_ESP_CONSOLE_UART_DEFAULT=y\nCONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y\n",
 }
 
@@ -112,7 +112,7 @@ class IdfEnv:
 
 def hw_config_header(profile: HardwareProfile) -> str:
     """把硬件档案写成 hw_config.h：代码只能用这里的宏，不许直接写 GPIO 数字（合规检查据此判定）。"""
-    lines = ["/* FirmForge 按硬件档案生成，不要手改。代码里的引脚和器件地址一律用这里的宏。 */",
+    lines = ["/* 固件工坊按硬件档案生成，不要手改。代码里的引脚和器件地址一律用这里的宏。 */",
              "#pragma once", ""]
     for sig, fact in sorted(profile.pins.items()):
         name = "FF_PIN_" + re.sub(r"[^A-Za-z0-9]", "_", sig).upper()
