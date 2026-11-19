@@ -12,3 +12,8 @@ dist/
 .venv/
 .ff_sources/
 .ff_projects/
+
+# 视频工程的依赖和渲染产物（素材另外打包）
+submission/video/node_modules/
+submission/video/out/
+submission/video/素材/
