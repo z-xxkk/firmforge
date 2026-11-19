@@ -68,8 +68,8 @@ export const Stats = () => {
   const items = [
     { el: <><Count from={39} to={67} delay={10} suffix="%" color={C.pass} /></>, cap: "难题通过率（改进前 39%）" },
     { el: <><Count from={9} to={0} delay={22} /><span style={{ fontSize: 60, color: C.muted }}> 次</span></>, cap: "把硬件问题误判、提前放弃（原来 9 次）" },
-    { el: <><Count to={22} delay={34} /><span style={{ fontSize: 60, color: C.muted }}> 分钟</span></>, cap: "一句话到真板验证交付" },
-    { el: <><Count to={0.86} decimals={2} delay={46} /><span style={{ fontSize: 60, color: C.muted }}> 元</span></>, cap: "一次真实需求的模型费用" },
+    { el: <><Count to={19} delay={34} /><span style={{ fontSize: 60, color: C.muted }}> 分钟</span></>, cap: "本次演示：一句话到真板验证交付" },
+    { el: <><Count to={0.83} decimals={2} delay={46} /><span style={{ fontSize: 60, color: C.muted }}> 元</span></>, cap: "本次演示的模型费用" },
   ];
   return (
     <Backdrop>

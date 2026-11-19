@@ -87,6 +87,69 @@ def text(slide, x, y, w, h, paras, *, anchor=MSO_ANCHOR.TOP, name="文本", marg
     return tb
 
 
+def soft_shadow(shape, blur=14, dist=4, alpha=18, color="0A1A4A"):
+    """柔和的投影（向下偏一点、很淡），让卡片和截图浮在页面上。"""
+    spPr = shape._element.spPr
+    for e in spPr.findall(qn("a:effectLst")):
+        spPr.remove(e)
+    eff = etree.SubElement(spPr, qn("a:effectLst"))
+    sh = etree.SubElement(eff, qn("a:outerShdw"), blurRad=str(Pt(blur)), dist=str(Pt(dist)), dir="5400000",
+                          algn="t", rotWithShape="0")
+    clr = etree.SubElement(sh, qn("a:srgbClr"), val=color)
+    etree.SubElement(clr, qn("a:alpha"), val=str(alpha * 1000))
+
+
+_ROUNDED = {}
+
+
+def rounded_png(path: Path, region=None) -> Path:
+    """截图（或其中一块）做成圆角、带一圈细边的 PNG，放进 PPT 像产品图一样。"""
+    import tempfile
+    from PIL import Image, ImageDraw
+    key = (str(path), region)
+    if key in _ROUNDED:
+        return _ROUNDED[key]
+    im = Image.open(path).convert("RGBA")
+    if region:
+        im = im.crop(region)
+    k = 2                                           # 放大一倍再画圆角，边缘更平滑
+    im = im.resize((im.width * k, im.height * k), Image.LANCZOS)
+    r = 14 * k
+    mask = Image.new("L", im.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, im.width - 1, im.height - 1), r, fill=255)
+    im.putalpha(mask)
+    ImageDraw.Draw(im).rounded_rectangle((0, 0, im.width - 1, im.height - 1), r, outline=(205, 212, 224, 255), width=2 * k)
+    out = Path(tempfile.mkdtemp(prefix="ffppt_")) / "shot.png"
+    im.save(out)
+    _ROUNDED[key] = out
+    return out
+
+
+SECTION = {"tag": ""}
+
+
+def footer(slide, dark=False):
+    """右下角：章节和页码，统一的小字。"""
+    n = len(slide.part.package.presentation_part.presentation.slides)
+    tag = SECTION["tag"]
+    col = RGBColor(0xC8, 0xD4, 0xF5) if dark else MUTED
+    text(slide, 8.4, 7.02, 4.4, 0.3, [(f"{tag}　　{n:02d}", 10, False, col, PP_ALIGN.RIGHT, 0)], name="页脚", margin=0)
+
+
+def accent(slide, dark=False):
+    """标题下面一段短的渐变强调线。"""
+    s = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.57), Inches(1.5), Inches(0.9), Inches(0.05))
+    s.name = "强调线"
+    s.adjustments[0] = 0.5
+    s.line.fill.background()
+    s.fill.gradient()
+    s.fill.gradient_angle = 0
+    st = s.fill.gradient_stops
+    st[0].color.rgb = CYAN if dark else BLUE
+    st[1].color.rgb = RGBColor(0x5C, 0xE1, 0xFF)
+    s.shadow.inherit = False
+
+
 def card(slide, x, y, w, h, fill=TINT, name="卡片"):
     s = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h))
     s.name = name
@@ -94,7 +157,7 @@ def card(slide, x, y, w, h, fill=TINT, name="卡片"):
     s.fill.solid()
     s.fill.fore_color.rgb = fill
     s.line.fill.background()
-    s.shadow.inherit = False
+    soft_shadow(s, blur=10, dist=2, alpha=10)
     return s
 
 
@@ -128,10 +191,24 @@ def arrow(slide, x, y, w=0.35, h=0.3, color=BLUE):
 
 
 def picture(slide, path: Path, x, y, w=None, h=None):
-    pic = slide.shapes.add_picture(str(path), Inches(x), Inches(y), Inches(w) if w else None, Inches(h) if h else None)
-    pic.line.color.rgb = RGBColor(0xC9, 0xCE, 0xD4)
-    pic.line.width = Pt(0.75)
+    pic = slide.shapes.add_picture(str(rounded_png(path)), Inches(x), Inches(y), Inches(w) if w else None,
+                                   Inches(h) if h else None)
+    soft_shadow(pic)
     return pic
+
+
+def shot_fit(slide, name: str, x, y, w, h):
+    """整张截图按框的比例居中裁切，再做成圆角带阴影的图放进去。"""
+    from PIL import Image
+    iw, ih = Image.open(SHOTS / name).size
+    want, have = w / h, iw / ih
+    if have > want:
+        cw = int(ih * want)
+        region = ((iw - cw) // 2, 0, (iw - cw) // 2 + cw, ih)
+    else:
+        ch = int(iw / want)
+        region = (0, (ih - ch) // 2, iw, (ih - ch) // 2 + ch)
+    return shot(slide, name, region, x, y, w=w, h=h)
 
 
 def crop_to(pic, box_w, box_h):
@@ -190,6 +267,8 @@ def agenda(prs):
 def content(prs, t, dark=False):
     s = prs.slides.add_slide(prs.slide_layouts.get_by_name("节标题" if dark else "两栏内容"))
     title(s, t, dark=dark)
+    accent(s, dark=dark)
+    footer(s, dark=dark)
     return s
 
 
@@ -237,7 +316,7 @@ def slide_background(prs):
 def slide_overview(prs):
     s = content(prs, "固件工坊：一句话需求 → 在真实开发板上验证过的程序", dark=True)
     stats = [("67%", "难题通过率", "改进前 39%，单个 AI 只有 33%"), ("12/12", "没见过的新题全部通过", "4 道平台从没做过的新题"),
-             ("0.86 元", "一个真实需求的花费", "从一句话到装板验证，22 分钟"), ("632", "自动化测试用例全部通过", "保证平台本身不出错")]
+             ("0.83 元", "一个真实需求的花费", "从一句话到装板验证，19 分钟"), ("632", "自动化测试用例全部通过", "保证平台本身不出错")]
     for i, (big, lab, sub) in enumerate(stats):
         x = 0.6 + i * 3.1
         text(s, x, 2.0, 2.9, 1.0, [(big, 44, True, CYAN, PP_ALIGN.CENTER, 0)])
@@ -279,8 +358,7 @@ def slide_agents(prs):
         text(s, 0.75, y, 2.15, 0.62, [(a, 12, True, BLUE, PP_ALIGN.LEFT, 0)], anchor=MSO_ANCHOR.MIDDLE)
         text(s, 2.95, y, 2.9, 0.62, [(d, 11, False, INK, PP_ALIGN.LEFT, 0)], anchor=MSO_ANCHOR.MIDDLE)
     text(s, 0.6, 6.17, 5.3, 0.45, [("每个角色都有版本、用哪档模型、能用哪些工具、做过多少次、成功率多少", 11, False, MUTED)])
-    pic = picture(s, SHOTS / "08_工作流设计器.png", 6.2, 1.8)
-    crop_to(pic, 6.55, 3.95)
+    shot_fit(s, "08_工作流设计器.png", 6.2, 1.8, 6.55, 3.95)
     text(s, 6.2, 5.85, 6.55, 0.8, [("工作流设计器：像画流程图一样拖拽步骤，支持先后、同时、条件、循环、停下来等人确认；"
                                    "保存前平台会把流程空跑几遍，确认画出来的就是实际执行的", 12, False, MUTED)])
     notes(s, "平台里有 10 个 AI 角色，各管一件事。比如测试员看不到程序员的代码，避免自己考自己。流程可以在图形界面里拖拽编排。")
@@ -430,20 +508,19 @@ def slide_innovation(prs):
 
 
 def slide_demo(prs):
-    s = content(prs, "运行效果：一句话需求，22 分钟、0.86 元交付装板验证过的程序")
-    pic = picture(s, SHOTS / "01_对话_一次完整运行.png", 0.6, 1.8)
-    crop_to(pic, 7.2, 4.5)
-    rows = [("需求", "每 2 秒读一次芯片温度和电压，记住最高温度；断电重启后还能说出上次的最高温度"),
-            ("拆分", "温度、电压、存储、统计 4 个模块，分别 2、1、4、1 次通过"),
-            ("返工", "存储模块诊断说某个测试写错要删，平台核对确实删了"),
-            ("运行", "主程序装板跑两轮：第一次开机说\"没有记录\"，重启后说出上次的最高温度"),
-            ("交付", "可以直接装进开发板的完整程序 + 验证报告")]
+    s = content(prs, "运行效果：一句话需求，19 分钟、0.83 元交付装板验证过的程序")
+    shot_fit(s, "01_对话_一次完整运行.png", 0.6, 1.8, 7.2, 4.5)
+    rows = [("需求", "每 2 秒读 MPU6050 加速度和芯片温度，记录最大加速度并断电保存，重启后先打印上次的最大值"),
+            ("接线", "故意拔掉传感器数据线：自检发现没应答、马上停下；插回后应答了才写代码"),
+            ("拆分", "传感器驱动、片内温度、存储、换算、最大值 5 个模块，分别 3、2、3、1、1 次通过"),
+            ("返工", "测试写错交回测试员改；故意改坏代码时测试没发现，就让测试员补测试"),
+            ("交付", "主程序装板跑两轮核对输出；交付可以直接烧录的完整工程 + 验证报告")]
     for i, (h, d) in enumerate(rows):
         y = 1.8 + i * 0.9
         card(s, 8.05, y, 4.75, 0.8)
         text(s, 8.15, y, 0.75, 0.8, [(h, 14, True, BLUE, PP_ALIGN.LEFT, 0)], anchor=MSO_ANCHOR.MIDDLE)
         text(s, 8.9, y, 3.85, 0.8, [(d, 11, False, INK, PP_ALIGN.LEFT, 0)], anchor=MSO_ANCHOR.MIDDLE)
-    notes(s, "一个真实需求从头到尾：快档模型 22 分钟、不到一块钱，4 个模块和主程序全部通过，并在板子上实际运行验证。")
+    notes(s, "这是演示视频里那次真实运行：快档模型 19 分钟、0.83 元，5 个模块和主程序全部通过，并在板子上实际运行验证。")
 
 
 def shot(slide, name: str, region, x, y, *, w=None, h=None):
@@ -457,12 +534,8 @@ def shot(slide, name: str, region, x, y, *, w=None, h=None):
         w = h * aspect
     if h is None:
         h = w / aspect
-    pic = slide.shapes.add_picture(str(path), Inches(x), Inches(y), Inches(w), Inches(h))
-    pic.crop_left, pic.crop_top = l / iw, t / ih
-    pic.crop_right, pic.crop_bottom = 1 - r / iw, 1 - b / ih
-    pic.width, pic.height = Inches(w), Inches(h)
-    pic.line.color.rgb = RGBColor(0xC9, 0xCE, 0xD4)
-    pic.line.width = Pt(0.75)
+    pic = slide.shapes.add_picture(str(rounded_png(path, tuple(region))), Inches(x), Inches(y), Inches(w), Inches(h))
+    soft_shadow(pic)
     return w, h
 
 
@@ -497,9 +570,9 @@ def slide_wiring(prs):
     _, h2 = shot(s, "05_接线清单与自检没对上.png", (335, 188, 985, 415), x2, 1.75, w=w2)
     bullets(s, x2, 1.75 + h2 + 0.2, w2, 6.6 - (1.75 + h2 + 0.2), [
         "写代码之前，平台先列出接线清单：每根线两头接哪里、为什么",
-        "你接好后，平台烧一个自己写的小程序去实测：第一次只测到 0.45 伏，就停下来告诉你哪根线不对",
-        "重新接好、测到 3 伏才开始写代码——没有这一步时，AI 曾对着一根没接好的线白试了 4 次"], size=13, gap=7)
-    notes(s, "左边是接线图，每个引脚接到哪个器件的哪个脚都画出来了。右边是接线清单：线没接好时，平台实测只有 0.45 伏，就停下来告诉你，接好了才写代码。")
+        "你接好后，平台烧一个自己写的小程序去实测：演示时故意拔掉传感器数据线，自检发现 MPU6050 没应答，马上停下",
+        "插回去再测、器件应答了才开始写代码——没有这一步时，AI 曾对着一根没接好的线白试了 4 次"], size=13, gap=7)
+    notes(s, "左边是接线图，每个引脚接到哪个器件的哪个脚都画出来了。右边是接线清单和自检结果：演示时故意拔掉数据线，平台实测发现传感器没应答，就停下来告诉你，接好了才写代码。")
 
 
 def slide_kb(prs):
@@ -620,10 +693,15 @@ def main() -> None:
         ids.remove(sid)
     cover(prs)
     agenda(prs)
-    for build in (slide_background, slide_overview, slide_arch, slide_flow, slide_map, slide_wiring, slide_kb,
-                  slide_agents, slide_sched, slide_loop, slide_ai_verify, slide_innovation, slide_failed, slide_demo,
-                  slide_eval_perf):
-        build(prs)
+    groups = [("01  选题背景与平台概览", (slide_background, slide_overview)),
+              ("02  架构与协作流程", (slide_arch, slide_flow)),
+              ("03  软件亮点", (slide_map, slide_wiring, slide_kb, slide_agents)),
+              ("04  调度、返工与验证", (slide_sched, slide_loop, slide_failed, slide_ai_verify)),
+              ("05  核心创新与效果", (slide_innovation, slide_demo, slide_eval_perf))]
+    for tag, builds in groups:
+        SECTION["tag"] = tag
+        for build in builds:
+            build(prs)
     closing(prs)
     prs.save(str(OUT))
     print(f"已生成 {OUT}，共 {len(prs.slides)} 页（正文 {len(prs.slides) - 3} 页）")

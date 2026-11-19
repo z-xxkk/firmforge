@@ -6,18 +6,19 @@ import { AbsoluteFill, interpolate, Easing, OffthreadVideo, Img, staticFile, use
 // src 以 "assets/" 开头（public/assets 链接到 素材/）；still=true 时按图片处理（截图）
 export const ScreenClip = ({ src, startFrom = 0, playbackRate = 1, zooms = [], still = false, width = 1680 }) => {
   const f = useCurrentFrame();
-  const keys = [{ at: 0, scale: 1, x: 0.5, y: 0.5 }, ...zooms];
+  // 第 0 帧没给关键帧时，从原始大小开始
+  const keys = zooms.length && zooms[0].at === 0 ? zooms : [{ at: 0, scale: 1, x: 0.5, y: 0.5 }, ...zooms];
   const pick = (k) => {
-    const frames = keys.map((z) => z.at);
-    const vals = keys.map((z) => z[k]);
-    if (frames.length === 1) return vals[0];
-    return interpolate(f, frames, vals, {
+    if (keys.length === 1) return keys[0][k];
+    return interpolate(f, keys.map((z) => z.at), keys.map((z) => z[k]), {
       extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.bezier(0.65, 0, 0.35, 1),
     });
   };
   const s = pick("scale");
-  const cx = pick("x");
-  const cy = pick("y");
+  // 把 (x, y) 这一点移到画面中央；靠边时贴边，不露出外面
+  const clamp = (v) => Math.min(Math.max(v, 0), 1 - 1 / s);
+  const left = clamp(pick("x") - 0.5 / s);
+  const top = clamp(pick("y") - 0.5 / s);
   const h = (width * 9) / 16;
   const media = still ? (
     <Img src={staticFile(src)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -33,7 +34,7 @@ export const ScreenClip = ({ src, startFrom = 0, playbackRate = 1, zooms = [], s
           boxShadow: "0 40px 120px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08)",
         }}
       >
-        <div style={{ width: "100%", height: "100%", transformOrigin: `${cx * 100}% ${cy * 100}%`, transform: `scale(${s})` }}>
+        <div style={{ width: "100%", height: "100%", transformOrigin: "0 0", transform: `scale(${s}) translate(${-left * 100}%, ${-top * 100}%)` }}>
           {media}
         </div>
       </div>

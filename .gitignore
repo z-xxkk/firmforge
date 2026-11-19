@@ -17,3 +17,7 @@ dist/
 submission/video/node_modules/
 submission/video/out/
 submission/video/素材/
+
+# 学籍证明是个人隐私，只放进提交压缩包，不进公开仓库
+submission/学籍证明/
+submission/提交包/

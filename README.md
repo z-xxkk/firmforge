@@ -1,7 +1,7 @@
 # 固件工坊 FirmForge
 
 面向嵌入式固件开发的多 Agent 编排与验证平台（第五届"未来杯"技术大赛赛题一参赛作品）。
-目标芯片 STM32F103（Cortex-M3）。设计文档见 `docs/ARCHITECTURE.md`，开发顺序见 `docs/ROADMAP.md`。
+目标芯片 ESP32-C3（ESP32-C3 SuperMini 开发板，ESP-IDF v6.1）；早期的纯逻辑评测题仍按 STM32F103（Cortex-M3）。安装与使用见 `submission/安装与使用说明.md`，设计文档见 `docs/ARCHITECTURE.md`，开发顺序见 `docs/ROADMAP.md`。
 
 ## 当前进度
 
